@@ -1,0 +1,25 @@
+{
+  "metadata": {
+    "auditTimestamp": "2026-10-05T04:05:36.995Z",
+    "runner": "scripts/audit_all_interactive_controls_runtime.mjs",
+    "totalContractsTested": 1595,
+    "failures": 0,
+    "untested": 0
+  },
+  "executionModes": {
+    "REAL_POINTER_CLICKS": 1468,
+    "KEYBOARD_ACTIVATIONS": 1696,
+    "NON_CLICK_INTERACTION": 637,
+    "GOVERNED_NON_EXECUTABLE": 2
+  },
+  "postconditionSummary": {
+    "navigationSuccess": 129,
+    "navigationGuarded": 106,
+    "formsValidated": 69,
+    "mutationsCommitted": 141,
+    "modalsHandled": 229,
+    "tablesTargeted": 147,
+    "securityDenialsVerified": 106,
+    "f5PersistenceVerified": true
+  }
+}

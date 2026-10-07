@@ -468,6 +468,8 @@ function createAccessToken({
       sid: sessionId,
       org: user.organisationId,
       role: user.role,
+      isPrimaryMaster: Boolean(user.isPrimaryMaster),
+      vendorId: user.vendorId || null,
       cafes: user.assignedCafeIds || [],
       sv: sessionVersion,
       usv: user.sessionVersion,
@@ -569,6 +571,15 @@ async function authenticatePassword({
     throw new Error(
       'This account is not available for sign-in.'
     );
+  }
+
+  // Normal Master Decommission Invariant:
+  if (user.role === 'MASTER' && !user.isPrimaryMaster) {
+    const error = new Error(
+      'The Normal Master persona has been permanently retired. Please contact your Primary Master administrator.'
+    );
+    error.code = 'ROLE_RETIRED';
+    throw error;
   }
 
   if (
@@ -846,6 +857,20 @@ async function rotateRefreshToken({
     throw new Error(
       'The user account is unavailable.'
     );
+  }
+
+  // Normal Master Decommission Invariant:
+  if (user.role === 'MASTER' && !user.isPrimaryMaster) {
+    await session.revoke({
+      revokedBy: 'SYSTEM',
+      reason: 'ROLE_RETIRED_NORMAL_MASTER',
+      details: 'The Normal Master role has been permanently retired.',
+    });
+    const error = new Error(
+      'The Normal Master persona has been permanently retired. Please contact your Primary Master administrator.'
+    );
+    error.code = 'ROLE_RETIRED';
+    throw error;
   }
 
   if (

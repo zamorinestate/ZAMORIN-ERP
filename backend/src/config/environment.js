@@ -238,10 +238,57 @@ function loadEnvironment(
     );
   }
 
+  const rawMasterPassword = String(
+    source.INITIAL_MASTER_PASSWORD || source.DEFAULT_ADMIN_PASSWORD || ''
+  ).trim();
+
+  if (production && !rawMasterPassword) {
+    throw new Error(
+      'INITIAL_MASTER_PASSWORD or DEFAULT_ADMIN_PASSWORD is required in production.'
+    );
+  }
+
+  const insecurePasswords = [
+    'pradeeshk@94309',
+    'pk@nilavega_8427!cedar',
+    'admin123',
+    'changeme',
+    'change-me',
+    'placeholder',
+  ];
+
+  if (rawMasterPassword && insecurePasswords.some((bad) => rawMasterPassword.toLowerCase().includes(bad))) {
+    throw new Error(
+      'INITIAL_MASTER_PASSWORD contains an insecure or default password value.'
+    );
+  }
+
+  const distributedAdapter = String(
+    source.DISTRIBUTED_ADAPTER || (production ? 'redis' : 'memory')
+  ).trim().toLowerCase();
+
+  if (!['redis', 'memory'].includes(distributedAdapter)) {
+    throw new Error('DISTRIBUTED_ADAPTER must be either "redis" or "memory".');
+  }
+
+  if (production && distributedAdapter === 'memory' && source.ALLOW_IN_MEMORY_CLUSTER !== 'true') {
+    throw new Error('DISTRIBUTED_ADAPTER=memory is not permitted in production cluster mode.');
+  }
+
+  const redisUrl = String(source.REDIS_URL || '').trim();
+  const redisHost = String(source.REDIS_HOST || (distributedAdapter === 'redis' && !redisUrl ? '127.0.0.1' : '')).trim();
+  const redisPort = source.REDIS_PORT
+    ? parsePositiveInteger('REDIS_PORT', source.REDIS_PORT, 6379)
+    : 6379;
+
   return Object.freeze({
     nodeEnvironment,
     production,
     staging,
+    distributedAdapter,
+    redisUrl,
+    redisHost,
+    redisPort,
     host:
       String(source.HOST || '0.0.0.0')
         .trim() || '0.0.0.0',
@@ -282,7 +329,7 @@ function loadEnvironment(
     initialOrganisationId: String(source.INITIAL_ORGANISATION_ID || 'ZAMORIN').trim(),
     initialMasterName: String(source.INITIAL_MASTER_NAME || 'Zamorin Primary Master').trim(),
     initialMasterEmail: String(source.INITIAL_MASTER_EMAIL || 'pradeeshk331@gmail.com').trim(),
-    initialMasterPassword: String(source.INITIAL_MASTER_PASSWORD || 'PRADEESHK@94309').trim(),
+    initialMasterPassword: rawMasterPassword,
   });
 }
 

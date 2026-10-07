@@ -88,6 +88,16 @@ async function authenticate(
       );
     }
 
+    // Normal Master Decommission Invariant:
+    if (user.role === 'MASTER' && !user.isPrimaryMaster) {
+      return response.status(403).json({
+        error: {
+          code: 'ROLE_RETIRED',
+          message: 'The Normal Master role has been permanently retired. Please contact your Primary Master administrator.',
+        },
+      });
+    }
+
     if (
       user.role !== payload.role ||
       session.roleSnapshot !== user.role
@@ -127,6 +137,7 @@ async function authenticate(
       organisationId: user.organisationId,
       role: user.role,
       isPrimaryMaster: Boolean(user.isPrimaryMaster),
+      vendorId: user.vendorId || null,
       assignedCafeIds,
       primaryCafeId:
         user.primaryCafeId || null,

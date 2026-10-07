@@ -24,6 +24,13 @@ function normalizeId(value) {
 }
 
 function assertCafeAccess(request, cafeId) {
+  if (request.auth?.role === 'STAFF') {
+    throw new ApiError(
+      403,
+      'PERMISSION_DENIED',
+      'Staff role is restricted to self-service only and does not have POS & Billing operational authority.'
+    );
+  }
   const normCafeId = normalizeId(cafeId);
   const effectiveCafe = resolveEffectiveCafeScope(request);
   if (effectiveCafe && normCafeId && normCafeId !== effectiveCafe) {

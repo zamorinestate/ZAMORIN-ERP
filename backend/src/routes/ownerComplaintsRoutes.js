@@ -23,20 +23,20 @@ router.get(
 
 router.get(
   '/',
-  authorize('ADMIN_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STORE_MANAGER', 'STAFF'] }),
+  authorize('ADMIN_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STORE_MANAGER'] }),
   (req, res) => controller.listComplaints(req, res)
 );
 
 router.get(
   '/:complaintId',
-  authorize('ADMIN_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STORE_MANAGER', 'STAFF'] }),
+  authorize('ADMIN_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STORE_MANAGER'] }),
   (req, res) => controller.getComplaintById(req, res)
 );
 
 // Create Complaint (Intake)
 router.post(
   '/',
-  authorize('ADMIN_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STORE_MANAGER', 'STAFF'] }),
+  authorize('ADMIN_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STORE_MANAGER'] }),
   (req, res) => controller.createComplaint(req, res)
 );
 

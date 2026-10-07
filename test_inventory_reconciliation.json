@@ -1,0 +1,2021 @@
+{
+  "inventory": {
+    "stageMasterSuites": [
+      {
+        "file": "stage01UniversalExportSuite.test.js",
+        "testCount": 8,
+        "inNpmTest": true,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "stage02UniversalQrSuite.test.js",
+        "testCount": 7,
+        "inNpmTest": true,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "stage03CafeReadinessSuite.test.js",
+        "testCount": 8,
+        "inNpmTest": true,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "stage04EmployeeSuite.test.js",
+        "testCount": 9,
+        "inNpmTest": true,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "stage05HardwareSuite.test.js",
+        "testCount": 8,
+        "inNpmTest": true,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "stage06PosSuite.test.js",
+        "testCount": 10,
+        "inNpmTest": true,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "stage07InventoryProcurementSuite.test.js",
+        "testCount": 8,
+        "inNpmTest": true,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "stage08FinanceGstSuite.test.js",
+        "testCount": 9,
+        "inNpmTest": true,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "stage09PayrollSuite.test.js",
+        "testCount": 7,
+        "inNpmTest": true,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "stage10AnalyticsSuite.test.js",
+        "testCount": 9,
+        "inNpmTest": true,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "stage10PostReleaseOperations.test.js",
+        "testCount": 33,
+        "inNpmTest": true,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      }
+    ],
+    "remediationSuites": [
+      {
+        "file": "p0A_masterPasswordSecurity.test.js",
+        "testCount": 7,
+        "inNpmTest": false,
+        "isNewRemediation": true,
+        "inTestSummary": false
+      },
+      {
+        "file": "p0BC_posAtomicityFefoConcurrency.test.js",
+        "testCount": 6,
+        "inNpmTest": false,
+        "isNewRemediation": true,
+        "inTestSummary": false
+      },
+      {
+        "file": "p0D_p1A_grnIdempotencyDiscrepancy.test.js",
+        "testCount": 7,
+        "inNpmTest": false,
+        "isNewRemediation": true,
+        "inTestSummary": false
+      },
+      {
+        "file": "p0E_redisInitialization.test.js",
+        "testCount": 7,
+        "inNpmTest": false,
+        "isNewRemediation": true,
+        "inTestSummary": false
+      },
+      {
+        "file": "p1B_statutoryRuleConfiguration.test.js",
+        "testCount": 6,
+        "inNpmTest": false,
+        "isNewRemediation": true,
+        "inTestSummary": false
+      }
+    ],
+    "historicalUnitSuites": [],
+    "reconciliationSuites": [
+      {
+        "file": "rec04aTransactionIntegrityCertification.test.js",
+        "testCount": 32,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "rec04bDistributedIdempotencyReconciliation.test.js",
+        "testCount": 12,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "rec05PoDocumentLifecycle.test.js",
+        "testCount": 45,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "rec06aProductionMalwareAndStorageRuntime.test.js",
+        "testCount": 15,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "rec06DocumentStorageSecurity.test.js",
+        "testCount": 40,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "rec07StaffSettingsHardening.test.js",
+        "testCount": 42,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "rec08GlobalInteractiveControls.test.js",
+        "testCount": 10,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "rec09aSecurityReconciliation.test.js",
+        "testCount": 20,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "rec09AuthSecurityHardening.test.js",
+        "testCount": 59,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "rec10NewCafeEndToEndAcceptance.test.js",
+        "testCount": 42,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "rec11CrossRoleFinalRegression.test.js",
+        "testCount": 43,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "rec13OfflinePosQueueSync.test.js",
+        "testCount": 54,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "rec15AssetMaintenanceLifecycle.test.js",
+        "testCount": 37,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "rec16GstRoundingAccounting.test.js",
+        "testCount": 35,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "rec17aClosure.test.js",
+        "testCount": 13,
+        "inNpmTest": true,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "rec17bReconciliation.test.js",
+        "testCount": 9,
+        "inNpmTest": true,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "rec17cReconciliation.test.js",
+        "testCount": 20,
+        "inNpmTest": true,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "rec17VendorAccountsPayableLedger.test.js",
+        "testCount": 23,
+        "inNpmTest": true,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "rec17VendorShortSupplyBackorder.test.js",
+        "testCount": 62,
+        "inNpmTest": true,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "rec18CanonicalLogin2Removal.test.js",
+        "testCount": 47,
+        "inNpmTest": true,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "rec19AuthUiPasskeyPerformanceHardening.test.js",
+        "testCount": 83,
+        "inNpmTest": true,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "recoveryCafeQrDeepLinkLifecycle.test.js",
+        "testCount": 9,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "recoveryNewCafeEndToEndAcceptance.test.js",
+        "testCount": 9,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "recoveryNewCafeLifecycle.test.js",
+        "testCount": 10,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "recoveryPosSavePrintReprintLifecycle.test.js",
+        "testCount": 13,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      }
+    ],
+    "otherActiveSuites": [
+      {
+        "file": "acp03MultiCafeOperationalSimulation.test.js",
+        "testCount": 15,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "acp05e02BiometricPasskeyPin.test.js",
+        "testCount": 22,
+        "inNpmTest": true,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "acp07bPasskeyLifecycleCoordination.test.js",
+        "testCount": 15,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "adminGovernance.test.js",
+        "testCount": 8,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "approvalPermissionPolicy.test.js",
+        "testCount": 1,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "approvalScopePolicy.test.js",
+        "testCount": 1,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "assetManagement.test.js",
+        "testCount": 9,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "assetOwnerScopePolicy.test.js",
+        "testCount": 1,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "assetPermissionPolicy.test.js",
+        "testCount": 1,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "asvsCompliance.test.js",
+        "testCount": 6,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "attachmentConcurrencyLoad.test.js",
+        "testCount": 4,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "attendanceManagement.test.js",
+        "testCount": 9,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "attendanceOperationsSecurity.test.js",
+        "testCount": 8,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "attendanceQrScannerPage.test.js",
+        "testCount": 19,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "attendanceSecurePresence.test.js",
+        "testCount": 26,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "authCredentialExposure.test.js",
+        "testCount": 3,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "authenticationPasskeyDisabled.test.js",
+        "testCount": 7,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "authLoginMfaTokenApi.test.js",
+        "testCount": 3,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "authLogoutFrontendContract.test.js",
+        "testCount": 2,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "authMeApi.test.js",
+        "testCount": 7,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "authMeContract.test.js",
+        "testCount": 1,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "authMfaFlowApi.test.js",
+        "testCount": 5,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "authPasswordChangeApi.test.js",
+        "testCount": 4,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "authRefreshApi.test.js",
+        "testCount": 3,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "authSessionApi.test.js",
+        "testCount": 4,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "authStepUpApi.test.js",
+        "testCount": 8,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "bcp01bProviderGovernance.test.js",
+        "testCount": 19,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "bcp01GovernanceNetworkClosure.test.js",
+        "testCount": 25,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "bcp02aWaveZeroMeasurement.test.js",
+        "testCount": 9,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "bcp02bFirstPurchaseReadiness.test.js",
+        "testCount": 10,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "bcp02PaidBlockerPrioritisation.test.js",
+        "testCount": 8,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "billManagement.test.js",
+        "testCount": 10,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "billOwnerScopePolicy.test.js",
+        "testCount": 1,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "businessModules.test.js",
+        "testCount": 23,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "cafeCreationAndAccessProvisioning.test.js",
+        "testCount": 9,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "cafeOperations13ModulesParity.test.js",
+        "testCount": 9,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "cafeOperationsFoundation.test.js",
+        "testCount": 30,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "cafeOperationsFullWiringParity.test.js",
+        "testCount": 9,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "cafeOperationsP0Remediation.test.js",
+        "testCount": 12,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "cafeOperationsP1Integrity.test.js",
+        "testCount": 16,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "cafeOperationsReleaseCandidate.test.js",
+        "testCount": 9,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "cafeOperationsSecurityHardening.test.js",
+        "testCount": 9,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "cafeOperationsUatE2E.test.js",
+        "testCount": 10,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "cafeOpsDualPinAndDirectory.test.js",
+        "testCount": 8,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "cafeOpsR02AllDomains.test.js",
+        "testCount": 11,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "cafeOpsR02BConfigurationIntegrity.test.js",
+        "testCount": 6,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "cafeOpsR02CAuthorizationCanonicalization.test.js",
+        "testCount": 6,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "cafeOpsR02CorrectiveIntegrity.test.js",
+        "testCount": 8,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "cafeOpsR02DProxyRateLimitSecurity.test.js",
+        "testCount": 8,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "canonicalRefundService.test.js",
+        "testCount": 10,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "codeOnWagesStatutoryRules.test.js",
+        "testCount": 6,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "consolidatedMasterOptions.test.js",
+        "testCount": 14,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "crossSystemSpecificationFinal.test.js",
+        "testCount": 41,
+        "inNpmTest": true,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "csrfOriginProtectionApi.test.js",
+        "testCount": 4,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "customerLoyaltyManagement.test.js",
+        "testCount": 11,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "customerPermissionPolicy.test.js",
+        "testCount": 1,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "customerRouteAccessPolicy.test.js",
+        "testCount": 1,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "customFieldRoutes.test.js",
+        "testCount": 3,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "customFieldsCapability.test.js",
+        "testCount": 17,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "dashboardCommandCentre.test.js",
+        "testCount": 4,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "departmentOrderAccessPolicy.test.js",
+        "testCount": 2,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "departmentOrderManagement.test.js",
+        "testCount": 11,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "departmentOrderPermissionPolicy.test.js",
+        "testCount": 1,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "devDirectDashboardLocalPreview.test.js",
+        "testCount": 3,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "devDirectDashboardSafety.test.js",
+        "testCount": 3,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "deviceBoundAttendanceFinal.test.js",
+        "testCount": 19,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "deviceDataSeparation.test.js",
+        "testCount": 12,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "documentStorageDurability.test.js",
+        "testCount": 15,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "employeeFrontendContract.test.js",
+        "testCount": 3,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "employeeLoginAndPinResetCompliance.test.js",
+        "testCount": 7,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "employeePermissionPolicy.test.js",
+        "testCount": 2,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "employeeProfileApi.test.js",
+        "testCount": 15,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "employeeReadService.test.js",
+        "testCount": 8,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "employeeSchema.test.js",
+        "testCount": 5,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "employeeSearchApi.test.js",
+        "testCount": 8,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "employeeSearchService.test.js",
+        "testCount": 7,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "employeeStaffDashboard.test.js",
+        "testCount": 2,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "employeeWorkforceManagement.test.js",
+        "testCount": 11,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "expansionAllCapabilities.test.js",
+        "testCount": 3,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "expenseManagement.test.js",
+        "testCount": 11,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "exportEngineCompliance.test.js",
+        "testCount": 9,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ext01gMongoGridFsProductionStorage.test.js",
+        "testCount": 60,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ext02LiveMalwareScanner.test.js",
+        "testCount": 44,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ext03AtlasBackupRestoreVerification.test.js",
+        "testCount": 35,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ext03fFreeTierBackupRestore.test.js",
+        "testCount": 37,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ext04DocumentRestoreVerification.test.js",
+        "testCount": 46,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ext05DisasterRecoveryExercise.test.js",
+        "testCount": 36,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ext06aStagingDastLiveClosure.test.js",
+        "testCount": 12,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ext06StagingDastSecurity.test.js",
+        "testCount": 43,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ext07IndependentPentestReadiness.test.js",
+        "testCount": 36,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ext08ExternalCaTaxReadiness.test.js",
+        "testCount": 47,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ext09GitHubReleaseGovernance.test.js",
+        "testCount": 45,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ext10ProductionDomainTls.test.js",
+        "testCount": 25,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ext11AndroidDeviceAcceptance.test.js",
+        "testCount": 31,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ext12WindowsInstallationAcceptance.test.js",
+        "testCount": 33,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ext13RealPrinterAcceptance.test.js",
+        "testCount": 34,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ext14PilotCafeAcceptance.test.js",
+        "testCount": 41,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ext15AppDistributionReadiness.test.js",
+        "testCount": 44,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ext16SecretsAccessReview.test.js",
+        "testCount": 50,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ext17MonitoringAlertingVerification.test.js",
+        "testCount": 41,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ext18ExecutiveSignoffReadiness.test.js",
+        "testCount": 26,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ext19ProductionCutoverReadiness.test.js",
+        "testCount": 35,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "financeAccounting.test.js",
+        "testCount": 12,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "frictionlessLogin.test.js",
+        "testCount": 2,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "full24PointValidation.test.js",
+        "testCount": 26,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "globalSearchPersonalLedger.test.js",
+        "testCount": 8,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "inboundMailOps.test.js",
+        "testCount": 5,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "incidentManagement.test.js",
+        "testCount": 3,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "inventoryOwnerScopePolicy.test.js",
+        "testCount": 1,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "inventoryPermissionPolicy.test.js",
+        "testCount": 1,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "inventoryStockManagement.test.js",
+        "testCount": 18,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "loanAdvanceFrontendContract.test.js",
+        "testCount": 2,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "loanAdvanceSelfServiceApi.test.js",
+        "testCount": 4,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "loanAdvanceService.test.js",
+        "testCount": 5,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "loansAdvancesSelfService.test.js",
+        "testCount": 19,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "login2Integration.test.js",
+        "testCount": 14,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "login2MfaOrchestration.test.js",
+        "testCount": 13,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "login2PerformanceAndAuth.test.js",
+        "testCount": 7,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "mailOpsCommandCentre.test.js",
+        "testCount": 19,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "mailOpsLiveCertification.test.js",
+        "testCount": 7,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "mailOpsSecurity.test.js",
+        "testCount": 5,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "menuPermissionPolicy.test.js",
+        "testCount": 1,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "menuReadScopePolicy.test.js",
+        "testCount": 1,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "menuRecipeManagement.test.js",
+        "testCount": 18,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "menuRouteAccessPolicy.test.js",
+        "testCount": 1,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "navigationRouterConsistency.test.js",
+        "testCount": 1,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "notificationOutbox.test.js",
+        "testCount": 4,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "ownerBatch01IntegrationSecurity.test.js",
+        "testCount": 6,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerBatch02FrontendWiring.test.js",
+        "testCount": 11,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerBatch02Integration.test.js",
+        "testCount": 7,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerBatch03FrontendWiring.test.js",
+        "testCount": 7,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerBatch03Integration.test.js",
+        "testCount": 5,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerBatch03SecurityIdor.test.js",
+        "testCount": 5,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerCafePerformance.test.js",
+        "testCount": 14,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerCrossAppDistribution.test.js",
+        "testCount": 8,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerDashboardControl.test.js",
+        "testCount": 12,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerFinalCertification.test.js",
+        "testCount": 29,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerFinanceSummary.test.js",
+        "testCount": 17,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerFrontendWiring.test.js",
+        "testCount": 7,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerGlobalPrivacyCybersecurity.test.js",
+        "testCount": 8,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerPersonalLedgerParity.test.js",
+        "testCount": 13,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerReportsAnalyticsParity.test.js",
+        "testCount": 26,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerSalesBills.test.js",
+        "testCount": 17,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerScopeRemediation.test.js",
+        "testCount": 18,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerSharedModulesParity.test.js",
+        "testCount": 44,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerStage01FoodSafety.test.js",
+        "testCount": 25,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerStage02RiskAudit.test.js",
+        "testCount": 21,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerStage03Planning.test.js",
+        "testCount": 22,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerStage04ComplianceContractInsurance.test.js",
+        "testCount": 17,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerStage05SupplierProcurementIntelligence.test.js",
+        "testCount": 11,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerStage06SOPTrainingCompetency.test.js",
+        "testCount": 12,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerStage07AssetReliability.test.js",
+        "testCount": 11,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerStage08PrivacyCybersecurity.test.js",
+        "testCount": 9,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerStage09BCDR.test.js",
+        "testCount": 8,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerStage10MasterDataGovernance.test.js",
+        "testCount": 8,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerStage11CustomerComplaints.test.js",
+        "testCount": 9,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerStage12MenuPricingIntelligence.test.js",
+        "testCount": 8,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerStage13CustomerLoyaltyIntelligence.test.js",
+        "testCount": 8,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerStage14UtilitiesWasteEnergy.test.js",
+        "testCount": 8,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerStage15CorporateGovernanceDelegation.test.js",
+        "testCount": 9,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "ownerTaskOversight.test.js",
+        "testCount": 11,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "p0AttendanceRemediation.test.js",
+        "testCount": 21,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "p0CafeAccessRemediation.test.js",
+        "testCount": 12,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "p1AttendanceIntegration.test.js",
+        "testCount": 52,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "partialCapabilitiesCompletion.test.js",
+        "testCount": 32,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "passbookTreasury.test.js",
+        "testCount": 6,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "passkeyIntegration.test.js",
+        "testCount": 20,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "passwordResetChallengeModel.test.js",
+        "testCount": 3,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "passwordResetDeliveryService.test.js",
+        "testCount": 6,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "passwordResetFinalApi.test.js",
+        "testCount": 2,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "passwordResetFrontendContract.test.js",
+        "testCount": 8,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "passwordResetRequestApi.test.js",
+        "testCount": 3,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "passwordResetService.test.js",
+        "testCount": 6,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "passwordResetVerifyApi.test.js",
+        "testCount": 2,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "payrollAccessApi.test.js",
+        "testCount": 23,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "payrollMasterControl.test.js",
+        "testCount": 7,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "payslipFrontendContract.test.js",
+        "testCount": 1,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "personalLedgerAccessApi.test.js",
+        "testCount": 6,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "personalLedgerMasterControl.test.js",
+        "testCount": 13,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "personalLedgerPermissionPolicy.test.js",
+        "testCount": 1,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "pm01Integrations.test.js",
+        "testCount": 20,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "pm02aReportingFoundation.test.js",
+        "testCount": 51,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "pm02bCoreCalculations.test.js",
+        "testCount": 24,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "pm02cReportCatalogue.test.js",
+        "testCount": 52,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "pm02dSalesIntelligence.test.js",
+        "testCount": 32,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "pm02eInventoryProcurementVendor.test.js",
+        "testCount": 60,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "pm02fFinanceIntelligence.test.js",
+        "testCount": 84,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "pm02gWorkforceAttendancePayroll.test.js",
+        "testCount": 79,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "pm02hCustomerPosServiceIntelligence.test.js",
+        "testCount": 82,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "pm02iMultiCafeBenchmarking.test.js",
+        "testCount": 35,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "pm02jAdvancedDiagnostics.test.js",
+        "testCount": 63,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "pm02kForecastScenarioIntelligence.test.js",
+        "testCount": 87,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "pm02lReconciliationGovernanceTrust.test.js",
+        "testCount": 67,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "pm02mReportingProductivity.test.js",
+        "testCount": 206,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "pm02nFinalReportsCertification.test.js",
+        "testCount": 127,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "pm02ReportsAnalytics.test.js",
+        "testCount": 37,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "pm03ProcurementVendorOperations.test.js",
+        "testCount": 123,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "pm04AdministrationTrashSecurity.test.js",
+        "testCount": 12,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "pm04CrossPortalParity.test.js",
+        "testCount": 6,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "pm05PersonalLedgerIntegration.test.js",
+        "testCount": 7,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "pm05R1FinancialAtomicity.test.js",
+        "testCount": 14,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "pm05ResidualControls.test.js",
+        "testCount": 5,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "pm05SharedComponentsParity.test.js",
+        "testCount": 5,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "pm06FinalPrimaryMasterCertification.test.js",
+        "testCount": 9,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "pm06R1Reconciliation.test.js",
+        "testCount": 7,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "posBillingTerminal.test.js",
+        "testCount": 10,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "posLoadConcurrency.test.js",
+        "testCount": 6,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "posOfflineFinancialSafety.test.js",
+        "testCount": 6,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "posPermissionPolicy.test.js",
+        "testCount": 1,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "posVoidAccessPolicy.test.js",
+        "testCount": 1,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "primaryMaster.test.js",
+        "testCount": 15,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "primaryMasterSecurity.test.js",
+        "testCount": 4,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "procurementAccessPolicy.test.js",
+        "testCount": 2,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "procurementMasterControl.test.js",
+        "testCount": 11,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "procurementPermissionPolicy.test.js",
+        "testCount": 1,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "profileFrontendContract.test.js",
+        "testCount": 1,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "qrAttendanceSecurity.test.js",
+        "testCount": 4,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "qualityMasterControl.test.js",
+        "testCount": 13,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "reportsAnalyticsMasterControl.test.js",
+        "testCount": 23,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "revenueShareContract.test.js",
+        "testCount": 14,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "routeSeedConsistency.test.js",
+        "testCount": 1,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "settingsHubContract.test.js",
+        "testCount": 2,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "sharedInfrastructureSuite.test.js",
+        "testCount": 63,
+        "inNpmTest": true,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "shiftsAndGeofence.test.js",
+        "testCount": 3,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "staffAnnouncements.test.js",
+        "testCount": 4,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "staffAttendance.test.js",
+        "testCount": 6,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "staffLeave.test.js",
+        "testCount": 6,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "staffLoanAdvanceModel.test.js",
+        "testCount": 5,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "staffP0Remediation.test.js",
+        "testCount": 20,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "staffP1FunctionalCompletion.test.js",
+        "testCount": 55,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "staffP2ProductCompletion.test.js",
+        "testCount": 32,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "staffPosVendorAccessPolicy.test.js",
+        "testCount": 1,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "staffScopeSecurity.test.js",
+        "testCount": 5,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "statutoryEsiEpfSuite.test.js",
+        "testCount": 60,
+        "inNpmTest": true,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "threatModelAbuseCases.test.js",
+        "testCount": 19,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "trashLifecycleContract.test.js",
+        "testCount": 5,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "trustedDeviceSecurity.test.js",
+        "testCount": 23,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "userAdministrationPolicy.test.js",
+        "testCount": 4,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "userAdministrationRoutes.test.js",
+        "testCount": 9,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "userGovernance.test.js",
+        "testCount": 23,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "userGovernanceApi.test.js",
+        "testCount": 11,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "v01ToV22AcceptanceSuite.test.js",
+        "testCount": 6,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "vendorLifecycleContract.test.js",
+        "testCount": 13,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      },
+      {
+        "file": "vendorOrderLifecycle.test.js",
+        "testCount": 5,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": false
+      },
+      {
+        "file": "vendorPermissionPolicy.test.js",
+        "testCount": 1,
+        "inNpmTest": false,
+        "isNewRemediation": false,
+        "inTestSummary": true
+      }
+    ]
+  },
+  "archiveFileCount": 62,
+  "archiveTestCount": 499,
+  "testSummaryData": {
+    "totalFiles": 108,
+    "totalTests": 705
+  }
+}

@@ -25,9 +25,8 @@ const server = http.createServer(async (req, res) => {
   // Reverse proxy /api/* requests to local backend or Render
   if (parsedUrl.pathname.startsWith("/api/")) {
     const backendHost = process.env.BACKEND_URL || "http://localhost:4000";
-    const targetUrl = `${backendHost}${parsedUrl.pathname}${parsedUrl.search}`;
-
-    try {
+    async function tryProxy(host) {
+      const targetUrl = `${host}${parsedUrl.pathname}${parsedUrl.search}`;
       const headers = { ...req.headers };
       delete headers.host;
 
@@ -40,12 +39,26 @@ const server = http.createServer(async (req, res) => {
         bodyData = Buffer.concat(chunks);
       }
 
-      const proxyRes = await fetch(targetUrl, {
+      return await fetch(targetUrl, {
         method: req.method,
         headers,
         body: bodyData,
         redirect: "manual"
       });
+    }
+
+    try {
+      let proxyRes;
+      try {
+        proxyRes = await tryProxy(backendHost);
+      } catch (primaryErr) {
+        if (backendHost.includes("localhost") || backendHost.includes("127.0.0.1")) {
+          console.warn("[proxy] Local backend unavailable, falling back to staging Render API...");
+          proxyRes = await tryProxy("https://zamorin-cafe-erp-staging.onrender.com");
+        } else {
+          throw primaryErr;
+        }
+      }
 
       const resHeaders = {};
       proxyRes.headers.forEach((val, key) => {

@@ -162,7 +162,10 @@ async function handlePrimaryMasterAttack({ request, actorDocument, target, opera
 
       const recipients = await User.find({
         organisationId: orgId,
-        role: { $in: ['MASTER', 'OWNER'] },
+        $or: [
+          { role: 'MASTER', isPrimaryMaster: true },
+          { role: 'OWNER' },
+        ],
         userId: { $ne: actorDocument.userId },
         accountStatus: 'ACTIVE',
       }).select('userId role');
@@ -352,6 +355,16 @@ function validateProposedRole(proposedRole) {
       422,
       'INVALID_USER_ROLE',
       `The proposed role "${proposedRole}" is not valid. Supported roles: ${USER_ROLES.join(', ')}.`
+    );
+  }
+
+  // Normal Master Decommission Invariant:
+  // Non-primary Master is permanently retired; MASTER role cannot be assigned to another user.
+  if (proposedRole === 'MASTER') {
+    throw new ApiError(
+      403,
+      'ROLE_RETIRED_NORMAL_MASTER',
+      'The Normal Master role is permanently retired. The MASTER role is exclusively reserved for Primary Master.'
     );
   }
 }

@@ -65,6 +65,9 @@ const inventoryRoutes =
 const vendorRoutes =
   require('./vendorRoutes');
 
+const vendorPortalRoutes =
+  require('./vendorPortalRoutes');
+
 const procurementRoutes =
   require('./procurementRoutes');
 
@@ -319,6 +322,11 @@ router.use(
 router.use(
   '/vendors',
   vendorRoutes
+);
+
+router.use(
+  '/vendor-portal',
+  vendorPortalRoutes
 );
 
 router.use(

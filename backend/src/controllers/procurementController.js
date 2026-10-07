@@ -15,11 +15,13 @@
  *   3. Audits the receipt action.
  */
 
+const crypto = require('crypto');
 const mongoose = require('mongoose');
 const {
   PurchaseOrder,
   PO_STATUSES,
 } = require('../models/PurchaseOrder');
+const { IdempotencyRecord } = require('../models/IdempotencyRecord');
 
 const {
   Vendor,
@@ -121,6 +123,38 @@ function parsePositiveInteger(value, fallback, maximum) {
   return Math.min(parsed, maximum);
 }
 
+function computeGrnIdempotencyKey({
+  purchaseOrderId,
+  deliveryIdentifier,
+  rawIdempotencyKey,
+  headers,
+  version = '0',
+  rawDeliveries = [],
+}) {
+  const explicit = normalizeId(rawIdempotencyKey || headers?.['idempotency-key']);
+  if (explicit) return explicit;
+
+  const rawDelId = String(deliveryIdentifier || '').trim();
+  const delId = rawDelId
+    ? rawDelId.replace(/[^a-zA-Z0-9_-]/g, '_').toUpperCase()
+    : crypto
+        .createHash('sha256')
+        .update(
+          JSON.stringify(
+            rawDeliveries.map((d) => ({
+              i: normalizeId(d.itemId),
+              d: d.deliveredQty ?? d.quantityReceived ?? 0,
+              a: d.acceptedQty ?? d.acceptedQuantity ?? 0,
+            }))
+          )
+        )
+        .digest('hex')
+        .slice(0, 16)
+        .toUpperCase();
+
+  return `GRN:${purchaseOrderId}:${delId}:${version}`;
+}
+
 async function notifyMasterOfOrderEvent({
   organisationId,
   cafeId,
@@ -134,7 +168,10 @@ async function notifyMasterOfOrderEvent({
   try {
     const masterUsers = await User.find({
       organisationId,
-      role: { $in: ['MASTER', 'OWNER'] },
+      $or: [
+        { role: 'MASTER', isPrimaryMaster: true },
+        { role: 'OWNER' },
+      ],
       accountStatus: 'ACTIVE',
     }).select('userId email name role').lean();
 
@@ -1448,7 +1485,243 @@ const verifyDeliveryAndSubmitBill = asyncHandler(async (request, response) => {
     billDocument,
   } = request.body;
 
-  // Check receipt file from multer or body base64
+  // ── P1-A: STRICT DISCREPANCY REASON ENFORCEMENT ──────────────────────────
+  // Frozen Business Rule: If delivered/accepted quantities differ from ordered quantities,
+  // a discrepancy reason is mandatory. Fallbacks ("No reason specified") are prohibited.
+  for (const del of rawDeliveries) {
+    const iId = normalizeId(del.itemId);
+    const lineItem = (order.lineItems || []).find((li) => li.itemId === iId);
+    if (!lineItem) {
+      throw new ApiError(400, 'INVALID_LINE_ITEM', `Item ${iId} is not in this purchase order.`);
+    }
+
+    const orderedQty = Number(lineItem.orderedQuantityBase || 0);
+    const deliveredQty = Number(
+      del.deliveredQty !== undefined
+        ? del.deliveredQty
+        : del.quantityReceived !== undefined
+        ? del.quantityReceived
+        : orderedQty
+    );
+    const acceptedQty = Number(
+      del.acceptedQty !== undefined
+        ? del.acceptedQty
+        : del.acceptedQuantity !== undefined
+        ? del.acceptedQuantity
+        : deliveredQty
+    );
+    const rejectedQty = Number(del.rejectedQty || del.rejectedQuantity || 0);
+    const missingQty = Math.max(0, orderedQty - acceptedQty);
+
+    const hasDiscrepancy =
+      deliveredQty !== orderedQty ||
+      acceptedQty !== orderedQty ||
+      missingQty > 0 ||
+      rejectedQty > 0;
+
+    const discrepancyReason = String(
+      del.discrepancyReason || del.rejectionReason || del.reason || ''
+    ).trim();
+
+    if (hasDiscrepancy && !discrepancyReason) {
+      throw new ApiError(
+        422,
+        'DISCREPANCY_REASON_REQUIRED',
+        'A discrepancy reason is required when received quantity differs from ordered quantity.'
+      );
+    }
+  }
+
+  // ── P0-D: AUTHORITATIVE IDEMPOTENCY KEY & RESERVATION ───────────────────
+  const operationVersion = `${order.editCountAfterApproval || 0}`;
+  const deliveryIdentifier =
+    deliveryNoteNumber ||
+    deliveryNote ||
+    vendorInvoiceNumber ||
+    request.body.deliveryId ||
+    '';
+
+  const finalIdempotencyKey = computeGrnIdempotencyKey({
+    purchaseOrderId,
+    deliveryIdentifier,
+    rawIdempotencyKey: request.body.idempotencyKey,
+    headers: request.headers,
+    version: operationVersion,
+    rawDeliveries,
+  });
+
+  const requestFingerprint = crypto
+    .createHash('sha256')
+    .update(JSON.stringify({ purchaseOrderId, deliveries: rawDeliveries, deliveryNoteNumber }))
+    .digest('hex');
+
+  const DEFAULT_GRN_LEASE_MS = Number(process.env.GRN_IDEMPOTENCY_LEASE_MS) || 5 * 60 * 1000;
+  const currentOwnerId = `${process.pid}-${crypto.randomBytes(6).toString('hex')}`;
+
+  // Helper to handle authoritative business state check for stale PROCESSING lease
+  const resolveStaleLeaseOrReclaim = async (record) => {
+    const leaseExpiry = record.leaseExpiresAt
+      ? new Date(record.leaseExpiresAt)
+      : new Date(new Date(record.processingStartedAt || record.createdAt || Date.now()).getTime() + DEFAULT_GRN_LEASE_MS);
+    const isLeaseActive = leaseExpiry > new Date();
+    if (isLeaseActive) {
+      throw new ApiError(
+        409,
+        'IDEMPOTENCY_CONFLICT',
+        `A delivery verification operation with key ${finalIdempotencyKey} is currently processing.`
+      );
+    }
+
+    // Stale lease detected — verify authoritative business state before re-executing
+    const authoritativePo = await PurchaseOrder.findOne({
+      organisationId: request.auth.organisationId,
+      purchaseOrderId,
+      'grnReceipts.idempotencyKey': finalIdempotencyKey,
+    });
+
+    if (authoritativePo) {
+      const existingGrn = (authoritativePo.grnReceipts || []).find(
+        (g) => g.idempotencyKey === finalIdempotencyKey
+      );
+      const reconstructedResponse = {
+        success: true,
+        data: {
+          order: authoritativePo.toObject(),
+          purchaseOrder: authoritativePo.toObject(),
+          grn: existingGrn,
+          receiptAttachment: (authoritativePo.receiptAttachments || []).slice(-1)[0] || null,
+          movementsCreated: [],
+        },
+        correlationId: request.correlationId || null,
+      };
+
+      await IdempotencyRecord.updateOne(
+        { _id: record._id },
+        {
+          status: 'COMPLETED',
+          responseSnapshot: reconstructedResponse,
+          leaseExpiresAt: null,
+          finalizedAt: new Date(),
+        }
+      ).catch(() => {});
+
+      return { completedResponse: reconstructedResponse };
+    }
+
+    // Previous node crashed before commit: atomically reclaim bounded lease
+    const reclaimed = await IdempotencyRecord.findOneAndUpdate(
+      {
+        _id: record._id,
+        status: 'PROCESSING',
+        $or: [
+          { leaseExpiresAt: { $lt: new Date() } },
+          {
+            $and: [
+              { leaseExpiresAt: null },
+              { processingStartedAt: { $lt: new Date(Date.now() - DEFAULT_GRN_LEASE_MS) } },
+            ],
+          },
+        ],
+      },
+      {
+        $set: {
+          ownerId: currentOwnerId,
+          leaseExpiresAt: new Date(Date.now() + DEFAULT_GRN_LEASE_MS),
+          processingStartedAt: new Date(),
+          requestFingerprint,
+        },
+      },
+      { returnDocument: 'after' }
+    );
+
+    if (!reclaimed) {
+      throw new ApiError(
+        409,
+        'IDEMPOTENCY_CONFLICT',
+        `A delivery verification operation with key ${finalIdempotencyKey} is currently processing.`
+      );
+    }
+
+    return { reclaimedDoc: reclaimed };
+  };
+
+  // Check existing idempotency record
+  const existingRecord = await IdempotencyRecord.findOne({
+    organisationId: request.auth.organisationId,
+    cafeId: order.cafeId,
+    idempotencyKey: finalIdempotencyKey,
+  });
+
+  let idempotencyDoc = null;
+
+  if (existingRecord) {
+    if (existingRecord.status === 'COMPLETED' && existingRecord.responseSnapshot) {
+      return response.status(200).json({
+        ...existingRecord.responseSnapshot,
+        isIdempotentReplay: true,
+      });
+    }
+    if (existingRecord.status === 'PROCESSING') {
+      const result = await resolveStaleLeaseOrReclaim(existingRecord);
+      if (result.completedResponse) {
+        return response.status(200).json({
+          ...result.completedResponse,
+          isIdempotentReplay: true,
+        });
+      }
+      idempotencyDoc = result.reclaimedDoc;
+    }
+  }
+
+  // Atomically reserve the idempotency record in MongoDB if not reclaimed
+  if (!idempotencyDoc) {
+    try {
+      idempotencyDoc = await IdempotencyRecord.create({
+        organisationId: request.auth.organisationId,
+        cafeId: order.cafeId,
+        idempotencyKey: finalIdempotencyKey,
+        requestFingerprint,
+        status: 'PROCESSING',
+        processingStartedAt: new Date(),
+        leaseExpiresAt: new Date(Date.now() + DEFAULT_GRN_LEASE_MS),
+        ownerId: currentOwnerId,
+      });
+    } catch (err) {
+      if (err.code === 11000) {
+        const inFlight = await IdempotencyRecord.findOne({
+          organisationId: request.auth.organisationId,
+          cafeId: order.cafeId,
+          idempotencyKey: finalIdempotencyKey,
+        });
+        if (inFlight && inFlight.status === 'COMPLETED' && inFlight.responseSnapshot) {
+          return response.status(200).json({
+            ...inFlight.responseSnapshot,
+            isIdempotentReplay: true,
+          });
+        }
+        if (inFlight && inFlight.status === 'PROCESSING') {
+          const result = await resolveStaleLeaseOrReclaim(inFlight);
+          if (result.completedResponse) {
+            return response.status(200).json({
+              ...result.completedResponse,
+              isIdempotentReplay: true,
+            });
+          }
+          idempotencyDoc = result.reclaimedDoc;
+        } else {
+          throw new ApiError(
+            409,
+            'IDEMPOTENCY_CONFLICT',
+            `A delivery verification operation with key ${finalIdempotencyKey} is currently processing.`
+          );
+        }
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  // Parse receipt file from multer or body base64
   const file = request.file;
   let receiptAttachment = null;
 
@@ -1481,176 +1754,266 @@ const verifyDeliveryAndSubmitBill = asyncHandler(async (request, response) => {
   const businessDate = getIstBusinessDate();
   const datePart = businessDate.replace(/-/g, '');
   const now = new Date();
-  const movementsCreated = [];
-  const grnItems = [];
 
-  // Itemized verification
-  for (const del of rawDeliveries) {
-    const iId = normalizeId(del.itemId);
-    const lineItem = order.lineItems.find((li) => li.itemId === iId);
-    if (!lineItem) {
-      throw new ApiError(400, 'INVALID_LINE_ITEM', `Item ${iId} is not in this purchase order.`);
-    }
+  let transactionResult = null;
+  try {
+    transactionResult = await executeTransactionWithRetry(async (session) => {
+      const sessionOpt = session ? { session } : {};
 
-    const orderedQty = Number(lineItem.orderedQuantityBase || 0);
-    const deliveredQty = Number(del.deliveredQty !== undefined ? del.deliveredQty : (del.quantityReceived !== undefined ? del.quantityReceived : orderedQty));
-    const acceptedQty = Number(del.acceptedQty !== undefined ? del.acceptedQty : (del.acceptedQuantity !== undefined ? del.acceptedQuantity : deliveredQty));
-    const rejectedQty = Number(del.rejectedQty || del.rejectedQuantity || 0);
-    const missingQty = Math.max(0, orderedQty - acceptedQty);
-    const discrepancyReason = String(del.discrepancyReason || del.rejectionReason || del.notes || (missingQty > 0 ? 'Item shortage on delivery' : '')).trim();
-
-    // ── ACTION 1: Automatically add accepted items to inventory ──────────────
-    if (acceptedQty > 0) {
-      let stockConfig = await CafeInventoryConfig.findOne({
-        organisationId: request.auth.organisationId,
-        cafeId: order.cafeId,
-        itemId: iId,
-      });
-
-      if (!stockConfig) {
-        stockConfig = new CafeInventoryConfig({
+      // Re-read fresh order inside transaction
+      const freshOrder = await PurchaseOrder.findOne(
+        {
+          purchaseOrderId,
           organisationId: request.auth.organisationId,
-          cafeId: order.cafeId,
+        },
+        null,
+        sessionOpt
+      );
+
+      if (!freshOrder) {
+        throw new ApiError(404, 'NOT_FOUND', 'Purchase order not found in transaction.');
+      }
+
+      // Check order-level idempotency duplicate guard inside transaction
+      if (Array.isArray(freshOrder.grnReceipts)) {
+        const existingGrn = freshOrder.grnReceipts.find(
+          (g) => g.idempotencyKey && g.idempotencyKey === finalIdempotencyKey
+        );
+        if (existingGrn) {
+          return {
+            order: freshOrder.toObject(),
+            purchaseOrder: freshOrder.toObject(),
+            grn: existingGrn,
+            receiptAttachment,
+            movementsCreated: [],
+            isIdempotentReplay: true,
+          };
+        }
+      }
+
+      const movementsCreated = [];
+      const grnItems = [];
+
+      // Itemized verification
+      for (const del of rawDeliveries) {
+        const iId = normalizeId(del.itemId);
+        const lineItem = (freshOrder.lineItems || []).find((li) => li.itemId === iId);
+        if (!lineItem) {
+          throw new ApiError(400, 'INVALID_LINE_ITEM', `Item ${iId} is not in this purchase order.`);
+        }
+
+        const orderedQty = Number(lineItem.orderedQuantityBase || 0);
+        const deliveredQty = Number(
+          del.deliveredQty !== undefined
+            ? del.deliveredQty
+            : del.quantityReceived !== undefined
+            ? del.quantityReceived
+            : orderedQty
+        );
+        const acceptedQty = Number(
+          del.acceptedQty !== undefined
+            ? del.acceptedQty
+            : del.acceptedQuantity !== undefined
+            ? del.acceptedQuantity
+            : deliveredQty
+        );
+        const rejectedQty = Number(del.rejectedQty || del.rejectedQuantity || 0);
+        const missingQty = Math.max(0, orderedQty - acceptedQty);
+        const discrepancyReason = String(
+          del.discrepancyReason || del.rejectionReason || del.reason || ''
+        ).trim();
+
+        // ── ACTION 1: Automatically add accepted items to inventory ──────────────
+        if (acceptedQty > 0) {
+          let stockConfig = await CafeInventoryConfig.findOne(
+            {
+              organisationId: request.auth.organisationId,
+              cafeId: freshOrder.cafeId,
+              itemId: iId,
+            },
+            null,
+            sessionOpt
+          );
+
+          if (!stockConfig) {
+            stockConfig = new CafeInventoryConfig({
+              organisationId: request.auth.organisationId,
+              cafeId: freshOrder.cafeId,
+              itemId: iId,
+              currentQuantityBase: 0,
+              availableQuantityBase: 0,
+              createdByUserId: request.auth.userId,
+            });
+          }
+
+          const balanceBefore = Number(stockConfig.currentQuantityBase || 0);
+          const balanceAfter = balanceBefore + acceptedQty;
+
+          const movId = await SequenceCounter.generateId({
+            organisationId: request.auth.organisationId,
+            sequenceKey: `STOCK_MOVEMENT_${datePart}`,
+            prefix: `SMOV-${datePart}`,
+            minimumDigits: 4,
+          });
+
+          const movement = new StockMovement({
+            movementId: movId,
+            organisationId: request.auth.organisationId,
+            cafeId: freshOrder.cafeId,
+            itemId: iId,
+            movementType: 'RECEIPT',
+            quantityBase: acceptedQty,
+            quantityDelta: acceptedQty,
+            balanceBeforeBase: balanceBefore,
+            balanceAfterBase: balanceAfter,
+            balanceBefore,
+            balanceAfter,
+            businessDate,
+            serverTimestamp: now,
+            status: 'ACTIVE',
+            sourceModule: 'PROCUREMENT',
+            sourceRecordId: purchaseOrderId,
+            referenceId: purchaseOrderId,
+            referenceType: 'PURCHASE_ORDER',
+            description: `Verified goods receipt for PO ${purchaseOrderId}`,
+            performedByUserId: request.auth.userId,
+            createdByUserId: request.auth.userId,
+            createdByRole: request.auth.role,
+            correlationId: request.correlationId || null,
+          });
+          await movement.save(sessionOpt);
+          movementsCreated.push(movId);
+
+          await CafeInventoryConfig.findOneAndUpdate(
+            {
+              organisationId: request.auth.organisationId,
+              cafeId: freshOrder.cafeId,
+              itemId: iId,
+            },
+            {
+              $inc: { currentQuantityBase: acceptedQty, availableQuantityBase: acceptedQty },
+              $set: { lastModifiedByUserId: request.auth.userId },
+            },
+            { upsert: true, returnDocument: 'after', ...sessionOpt }
+          );
+
+          const lotId = await SequenceCounter.generateId({
+            organisationId: request.auth.organisationId,
+            sequenceKey: `LOT_${datePart}`,
+            prefix: `LOT-${datePart}`,
+            minimumDigits: 4,
+          });
+
+          const lotRecord = new InventoryLot({
+            organisationId: request.auth.organisationId,
+            lotId,
+            supplierLot: del.lotNumber || `SLOT-${Date.now().toString().slice(-6)}`,
+            itemId: iId,
+            cafeId: freshOrder.cafeId,
+            vendorId: freshOrder.vendorId,
+            procurementReference: freshOrder.purchaseOrderId,
+            storageLocation: 'Main Store',
+            mfgDate: del.manufacturingDate ? new Date(del.manufacturingDate).toISOString().slice(0, 10) : null,
+            expiryDate: del.expiryDate ? new Date(del.expiryDate).toISOString().slice(0, 10) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+            unit: lineItem.baseUnit || 'units',
+            initialQuantity: acceptedQty,
+            quantityBase: acceptedQty,
+            remainingQuantity: acceptedQty,
+            receivedAt: now,
+            status: 'AVAILABLE',
+          });
+          await lotRecord.save(sessionOpt);
+        }
+
+        lineItem.acceptedReceivedQty = (lineItem.acceptedReceivedQty || 0) + acceptedQty;
+        lineItem.receivedQuantityBase = lineItem.acceptedReceivedQty;
+        lineItem.rejectedQty = (lineItem.rejectedQty || 0) + rejectedQty;
+
+        grnItems.push({
           itemId: iId,
-          currentQuantityBase: 0,
-          availableQuantityBase: 0,
-          createdByUserId: request.auth.userId,
+          deliveredQty,
+          acceptedQty,
+          rejectedQty,
+          missingQty,
+          discrepancyReason,
+          lotNumber: del.lotNumber || null,
+          notes: del.notes || '',
         });
       }
 
-      const balanceBefore = Number(stockConfig.currentQuantityBase || 0);
-      const balanceAfter = balanceBefore + acceptedQty;
-
-      const movId = await SequenceCounter.generateId({
+      // Create GRN record
+      const grnId = await SequenceCounter.generateId({
         organisationId: request.auth.organisationId,
-        sequenceKey: `STOCK_MOVEMENT_${datePart}`,
-        prefix: `SMOV-${datePart}`,
+        sequenceKey: `GRN_${datePart}`,
+        prefix: `GRN-${datePart}`,
         minimumDigits: 4,
       });
 
-      const movement = new StockMovement({
-        movementId: movId,
-        organisationId: request.auth.organisationId,
-        cafeId: order.cafeId,
-        itemId: iId,
-        movementType: 'RECEIPT',
-        quantityBase: acceptedQty,
-        quantityDelta: acceptedQty,
-        balanceBeforeBase: balanceBefore,
-        balanceAfterBase: balanceAfter,
-        balanceBefore,
-        balanceAfter,
-        businessDate,
-        serverTimestamp: now,
-        status: 'ACTIVE',
-        sourceModule: 'PROCUREMENT',
-        sourceRecordId: purchaseOrderId,
-        referenceId: purchaseOrderId,
-        referenceType: 'PURCHASE_ORDER',
-        description: `Verified goods receipt for PO ${purchaseOrderId}`,
-        performedByUserId: request.auth.userId,
-        createdByUserId: request.auth.userId,
-        createdByRole: request.auth.role,
-        correlationId: request.correlationId || null,
-      });
-      await movement.save();
-      movementsCreated.push(movId);
-
-      await CafeInventoryConfig.findOneAndUpdate(
-        {
-          organisationId: request.auth.organisationId,
-          cafeId: order.cafeId,
-          itemId: iId,
-        },
-        {
-          $inc: { currentQuantityBase: acceptedQty, availableQuantityBase: acceptedQty },
-          $set: { lastModifiedByUserId: request.auth.userId },
-        },
-        { upsert: true, new: true }
-      );
-
-      const lotId = await SequenceCounter.generateId({
-        organisationId: request.auth.organisationId,
-        sequenceKey: `LOT_${datePart}`,
-        prefix: `LOT-${datePart}`,
-        minimumDigits: 4,
-      });
-
-      const lotRecord = new InventoryLot({
-        organisationId: request.auth.organisationId,
-        lotId,
-        supplierLot: del.lotNumber || `SLOT-${Date.now().toString().slice(-6)}`,
-        itemId: iId,
-        cafeId: order.cafeId,
-        vendorId: order.vendorId,
-        procurementReference: order.purchaseOrderId,
-        storageLocation: 'Main Store',
-        mfgDate: del.manufacturingDate ? new Date(del.manufacturingDate).toISOString().slice(0, 10) : null,
-        expiryDate: del.expiryDate ? new Date(del.expiryDate).toISOString().slice(0, 10) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
-        unit: lineItem.baseUnit || 'units',
-        initialQuantity: acceptedQty,
-        quantityBase: acceptedQty,
-        remainingQuantity: acceptedQty,
+      const grnRecord = {
+        grnId,
+        idempotencyKey: finalIdempotencyKey,
+        deliveryNoteNumber: String(deliveryNoteNumber || deliveryNote || '').trim(),
         receivedAt: now,
-        status: 'AVAILABLE',
-      });
-      await lotRecord.save();
-    }
+        receivedByUserId: request.auth.userId,
+        items: grnItems,
+        receiptAttachments: receiptAttachment ? [receiptAttachment] : [],
+        notes: notes || '',
+        status: grnItems.some((g) => g.missingQty > 0 || g.rejectedQty > 0) ? 'PARTIAL' : 'ACCEPTED',
+      };
 
-    lineItem.acceptedReceivedQty = (lineItem.acceptedReceivedQty || 0) + acceptedQty;
-    lineItem.receivedQuantityBase = lineItem.acceptedReceivedQty;
-    lineItem.rejectedQty = (lineItem.rejectedQty || 0) + rejectedQty;
+      if (!freshOrder.grnReceipts) freshOrder.grnReceipts = [];
+      freshOrder.grnReceipts.push(grnRecord);
 
-    grnItems.push({
-      itemId: iId,
-      deliveredQty,
-      acceptedQty,
-      rejectedQty,
-      missingQty,
-      discrepancyReason,
-      lotNumber: del.lotNumber || null,
-      notes: del.notes || '',
+      if (receiptAttachment) {
+        if (!freshOrder.receiptAttachments) freshOrder.receiptAttachments = [];
+        freshOrder.receiptAttachments.push(receiptAttachment);
+      }
+
+      freshOrder.status = 'VERIFIED_PENDING_MASTER_APPROVAL';
+      freshOrder.receivingStatus = 'PARTIALLY_RECEIVED';
+      freshOrder.receivedDate = businessDate;
+      if (vendorInvoiceNumber) freshOrder.vendorInvoiceNumber = String(vendorInvoiceNumber).trim();
+      if (vendorInvoiceDate && /^\d{4}-\d{2}-\d{2}$/.test(vendorInvoiceDate)) freshOrder.vendorInvoiceDate = vendorInvoiceDate;
+      freshOrder.lastModifiedByUserId = request.auth.userId;
+
+      await freshOrder.save(sessionOpt);
+
+      return {
+        order: freshOrder.toObject(),
+        purchaseOrder: freshOrder.toObject(),
+        grn: grnRecord,
+        receiptAttachment,
+        movementsCreated,
+      };
     });
+  } catch (err) {
+    if (idempotencyDoc) {
+      await IdempotencyRecord.deleteOne({ _id: idempotencyDoc._id }).catch(() => {});
+    }
+    throw err;
   }
 
-  // Create GRN record
-  const grnId = await SequenceCounter.generateId({
-    organisationId: request.auth.organisationId,
-    sequenceKey: `GRN_${datePart}`,
-    prefix: `GRN-${datePart}`,
-    minimumDigits: 4,
-  });
-
-  const grnRecord = {
-    grnId,
-    idempotencyKey: grnId,
-    deliveryNoteNumber: String(deliveryNoteNumber || deliveryNote || '').trim(),
-    receivedAt: now,
-    receivedByUserId: request.auth.userId,
-    items: grnItems,
-    receiptAttachments: receiptAttachment ? [receiptAttachment] : [],
-    notes: notes || '',
-    status: grnItems.some((g) => g.missingQty > 0 || g.rejectedQty > 0) ? 'PARTIAL' : 'ACCEPTED',
+  // Atomically finalize idempotency reservation on commit
+  const responseData = {
+    success: true,
+    data: transactionResult,
+    correlationId: request.correlationId || null,
   };
 
-  if (!order.grnReceipts) order.grnReceipts = [];
-  order.grnReceipts.push(grnRecord);
-
-  if (receiptAttachment) {
-    if (!order.receiptAttachments) order.receiptAttachments = [];
-    order.receiptAttachments.push(receiptAttachment);
+  if (idempotencyDoc) {
+    await IdempotencyRecord.updateOne(
+      { _id: idempotencyDoc._id },
+      {
+        status: 'COMPLETED',
+        responseSnapshot: responseData,
+        leaseExpiresAt: null,
+        finalizedAt: new Date(),
+      }
+    ).catch(() => {});
   }
 
-  order.status = 'VERIFIED_PENDING_MASTER_APPROVAL';
-  order.receivingStatus = 'PARTIALLY_RECEIVED';
-  order.receivedDate = businessDate;
-  if (vendorInvoiceNumber) order.vendorInvoiceNumber = String(vendorInvoiceNumber).trim();
-  if (vendorInvoiceDate && /^\d{4}-\d{2}-\d{2}$/.test(vendorInvoiceDate)) order.vendorInvoiceDate = vendorInvoiceDate;
-  order.lastModifiedByUserId = request.auth.userId;
-
-  await order.save();
-
   // ── ACTION 2: Notify Master window with module to approve order & bills ──
+  const grnItems = transactionResult?.grn?.items || [];
   const missingCount = grnItems.reduce((acc, g) => acc + (g.missingQty || 0), 0);
   const discrepancyText = missingCount > 0 ? ` (${missingCount} units reported missing/short)` : ' (Quantities fully verified)';
   const billText = receiptAttachment ? ' Vendor bill/receipt attached.' : '';
@@ -1664,7 +2027,7 @@ const verifyDeliveryAndSubmitBill = asyncHandler(async (request, response) => {
     priority: missingCount > 0 ? 'HIGH' : 'NORMAL',
     category: 'OPERATIONS',
     actorUserId: request.auth.userId,
-  });
+  }).catch(() => {});
 
   await recordRequestAudit({
     request,
@@ -1673,27 +2036,17 @@ const verifyDeliveryAndSubmitBill = asyncHandler(async (request, response) => {
     entityType: 'PURCHASE_ORDER',
     entityId: purchaseOrderId,
     after: {
-      status: order.status,
-      grnId,
+      status: transactionResult?.order?.status,
+      grnId: transactionResult?.grn?.grnId,
       receiptAttachmentAttached: !!receiptAttachment,
-      movementsCreatedCount: movementsCreated.length,
+      movementsCreatedCount: (transactionResult?.movementsCreated || []).length,
       missingCount,
     },
     result: 'SUCCESS',
     riskClassification: 'LOW',
-  });
+  }).catch(() => {});
 
-  return response.status(200).json({
-    success: true,
-    data: {
-      order: order.toObject(),
-      purchaseOrder: order.toObject(),
-      grn: grnRecord,
-      receiptAttachment,
-      movementsCreated,
-    },
-    correlationId: request.correlationId || null,
-  });
+  return response.status(200).json(responseData);
 });
 
 /**

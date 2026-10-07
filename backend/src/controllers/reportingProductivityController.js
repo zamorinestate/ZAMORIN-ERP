@@ -340,11 +340,11 @@ async function listCustomReports(req, res) {
       { organisationId, ownerUserId: userId }, // personal
     ];
 
-    if (['PRIMARY_MASTER', 'NORMAL_MASTER'].includes(scope.authorityType)) {
+    if (['PRIMARY_MASTER'].includes(scope.authorityType)) {
       visibilityQuery.push({ organisationId, visibility: 'SHARED_ORGANISATION' });
     }
 
-    if (['PRIMARY_MASTER', 'NORMAL_MASTER', 'OWNER', 'CAFE_ADMIN'].includes(scope.authorityType)) {
+    if (['PRIMARY_MASTER', 'OWNER', 'CAFE_ADMIN'].includes(scope.authorityType)) {
       const authorizedCafeIds = scope.assignedCafeIds || [];
       if (authorizedCafeIds.length > 0) {
         visibilityQuery.push({
@@ -398,7 +398,7 @@ async function getCustomReport(req, res) {
     const canView =
       isOwner ||
       (doc.visibility === 'SHARED_ORGANISATION' &&
-        ['PRIMARY_MASTER', 'NORMAL_MASTER'].includes(scope.authorityType)) ||
+        ['PRIMARY_MASTER'].includes(scope.authorityType)) ||
       (doc.visibility === 'SHARED_CAFE' &&
         (scope.assignedCafeIds || []).includes(doc.sharedCafeId));
 
@@ -593,7 +593,7 @@ async function cloneCustomReport(req, res) {
     const canRead =
       isOwner ||
       (source.visibility === 'SHARED_ORGANISATION' &&
-        ['PRIMARY_MASTER', 'NORMAL_MASTER'].includes(scope.authorityType)) ||
+        ['PRIMARY_MASTER'].includes(scope.authorityType)) ||
       (source.visibility === 'SHARED_CAFE' &&
         (scope.assignedCafeIds || []).includes(source.sharedCafeId));
 
@@ -769,11 +769,11 @@ async function listReportPacks(req, res) {
       { organisationId: auth.organisationId, ownerUserId: auth.userId },
     ];
 
-    if (['PRIMARY_MASTER', 'NORMAL_MASTER'].includes(scope.authorityType)) {
+    if (['PRIMARY_MASTER'].includes(scope.authorityType)) {
       visibilityQuery.push({ organisationId: auth.organisationId, visibility: 'SHARED_ORGANISATION' });
     }
 
-    if (['PRIMARY_MASTER', 'NORMAL_MASTER', 'OWNER', 'CAFE_ADMIN'].includes(scope.authorityType)) {
+    if (['PRIMARY_MASTER', 'OWNER', 'CAFE_ADMIN'].includes(scope.authorityType)) {
       const authorizedCafeIds = scope.assignedCafeIds || [];
       if (authorizedCafeIds.length > 0) {
         visibilityQuery.push({
@@ -821,7 +821,7 @@ async function previewReportPack(req, res) {
     const isOwner = String(doc.ownerUserId).toUpperCase() === String(auth.userId).toUpperCase();
     const canRead =
       isOwner ||
-      (doc.visibility === 'SHARED_ORGANISATION' && ['PRIMARY_MASTER', 'NORMAL_MASTER'].includes(scope.authorityType)) ||
+      (doc.visibility === 'SHARED_ORGANISATION' && ['PRIMARY_MASTER'].includes(scope.authorityType)) ||
       (doc.visibility === 'SHARED_CAFE' && (scope.assignedCafeIds || []).includes(doc.sharedCafeId));
 
     if (!canRead) return denyIdor(res);
@@ -871,7 +871,7 @@ async function getReportPack(req, res) {
     const isOwner = String(doc.ownerUserId).toUpperCase() === String(auth.userId).toUpperCase();
     const canRead =
       isOwner ||
-      (doc.visibility === 'SHARED_ORGANISATION' && ['PRIMARY_MASTER', 'NORMAL_MASTER'].includes(scope.authorityType)) ||
+      (doc.visibility === 'SHARED_ORGANISATION' && ['PRIMARY_MASTER'].includes(scope.authorityType)) ||
       (doc.visibility === 'SHARED_CAFE' && (scope.assignedCafeIds || []).includes(doc.sharedCafeId));
 
     if (!canRead) return denyIdor(res);
@@ -1059,7 +1059,7 @@ async function exportReportPack(req, res) {
     const isOwner = String(pack.ownerUserId).toUpperCase() === String(auth.userId).toUpperCase();
     const canRead =
       isOwner ||
-      (pack.visibility === 'SHARED_ORGANISATION' && ['PRIMARY_MASTER', 'NORMAL_MASTER'].includes(scope.authorityType)) ||
+      (pack.visibility === 'SHARED_ORGANISATION' && ['PRIMARY_MASTER'].includes(scope.authorityType)) ||
       (pack.visibility === 'SHARED_CAFE' && (scope.assignedCafeIds || []).includes(pack.sharedCafeId));
 
     if (!canRead) return denyIdor(res);
@@ -1316,7 +1316,7 @@ async function addFavourite(req, res) {
       const canRead =
         isOwner ||
         (targetDoc.visibility === 'SHARED_ORGANISATION' &&
-          ['PRIMARY_MASTER', 'NORMAL_MASTER'].includes(scope.authorityType)) ||
+          ['PRIMARY_MASTER'].includes(scope.authorityType)) ||
         (targetDoc.visibility === 'SHARED_CAFE' &&
           (scope.assignedCafeIds || []).includes(targetDoc.sharedCafeId));
       if (!canRead) return denyIdor(res);
@@ -1330,7 +1330,7 @@ async function addFavourite(req, res) {
       const canRead =
         isOwner ||
         (targetPack.visibility === 'SHARED_ORGANISATION' &&
-          ['PRIMARY_MASTER', 'NORMAL_MASTER'].includes(scope.authorityType)) ||
+          ['PRIMARY_MASTER'].includes(scope.authorityType)) ||
         (targetPack.visibility === 'SHARED_CAFE' &&
           (scope.assignedCafeIds || []).includes(targetPack.sharedCafeId));
       if (!canRead) return denyIdor(res);
@@ -1448,7 +1448,7 @@ async function getExportManifest(req, res) {
     const canRead =
       isOwner ||
       (doc.visibility === 'SHARED_ORGANISATION' &&
-        ['PRIMARY_MASTER', 'NORMAL_MASTER'].includes(scope.authorityType)) ||
+        ['PRIMARY_MASTER'].includes(scope.authorityType)) ||
       (doc.visibility === 'SHARED_CAFE' &&
         (scope.assignedCafeIds || []).includes(doc.sharedCafeId));
 

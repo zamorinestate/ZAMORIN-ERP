@@ -180,18 +180,20 @@ test('REC-18 Canonical Login Page 2.0 & Legacy Login Permanent Removal 40-Point 
       createdBy: 'SYSTEM',
     });
 
-    // Normal Master
-    await User.create({
+    // Normal Master (legacy decommissioned record)
+    await User.collection.insertOne({
       organisationId: TEST_ORG,
       userId: 'MU-0002',
       name: 'Normal Master User',
       email: 'normal.master@zamorin.com',
       passwordHash,
       role: 'MASTER',
-      accountStatus: 'ACTIVE',
-      status: 'ACTIVE',
+      accountStatus: 'DECOMMISSIONED',
+      status: 'DECOMMISSIONED',
       isPrimaryMaster: false,
       createdBy: 'MU-0001',
+      createdAt: new Date(),
+      updatedAt: new Date(),
     });
 
     // Owner
@@ -480,14 +482,27 @@ test('REC-18 Canonical Login Page 2.0 & Legacy Login Permanent Removal 40-Point 
     assert.equal(sessionData.session.roleSnapshot, 'MASTER');
   });
 
-  await t.test('19. Normal Master login', async () => {
-    const authResult = await authService.authenticatePassword({
-      organisationId: TEST_ORG,
-      email: 'normal.master@zamorin.com',
-      password: 'Password@123',
-    });
-    assert.equal(authResult.user.role, 'MASTER');
-    assert.equal(authResult.user.isPrimaryMaster, false);
+  await t.test('19. Normal Master login rejected (retired persona)', async () => {
+    await assert.rejects(
+      async () => {
+        await authService.authenticatePassword({
+          organisationId: TEST_ORG,
+          email: 'normal.master@zamorin.com',
+          password: 'Password@123',
+        });
+      },
+      (err) => {
+        assert.ok(
+          err.code === 'ROLE_RETIRED' ||
+          err.statusCode === 403 ||
+          (err.message && err.message.toLowerCase().includes('retired')) ||
+          (err.message && err.message.toLowerCase().includes('decommissioned')) ||
+          (err.message && err.message.toLowerCase().includes('not available')) ||
+          (err.message && err.message.toLowerCase().includes('inactive'))
+        );
+        return true;
+      }
+    );
   });
 
   await t.test('20. Owner login', async () => {

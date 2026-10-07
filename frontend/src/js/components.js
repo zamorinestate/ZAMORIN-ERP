@@ -202,7 +202,6 @@ export function renderTopbar({ scopeChip } = {}) {
         <div class="workspace-scope-dropdown">
           <select id="global-workspace-selector" class="select-scope" aria-label="Selected Workspace Window" style="font-weight:700;">
             <option value="master-primary" ${currentWs === 'master-primary' ? 'selected' : ''}>🛡️ Primary Master</option>
-            <option value="master-normal" ${currentWs === 'master-normal' ? 'selected' : ''}>⚖️ Normal Master</option>
             <option value="owner" ${currentWs === 'owner' ? 'selected' : ''}>👑 Owner Portal</option>
             <option value="cafe_admin" ${currentWs === 'cafe_admin' ? 'selected' : ''}>☕ Café Operations</option>
             <option value="staff" ${currentWs === 'staff' ? 'selected' : ''}>👤 Staff Preview</option>
@@ -498,12 +497,6 @@ export function wireBell(root) {
         state.isPrimaryMaster = true;
         state.activeWorkspace = "master-primary";
         showToast("Switched workspace to Primary Master", "info");
-        navigate("dashboard");
-      } else if (targetWs === "master-normal") {
-        state.role = ROLES.MASTER;
-        state.isPrimaryMaster = false;
-        state.activeWorkspace = "master-normal";
-        showToast("Switched workspace to Normal Master (Operational)", "info");
         navigate("dashboard");
       } else if (targetWs === "owner") {
         state.role = ROLES.OWNER;

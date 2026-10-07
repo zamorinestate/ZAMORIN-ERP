@@ -28,6 +28,20 @@ const router = express.Router();
 router.use(authenticate);
 router.use(attachDeviceContext);
 
+// Strict Four-Persona Topology Enforcement: Staff is self-service only and denied all POS operations
+router.use((request, response, next) => {
+  if (request.auth?.role === 'STAFF') {
+    return response.status(403).json({
+      success: false,
+      error: {
+        code: 'PERMISSION_DENIED',
+        message: 'Staff role is restricted to self-service only and does not have POS & Billing operational authority.',
+      },
+    });
+  }
+  return next();
+});
+
 // POS Order pipeline actions
 router.post('/orders/commit', commitOrder);
 router.post('/offline-sync', syncOfflineOrders);

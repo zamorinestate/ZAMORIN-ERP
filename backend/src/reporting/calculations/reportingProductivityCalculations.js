@@ -190,7 +190,6 @@ function isVisualCompatible(visualType, aggregationType) {
  */
 const ROLE_VISIBILITY_CREATE_PERMISSIONS = {
   PRIMARY_MASTER: ['PERSONAL', 'SHARED_CAFE', 'SHARED_ORGANISATION'],
-  NORMAL_MASTER: ['PERSONAL', 'SHARED_CAFE', 'SHARED_ORGANISATION'],
   OWNER: ['PERSONAL', 'SHARED_CAFE'],
   CAFE_ADMIN: ['PERSONAL', 'SHARED_CAFE'],
   STAFF: ['PERSONAL'], // STAFF has no enterprise shared views (PERSONAL only)

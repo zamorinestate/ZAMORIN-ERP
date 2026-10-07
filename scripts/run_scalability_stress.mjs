@@ -1,8 +1,13 @@
 // =============================================================================
-// ZAMORIN CAFÉ ERP — ENTERPRISE SCALABILITY STRESS SUITE (SC-01 -> SC-20)
+// ZAMORIN CAFÉ ERP — SYNTHETIC COMPUTATIONAL BENCHMARK (SC-01 -> SC-20) [IN-MEMORY ONLY]
 // scripts/run_scalability_stress.mjs
 //
-// 20 Deterministic Stress Tests verifying all enterprise capacity invariants.
+// AUDIT RECLASSIFICATION NOTICE (P1-C):
+// This suite tests in-memory algorithmic complexity and data structure limits
+// (e.g. slicing, coalescing, memory footprint). It does NOT perform actual HTTP
+// requests, database roundtrips, or real multi-node Redis coordination.
+// For real end-to-end load testing with HTTP, Mongo, Redis, and POS/inventory flows,
+// execute `scripts/run_real_scalability_benchmark.mjs` (npm run test:load:real).
 // =============================================================================
 
 import path from 'node:path';

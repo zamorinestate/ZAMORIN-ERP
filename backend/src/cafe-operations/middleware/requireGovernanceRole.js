@@ -102,7 +102,6 @@ function resolveCallerFromRequest(req) {
 
 const KNOWN_GOVERNANCE_ROLES = new Set([
   'MASTER_PRIMARY',
-  'MASTER_NORMAL',
   'MASTER',
   'OWNER',
   'CAFE_ADMIN',
@@ -121,6 +120,12 @@ function requireGovernanceRole(...allowedRoles) {
       return fail(res, 403, 'ACCOUNT_INACTIVE', 'User account is disabled or suspended.');
     }
 
+    // 2b. Normal Master Decommission Invariant:
+    // Non-primary Master is permanently retired. Deny access immediately.
+    if (caller.role === 'MASTER_NORMAL' || (caller.canonicalRole === 'MASTER' && !caller.isPrimaryMaster)) {
+      return fail(res, 403, 'ROLE_RETIRED', 'The Normal Master role has been permanently retired.');
+    }
+
     // 3. Deny unknown or unprivileged roles (e.g. STAFF)
     if (!KNOWN_GOVERNANCE_ROLES.has(caller.role) && !KNOWN_GOVERNANCE_ROLES.has(caller.canonicalRole)) {
       return fail(res, 403, 'FORBIDDEN', 'Role is not authorized for governance operations.');
@@ -129,8 +134,9 @@ function requireGovernanceRole(...allowedRoles) {
     // 4. Match against allowedRoles specification
     const matchesRole = allowedRoles.some((allowed) => {
       if (allowed === caller.role) return true;
-      if (allowed === caller.canonicalRole) return true;
-      if (allowed === 'MASTER' && (caller.role === 'MASTER_PRIMARY' || caller.role === 'MASTER_NORMAL')) return true;
+      if (allowed === caller.canonicalRole && caller.canonicalRole !== 'MASTER') return true;
+      if (allowed === 'MASTER' && caller.isPrimaryMaster === true) return true;
+      if (allowed === 'MASTER_PRIMARY' && caller.isPrimaryMaster === true) return true;
       return false;
     });
 

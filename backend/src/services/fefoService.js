@@ -106,7 +106,7 @@ class FefoService {
   }
 
   /**
-   * Executes FEFO deduction atomically across multiple lots.
+   * Executes FEFO deduction atomically across multiple lots with concurrency guard.
    */
   static async executeFefoDeduction({
     organisationId,
@@ -120,67 +120,160 @@ class FefoService {
     referenceType = 'BILL',
     userId = 'SYSTEM',
   }) {
-    const planResult = await this.planFefoDeduction({
+    if (!organisationId || !cafeId || !itemId || requiredQuantity <= 0) {
+      throw new ApiError(400, 'INVALID_FEFO_PARAMS', 'Valid organisationId, cafeId, itemId, and positive requiredQuantity are required.');
+    }
+
+    const todayStr = businessDate || getIstDateStr();
+    const sourceTx = billId || referenceId || '';
+    let remainingNeeded = Number(requiredQuantity);
+    const deductions = [];
+
+    // Query active available lots sorted by earliest expiry date (FEFO)
+    let lotQuery = InventoryLot.find({
       organisationId,
       cafeId,
       itemId,
-      requiredQuantity,
-      businessDate,
-    });
+      status: 'AVAILABLE',
+      quantityBase: { $gt: 0 },
+    }).sort({ expiryDate: 1, createdAt: 1 });
 
-    const deductions = [];
-    const sourceTx = billId || referenceId || '';
+    if (session) {
+      lotQuery = lotQuery.session(session);
+    }
 
-    for (const alloc of planResult.allocatedLots) {
-      const updateQuery = {
-        $inc: { quantityBase: -alloc.deductQuantity, remainingQuantity: -alloc.deductQuantity },
-      };
-      if (alloc.lotRemainingAfter === 0) {
-        updateQuery.$set = { status: 'DEPLETED' };
+    const lots = await lotQuery.lean();
+
+    if (!lots || lots.length === 0) {
+      throw new ApiError(400, 'NO_AVAILABLE_LOTS', `No available lots found for item ${itemId} at café ${cafeId}.`);
+    }
+
+    // Identify unexpired lots
+    const validLots = [];
+    const expiredLots = [];
+
+    for (const lot of lots) {
+      if (lot.expiryDate && lot.expiryDate < todayStr) {
+        expiredLots.push(lot);
+      } else {
+        validLots.push(lot);
+      }
+    }
+
+    if (expiredLots.length > 0) {
+      await InventoryLot.updateMany(
+        { _id: { $in: expiredLots.map((l) => l._id) } },
+        { $set: { status: 'EXPIRED' } },
+        session ? { session } : {}
+      ).catch(() => {});
+    }
+
+    for (const lot of validLots) {
+      if (remainingNeeded <= 0) break;
+
+      let lotAvail = Number(lot.quantityBase);
+      while (lotAvail > 0 && remainingNeeded > 0) {
+        const attemptDeduct = Math.min(lotAvail, remainingNeeded);
+
+        const updateQuery = {
+          $inc: { quantityBase: -attemptDeduct, remainingQuantity: -attemptDeduct },
+        };
+
+        const opts = { new: true };
+        if (session) opts.session = session;
+
+        // Atomic $gte guard prevents concurrent over-consumption and negative inventory
+        const updated = await InventoryLot.findOneAndUpdate(
+          {
+            organisationId,
+            cafeId,
+            lotId: lot.lotId,
+            quantityBase: { $gte: attemptDeduct },
+          },
+          updateQuery,
+          opts
+        );
+
+        if (updated) {
+          if (updated.quantityBase === 0) {
+            await InventoryLot.updateOne(
+              { _id: updated._id },
+              { $set: { status: 'DEPLETED' } },
+              session ? { session } : {}
+            ).catch(() => {});
+          }
+
+          const movementId = `SM-${Date.now()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+          try {
+            await StockMovement.create(
+              [
+                {
+                  organisationId,
+                  movementId,
+                  cafeId,
+                  itemId,
+                  movementType: 'CONSUMPTION',
+                  quantityBase: -attemptDeduct,
+                  balanceBeforeBase: (updated ? updated.quantityBase : 0) + attemptDeduct,
+                  balanceAfterBase: updated ? updated.quantityBase : 0,
+                  lotId: lot.lotId,
+                  supplierBatchNumber: lot.supplierLot || '',
+                  referenceId: sourceTx,
+                  referenceType: referenceType || 'BILL',
+                  performedByUserId: userId || 'SYSTEM',
+                  reason: `FEFO consumption allocation for ${sourceTx || itemId}`,
+                },
+              ],
+              session ? { session } : {}
+            );
+          } catch (_) {}
+
+          deductions.push({
+            lotId: lot.lotId,
+            deductedQuantity: attemptDeduct,
+            newBalance: updated ? updated.quantityBase : 0,
+            status: updated ? (updated.quantityBase === 0 ? 'DEPLETED' : updated.status) : 'UNKNOWN',
+            movementId,
+            sourceTransaction: sourceTx,
+          });
+
+          remainingNeeded -= attemptDeduct;
+          break; // successfully deducted from this lot, proceed to next lot if remainingNeeded > 0
+        } else {
+          // Lot was modified concurrently. Re-check fresh balance.
+          let freshQuery = InventoryLot.findOne({ organisationId, cafeId, lotId: lot.lotId });
+          if (session) freshQuery = freshQuery.session(session);
+          const freshLot = await freshQuery.lean();
+          if (!freshLot || freshLot.status !== 'AVAILABLE' || freshLot.quantityBase <= 0) {
+            break; // exhausted, move to next lot
+          }
+          lotAvail = freshLot.quantityBase;
+        }
+      }
+    }
+
+    if (remainingNeeded > 0) {
+      if (!session && deductions.length > 0) {
+        // Rollback partial deductions made in this standalone call to maintain atomicity
+        for (const d of deductions) {
+          try {
+            await InventoryLot.updateOne(
+              { organisationId, cafeId, lotId: d.lotId },
+              {
+                $inc: { quantityBase: d.deductedQuantity, remainingQuantity: d.deductedQuantity },
+                $set: { status: 'AVAILABLE' },
+              }
+            );
+            await StockMovement.deleteOne({ movementId: d.movementId });
+          } catch (_) {}
+        }
       }
 
-      const opts = { new: true };
-      if (session) opts.session = session;
-
-      const updated = await InventoryLot.findOneAndUpdate(
-        { organisationId, cafeId, lotId: alloc.lotId },
-        updateQuery,
-        opts
+      throw new ApiError(
+        400,
+        'INSUFFICIENT_UNEXPIRED_STOCK',
+        `Insufficient non-expired stock for item ${itemId}. Required: ${requiredQuantity}, Unfulfilled: ${remainingNeeded}.`
       );
-
-      const movementId = `SM-${Date.now()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
-      try {
-        await StockMovement.create(
-          [
-            {
-              organisationId,
-              movementId,
-              cafeId,
-              itemId,
-              movementType: 'CONSUMPTION',
-              quantityBase: -alloc.deductQuantity,
-              balanceBeforeBase: (updated ? updated.quantityBase : 0) + alloc.deductQuantity,
-              balanceAfterBase: updated ? updated.quantityBase : 0,
-              lotId: alloc.lotId,
-              supplierBatchNumber: alloc.supplierLot || '',
-              referenceId: sourceTx,
-              referenceType: referenceType || 'BILL',
-              performedByUserId: userId || 'SYSTEM',
-              reason: `FEFO consumption allocation for ${sourceTx || itemId}`,
-            },
-          ],
-          session ? { session } : {}
-        );
-      } catch (_) {}
-
-      deductions.push({
-        lotId: alloc.lotId,
-        deductedQuantity: alloc.deductQuantity,
-        newBalance: updated ? updated.quantityBase : 0,
-        status: updated ? updated.status : 'UNKNOWN',
-        movementId,
-        sourceTransaction: sourceTx,
-      });
     }
 
     return {

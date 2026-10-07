@@ -34,14 +34,6 @@ const ROLE_AUTHORITY_MATRIX = {
     highlyConfidential: true,
     selfServiceOnly: false,
   },
-  NORMAL_MASTER: {
-    authorityType: 'NORMAL_MASTER',
-    scope: 'ORGANISATION_WIDE_OPERATIONAL',
-    multiCafe: true,
-    enterpriseReports: true,
-    highlyConfidential: false,
-    selfServiceOnly: false,
-  },
   OWNER: {
     authorityType: 'OWNER',
     scope: 'ASSIGNED_CAFES_PORTFOLIO',
@@ -105,7 +97,14 @@ function resolveReportScope(req, queryParamsOrReportDef = {}, maybeReportDefinit
 
   const role = String(auth.role || '').toUpperCase();
   const isPrimaryMaster = Boolean(auth.isPrimaryMaster || (role === 'MASTER' && auth.userId === 'MU-0001'));
-  const isNormalMaster = role === 'MASTER' && !isPrimaryMaster;
+  
+  if (role === 'MASTER' && !isPrimaryMaster) {
+    const err = new Error('The Normal Master persona has been permanently retired.');
+    err.statusCode = 403;
+    err.code = 'ROLE_RETIRED';
+    throw err;
+  }
+
   const isOwner = role === 'OWNER';
   const isCafeAdmin = role === 'CAFE_ADMIN';
   const isStaff = role === 'STAFF';
@@ -230,9 +229,9 @@ function resolveReportScope(req, queryParamsOrReportDef = {}, maybeReportDefinit
     };
   }
 
-  // Primary Master / Normal Master scoping
-  if (isPrimaryMaster || isNormalMaster) {
-    const authorityType = isPrimaryMaster ? 'PRIMARY_MASTER' : 'NORMAL_MASTER';
+  // Primary Master scoping
+  if (isPrimaryMaster) {
+    const authorityType = 'PRIMARY_MASTER';
     if (requestedCafeId) {
       return {
         organisationId,

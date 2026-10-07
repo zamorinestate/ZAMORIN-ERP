@@ -3,7 +3,7 @@
 //
 // Authoritative Universal Personal Self-Service Hub & Redesigned Settings Shell
 // for all 4 canonical management roles:
-//   - MASTER (Primary Master & Normal Master)
+//   - MASTER (Primary Master)
 //   - OWNER
 //   - CAFE_ADMIN (Cafe Operations)
 //   - STAFF (Frozen)

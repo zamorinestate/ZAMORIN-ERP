@@ -3,7 +3,7 @@
 // Design System v2 (Ledger & Roastery Dark / Porcelain Light Theme)
 //
 // Administrative Control Plane with:
-//   - Primary Master vs Normal Master capability enforcement
+//   - Primary Master capability enforcement
 //   - 6 Main Sections: Overview, Cafés, Users, Governance, Configuration, Audit & Security
 //   - Overview KPIs & Governance Work Queue with aging tags
 //   - Café Location Portfolio with explicit lifecycle (SETUP, ACTIVE, TEMPORARILY_CLOSED, DEACTIVATED)
@@ -674,9 +674,9 @@ function renderGovSubpanel(sub) {
             <div class="card" style="padding:16px;background:var(--surface-sunken);border:1px solid var(--line);">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
                 <strong style="font-size:14px;color:var(--ink);">MASTER</strong>
-                <span class="pill pill-mint">PRIMARY &amp; NORMAL</span>
+                <span class="pill pill-mint">PRIMARY MASTER ONLY</span>
               </div>
-              <p style="font-size:12px;color:var(--muted);margin:0;">Highest tier administrative role. Primary Master holds complete organisation control; Normal Master holds multi-café operational control.</p>
+              <p style="font-size:12px;color:var(--muted);margin:0;">Highest tier administrative role. Primary Master holds complete organisation control and universal enterprise governance authority.</p>
             </div>
 
             <div class="card" style="padding:16px;background:var(--surface-sunken);border:1px solid var(--line);">
@@ -717,7 +717,6 @@ function renderGovSubpanel(sub) {
                 <tr>
                   <th>Capability</th>
                   <th>Primary Master</th>
-                  <th>Normal Master</th>
                   <th>Owner</th>
                   <th>CAFE_ADMIN (Trusted)</th>
                   <th>CAFE_ADMIN (Personal)</th>
@@ -725,15 +724,15 @@ function renderGovSubpanel(sub) {
                 </tr>
               </thead>
               <tbody>
-                <tr><td>Command Centre Portfolio</td><td>✅ Full</td><td>✅ Full</td><td>✅ Read</td><td>❌</td><td>❌</td><td>❌</td></tr>
-                <tr><td>Add Café Location</td><td>✅ Allowed</td><td>✅ Allowed</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td></tr>
-                <tr><td>Onboard Staff / Admin</td><td>✅ Allowed</td><td>✅ Allowed</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td></tr>
-                <tr><td>Create / Promote Master</td><td>✅ Allowed</td><td>⛔ Denied</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td></tr>
-                <tr><td>POS &amp; Cash Operations</td><td>✅ Full</td><td>✅ Full</td><td>✅ Read</td><td>✅ Assigned</td><td>❌</td><td>✅ Assigned</td></tr>
-                <tr><td>Personal Ledger Access</td><td>✅ Allowed</td><td>⛔ Denied</td><td>⛔ Denied</td><td>⛔ Denied</td><td>⛔ Denied</td><td>⛔ Denied</td></tr>
-                <tr><td>Expense Final Decision</td><td>✅ Allowed</td><td>⛔ Denied</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td></tr>
-                <tr><td>Organisational Payroll</td><td>✅ Allowed</td><td>⛔ Denied</td><td>✅ Read</td><td>❌</td><td>❌</td><td>❌</td></tr>
-                <tr><td>Own Payslip Access</td><td>✅ Allowed</td><td>✅ Allowed</td><td>✅ Allowed</td><td>✅ Allowed</td><td>✅ Allowed</td><td>✅ Allowed</td></tr>
+                <tr><td>Command Centre Portfolio</td><td>✅ Full</td><td>✅ Read</td><td>❌</td><td>❌</td><td>❌</td></tr>
+                <tr><td>Add Café Location</td><td>✅ Allowed</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td></tr>
+                <tr><td>Onboard Staff / Admin</td><td>✅ Allowed</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td></tr>
+                <tr><td>Create / Promote Master</td><td>✅ Allowed</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td></tr>
+                <tr><td>POS &amp; Cash Operations</td><td>✅ Full</td><td>✅ Read</td><td>✅ Assigned</td><td>❌</td><td>⛔ Denied</td></tr>
+                <tr><td>Personal Ledger Access</td><td>✅ Allowed</td><td>⛔ Denied</td><td>⛔ Denied</td><td>⛔ Denied</td><td>⛔ Denied</td></tr>
+                <tr><td>Expense Final Decision</td><td>✅ Allowed</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td></tr>
+                <tr><td>Organisational Payroll</td><td>✅ Allowed</td><td>✅ Read</td><td>❌</td><td>❌</td><td>❌</td></tr>
+                <tr><td>Own Payslip Access</td><td>✅ Allowed</td><td>✅ Allowed</td><td>✅ Allowed</td><td>✅ Allowed</td><td>✅ Allowed</td></tr>
               </tbody>
             </table>
           </div>
@@ -929,7 +928,7 @@ function renderGovSubpanel(sub) {
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
             <div>
               <h2 style="font-size:17px;font-weight:700;margin:0 0 4px;color:var(--ink);">Administrative Action Requests</h2>
-              <p style="font-size:12.5px;color:var(--muted);margin:0;">Normal Master submissions for Primary-only governance operations.</p>
+              <p style="font-size:12.5px;color:var(--muted);margin:0;">Operational submissions for Primary-only governance operations.</p>
             </div>
             <button class="btn btn-sm btn-primary" id="admin-new-request-btn" type="button">+ Submit Request</button>
           </div>
@@ -961,7 +960,7 @@ function renderGovSubpanel(sub) {
                           <strong style="color:var(--ink);">${escHtml(r.title)}</strong>
                           <div style="font-size:11px;color:var(--muted);">${escHtml(r.reason || '')}</div>
                         </td>
-                        <td>${escHtml(r.requestedByUserId || 'Normal Master')}</td>
+                        <td>${escHtml(r.requestedByUserId || 'Operator')}</td>
                         <td>
                           <span class="pill ${r.status === 'APPROVED' ? 'pill-mint' : r.status === 'REJECTED' ? 'pill-coral' : 'pill-amber'}">
                             ${escHtml(r.status)}
@@ -2172,7 +2171,7 @@ function openAddUserWizard(root) {
             <div class="form-group">
               <label class="form-label" style="font-size:12px;font-weight:700;">Application Role*</label>
               <select id="user-wiz-role" class="form-control">
-                ${isPrimary ? `<option value="MASTER">MASTER (Full Governance)</option>` : ""}
+                <option value="OWNER">OWNER (Executive Portal)</option>
                 <option value="CAFE_ADMIN">CAFE_ADMIN (Café Operations)</option>
                 <option value="STAFF">STAFF (Self-Service)</option>
               </select>

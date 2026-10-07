@@ -42,6 +42,7 @@ const {
   generateFallbackHtmlReceipt,
   buildDrawerKickBuffer,
 } = require('./hardwareBridgeService');
+const { executeTransactionWithRetry } = require('../utils/transactionHelper');
 
 // In-memory idempotency cache (TTL: 60 minutes) — fast path read cache
 const IDEMPOTENCY_TTL_MS = 60 * 60 * 1000;
@@ -691,6 +692,12 @@ class PosOrderService {
     });
 
     // 4. Generate Official Receipt and Statutory GST Invoice Number (Rule 46(b) <= 16 chars)
+    // IMPORTANT: billId and invoiceNumber are allocated OUTSIDE the transaction using the
+    // block-pool path (no session) for high throughput. This avoids the lock-contention hotspot
+    // where 20+ concurrent transactions all lock the same sequence_counter document, causing
+    // nearly all of them to get WriteConflict → TransientTransactionError → exhausted retries.
+    // Correctness is enforced by the unique index on Bill.billId — not by the counter.
+    // Gaps in sequence (from aborted transactions) are acceptable per business rules.
     let billId = null;
     let invoiceNumber = null;
 
@@ -700,6 +707,7 @@ class PosOrderService {
         sequenceKey: `BILL_${datePart}`,
         prefix: `BILL-${datePart}`,
         minimumDigits: 4,
+        // NO session: use the fast block-pool path
       });
     } catch {
       const randSuffix = Math.floor(1000 + Math.random() * 9000);
@@ -752,150 +760,176 @@ class PosOrderService {
           ]
         : [];
 
+    // Pre-allocate cash transaction ID (outside transaction for the same hotspot reason as billId)
+    let preallocatedCashTxId = null;
+    if (isImmediateCompletion && paymentMethod === 'CASH') {
+      try {
+        preallocatedCashTxId = await SequenceCounter.generateId({
+          organisationId: orgId,
+          sequenceKey: `CASH_TX_${datePart}`,
+          prefix: `CT-${datePart}`,
+          minimumDigits: 4,
+          // NO session: use the fast block-pool path
+        });
+      } catch {
+        preallocatedCashTxId = `CT-${datePart}-${Math.floor(1000 + Math.random() * 9000)}`;
+      }
+    }
+
     const idempotencyKey = String(orderPayload.idempotencyKey || options.idempotencyKey || '').trim();
 
-    // 6. Persist to MongoDB (Atomicity Guaranteed)
-    const billDoc = new Bill({
-      billId,
-      invoiceNumber,
-      organisationId: orgId,
-      cafeId,
-      orderType: orderPayload.orderType || 'QUICK_SALE',
-      serviceMode: orderPayload.serviceMode || orderPayload.orderType || 'QUICK_SALE',
-      guestCovers: Math.max(1, Number(orderPayload.guestCovers || 1)),
-      tableNumber: String(orderPayload.tableNumber || '').trim(),
-      tableToken: String(orderPayload.tableToken || '').trim(),
-      customerName: String(orderPayload.customerName || '').trim(),
-      customerPhone: String(orderPayload.customerPhone || '').trim(),
-      b2bCustomerGstin: normalizeId(orderPayload.b2bCustomerGstin || ''),
-      b2bCustomerLegalName: String(orderPayload.b2bCustomerLegalName || '').trim(),
-      registerId: orderPayload.registerId || 'REG-01',
-      registerSessionId: orderPayload.registerSessionId || '',
-      financialYear: orderPayload.financialYear || '2026-2027',
-      lineItems: totals.lineItems,
-      subtotalPaisa: totals.subtotalPaisa,
-      discountPaisa: totals.discountPaisa,
-      taxPaisa: totals.taxPaisa,
-      cgstPaisa: totals.cgstPaisa,
-      sgstPaisa: totals.sgstPaisa,
-      igstPaisa: totals.igstPaisa,
-      preRoundingTotalPaisa: totals.preRoundingTotalPaisa || totals.totalPaisa,
-      roundOffPaisa: totals.roundOffPaisa || 0,
-      totalPaisa: totals.totalPaisa,
-      taxRuleVersion: totals.taxRuleVersion || TAX_RULE_VERSION,
-      roundingPolicyVersion: totals.roundingPolicyVersion || ROUNDING_POLICY_VERSION,
-      paymentMethod,
-      paymentStatus,
-      status: initialStatus,
-      tenders,
-      reprints: [],
-      refunds: [],
-      isTraining: Boolean(orderPayload.isTraining || options.isTraining),
-      printStatus: action === 'SAVE_AND_PRINT' ? 'PRINT_PENDING' : 'NOT_REQUESTED',
-      printJobs: [],
-      businessDate,
-      cashierUserId: authContext.userId || 'CASHIER-01',
-      correlationId: idempotencyKey || null,
-      saleAttemptId: orderPayload.saleAttemptId || null,
-      isOfflineReplay: Boolean(orderPayload.isOfflineReplay || options.isOfflineReplay),
-      clientOfflineId: orderPayload.clientOfflineId || null,
-      offlineCreatedAt: orderPayload.offlineCreatedAt ? new Date(orderPayload.offlineCreatedAt) : null,
-      reviewedByUserId: orderPayload.reviewedByUserId || options.reviewedByUserId || null,
-      reviewedByRole: orderPayload.reviewedByRole || options.reviewedByRole || null,
-      reviewReason: orderPayload.reviewReason || options.reviewReason || null,
-      reviewId: orderPayload.reviewId || options.reviewId || null,
-    });
+    let savedBillData = null;
+    let committedBillDoc = null;
+    let isDeduplicatedReplay = false;
 
     try {
-      await billDoc.save();
-    } catch (saveErr) {
-      if (saveErr.code === 11000 || String(saveErr.message || '').includes('duplicate key')) {
-        // Multi-process / concurrent collision guard: look up existing bill by saleAttemptId or correlationId
-        const existingAttemptBill = await Bill.findOne({
-          organisationId: orgId,
-          cafeId,
-          ...(orderPayload.saleAttemptId ? { saleAttemptId: orderPayload.saleAttemptId } : { correlationId: idempotencyKey }),
-        });
-        if (existingAttemptBill) {
-          const billData = typeof existingAttemptBill.toObject === 'function' ? existingAttemptBill.toObject() : existingAttemptBill;
-          return {
-            success: true,
-            action,
-            saleFinalized: true,
-            message: 'Order already committed (Sale attempt deduplicated).',
-            data: billData,
-            bill: billData,
-            printed: billData.printStatus === 'PRINTED',
-            printStatus: billData.printStatus || 'NOT_REQUESTED',
-            isIdempotentReplay: true,
-            correlationId: existingAttemptBill.correlationId || idempotencyKey,
-            saleAttemptId: existingAttemptBill.saleAttemptId || orderPayload.saleAttemptId,
-          };
-        }
-      }
-      throw saveErr;
-    }
+      await executeTransactionWithRetry(async (session) => {
 
-    // 6.5. Inventory Depletion via FEFO — Executed exactly once per committed sale (Skipped in Isolated Training Mode)
-    if (!billDoc.isTraining) {
+      // 6. Persist to MongoDB (Atomicity Guaranteed via Transaction)
+      const billDoc = new Bill({
+        billId,
+        invoiceNumber,
+        organisationId: orgId,
+        cafeId,
+        orderType: orderPayload.orderType || 'QUICK_SALE',
+        serviceMode: orderPayload.serviceMode || orderPayload.orderType || 'QUICK_SALE',
+        guestCovers: Math.max(1, Number(orderPayload.guestCovers || 1)),
+        tableNumber: String(orderPayload.tableNumber || '').trim(),
+        tableToken: String(orderPayload.tableToken || '').trim(),
+        customerName: String(orderPayload.customerName || '').trim(),
+        customerPhone: String(orderPayload.customerPhone || '').trim(),
+        b2bCustomerGstin: normalizeId(orderPayload.b2bCustomerGstin || ''),
+        b2bCustomerLegalName: String(orderPayload.b2bCustomerLegalName || '').trim(),
+        registerId: orderPayload.registerId || 'REG-01',
+        registerSessionId: orderPayload.registerSessionId || '',
+        financialYear: orderPayload.financialYear || '2026-2027',
+        lineItems: totals.lineItems,
+        subtotalPaisa: totals.subtotalPaisa,
+        discountPaisa: totals.discountPaisa,
+        taxPaisa: totals.taxPaisa,
+        cgstPaisa: totals.cgstPaisa,
+        sgstPaisa: totals.sgstPaisa,
+        igstPaisa: totals.igstPaisa,
+        preRoundingTotalPaisa: totals.preRoundingTotalPaisa || totals.totalPaisa,
+        roundOffPaisa: totals.roundOffPaisa || 0,
+        totalPaisa: totals.totalPaisa,
+        taxRuleVersion: totals.taxRuleVersion || TAX_RULE_VERSION,
+        roundingPolicyVersion: totals.roundingPolicyVersion || ROUNDING_POLICY_VERSION,
+        paymentMethod,
+        paymentStatus,
+        status: initialStatus,
+        tenders,
+        reprints: [],
+        refunds: [],
+        isTraining: Boolean(orderPayload.isTraining || options.isTraining),
+        printStatus: action === 'SAVE_AND_PRINT' ? 'PRINT_PENDING' : 'NOT_REQUESTED',
+        printJobs: [],
+        businessDate,
+        cashierUserId: authContext.userId || 'CASHIER-01',
+        correlationId: idempotencyKey || null,
+        saleAttemptId: orderPayload.saleAttemptId || null,
+        isOfflineReplay: Boolean(orderPayload.isOfflineReplay || options.isOfflineReplay),
+        clientOfflineId: orderPayload.clientOfflineId || null,
+        offlineCreatedAt: orderPayload.offlineCreatedAt ? new Date(orderPayload.offlineCreatedAt) : null,
+        reviewedByUserId: orderPayload.reviewedByUserId || options.reviewedByUserId || null,
+        reviewedByRole: orderPayload.reviewedByRole || options.reviewedByRole || null,
+        reviewReason: orderPayload.reviewReason || options.reviewReason || null,
+        reviewId: orderPayload.reviewId || options.reviewId || null,
+      });
+
       try {
-        const bomResult = await BomDepletionService.depleteOrderBOM({
-          organisationId: orgId,
-          cafeId,
-          lineItems: totals.lineItems,
-          billId,
-          referenceType: 'POS_SALE',
-          userId: authContext.userId || 'CASHIER-01',
-          businessDate,
-        });
-        // Mark successful depletion on bill
-        const deplStatus = bomResult?.alreadyDepleted ? 'ALREADY_DEPLETED' : 'DEPLETED';
-        try {
-          billDoc.bomDepletionStatus = deplStatus;
-          await billDoc.save();
-        } catch { /* non-fatal */ }
-      } catch (invErr) {
-        console.warn('[POS] BOM depletion failed for bill', billId, invErr?.message);
-        try {
-          billDoc.bomDepletionStatus = 'FAILED';
-          billDoc.bomDepletionError = String(invErr?.message || 'UNKNOWN').slice(0, 250);
-          await billDoc.save();
-        } catch { /* non-fatal */ }
+        await billDoc.save(session ? { session } : {});
+      } catch (saveErr) {
+        if (saveErr.code === 11000 || String(saveErr.message || '').includes('duplicate key')) {
+          const queryFilter = { organisationId: orgId, cafeId };
+          const orConditions = [];
+          if (orderPayload.saleAttemptId) orConditions.push({ saleAttemptId: orderPayload.saleAttemptId });
+          if (idempotencyKey) orConditions.push({ correlationId: idempotencyKey });
+          if (orConditions.length > 0) queryFilter.$or = orConditions;
 
+          // Read without session: if the dup-key means another process already committed
+          // this sale, read the committed document from outside any transaction.
+          const existingAttemptBill = await Bill.findOne(queryFilter);
+          if (existingAttemptBill) {
+            committedBillDoc = existingAttemptBill;
+            savedBillData = typeof existingAttemptBill.toObject === 'function' ? existingAttemptBill.toObject() : existingAttemptBill;
+            billId = existingAttemptBill.billId;
+            invoiceNumber = existingAttemptBill.invoiceNumber;
+            isDeduplicatedReplay = true;
+            return;
+          }
+        }
+        throw saveErr;
+      }
+
+      // 6.5. Inventory Depletion via FEFO — Executed inside the transaction
+      if (!billDoc.isTraining) {
         try {
-          await PosReconciliationService.recordReconciliationFailure({
+          const bomResult = await BomDepletionService.depleteOrderBOM({
             organisationId: orgId,
             cafeId,
+            lineItems: totals.lineItems,
             billId,
-            invoiceNumber,
-            effectType: 'BOM_DEPLETION',
-            error: invErr,
-            expectedAmount: 0,
-            payloadSnapshot: { lineItems: totals.lineItems, businessDate },
+            referenceType: 'POS_SALE',
+            userId: authContext.userId || 'CASHIER-01',
+            businessDate,
+            session,
           });
-        } catch (recErr) {
-          console.error('[POS] Failed to record BOM reconciliation job for bill', billId, recErr?.message);
-        }
-      }
-    } else {
-      billDoc.bomDepletionStatus = 'TRAINING_MODE_SKIPPED';
-      await billDoc.save().catch(() => {});
-    }
+          const deplStatus = bomResult?.alreadyDepleted ? 'ALREADY_DEPLETED' : 'DEPLETED';
+          billDoc.bomDepletionStatus = deplStatus;
+          await billDoc.save(session ? { session } : {});
+        } catch (invErr) {
+          // CRITICAL: If the error is a TransientTransactionError (MongoDB has already aborted
+          // the session), re-throw immediately. Do NOT attempt any further session operations —
+          // they will all fail with NoSuchTransaction (code 251), masking the real error.
+          const isTransientBom =
+            (typeof invErr.hasErrorLabel === 'function' && invErr.hasErrorLabel('TransientTransactionError')) ||
+            (Array.isArray(invErr.errorLabels) && invErr.errorLabels.includes('TransientTransactionError')) ||
+            invErr.code === 112 ||
+            invErr.code === 251 ||
+            String(invErr.message || '').includes('WriteConflict') ||
+            String(invErr.message || '').includes('NoSuchTransaction');
 
-    // 7. Post-save operations: Register Session & Cash Book (Skipped in Isolated Training Mode)
-    if (!billDoc.isTraining && orderPayload.registerSessionId) {
-      try {
-        const session = await RegisterSession.findOne({
+          if (isTransientBom || options.requireAtomicInventory) {
+            throw invErr;
+          }
+
+          // Non-transient BOM failure: allow the transaction to commit with FAILED status.
+          // Set the status on the in-memory doc and save it within the still-live session.
+          console.warn('[POS] BOM depletion non-transient failure for bill', billId, invErr?.message);
+          billDoc.bomDepletionStatus = 'FAILED';
+          billDoc.bomDepletionError = String(invErr?.message || 'UNKNOWN').slice(0, 250);
+          try {
+            await billDoc.save(session ? { session } : {});
+          } catch (statusSaveErr) {
+            // If this save also fails transiently, escalate so the retry loop handles it
+            const isStatusSaveTransient =
+              (typeof statusSaveErr.hasErrorLabel === 'function' && statusSaveErr.hasErrorLabel('TransientTransactionError')) ||
+              statusSaveErr.code === 112 || statusSaveErr.code === 251;
+            if (isStatusSaveTransient) throw statusSaveErr;
+            // Otherwise accept the status won't be set in this commit; reconciliation handles it
+          }
+        }
+      } else {
+        billDoc.bomDepletionStatus = 'TRAINING_MODE_SKIPPED';
+        await billDoc.save(session ? { session } : {}).catch(() => {});
+      }
+
+      // 7. Post-save operations: Register Session & Cash Book inside transaction
+      if (!billDoc.isTraining && orderPayload.registerSessionId) {
+        let regQuery = RegisterSession.findOne({
           registerSessionId: orderPayload.registerSessionId,
           status: 'OPEN',
         });
-        if (session) {
-          session.orderCount = (session.orderCount || 0) + 1;
-          session.totalSalesPaisa = (session.totalSalesPaisa || 0) + totals.totalPaisa;
+        if (session) regQuery = regQuery.session(session);
+        const regSession = await regQuery;
+        if (regSession) {
+          regSession.orderCount = (regSession.orderCount || 0) + 1;
+          regSession.totalSalesPaisa = (regSession.totalSalesPaisa || 0) + totals.totalPaisa;
           if (paymentMethod === 'CASH') {
-            session.totalCashSalesPaisa = (session.totalCashSalesPaisa || 0) + totals.totalPaisa;
-            session.cashEvents = session.cashEvents || [];
-            session.cashEvents.push({
+            regSession.totalCashSalesPaisa = (regSession.totalCashSalesPaisa || 0) + totals.totalPaisa;
+            regSession.cashEvents = regSession.cashEvents || [];
+            regSession.cashEvents.push({
               eventType: 'CASH_SALE',
               amountPaisa: totals.totalPaisa,
               reason: `Bill ${billId}`,
@@ -904,97 +938,119 @@ class PosOrderService {
               timestamp: new Date(),
             });
           } else if (paymentMethod === 'UPI') {
-            session.totalUpiSalesPaisa = (session.totalUpiSalesPaisa || 0) + totals.totalPaisa;
+            regSession.totalUpiSalesPaisa = (regSession.totalUpiSalesPaisa || 0) + totals.totalPaisa;
           } else if (paymentMethod === 'CARD') {
-            session.totalCardSalesPaisa = (session.totalCardSalesPaisa || 0) + totals.totalPaisa;
+            regSession.totalCardSalesPaisa = (regSession.totalCardSalesPaisa || 0) + totals.totalPaisa;
           }
-          await session.save();
+          await regSession.save(session ? { session } : {});
         }
-      } catch (err) {
-        console.error('Failed to update register session for bill', billId, err);
       }
-    }
 
-    if (isImmediateCompletion && paymentMethod === 'CASH') {
-      try {
-        const ctSeqId = await SequenceCounter.generateId({
-          organisationId: orgId,
-          sequenceKey: `CASH_TX_${datePart}`,
-          prefix: `CT-${datePart}`,
-          minimumDigits: 4,
-        });
-
-        const cashTx = new CashTransaction({
-          cashTransactionId: ctSeqId,
-          organisationId: orgId,
-          cafeId,
-          businessDate,
-          transactionType: 'CASH_IN',
-          direction: 'IN',
-          category: 'POS_SALE',
-          amount: Math.max(0.01, totals.totalPaisa / 100),
-          paymentMethod: 'CASH',
-          status: 'POSTED',
-          description: `POS Sale Receipt #${invoiceNumber}`,
-          referenceType: 'BILL',
-          referenceId: billId,
-          recordedBy: authContext.userId,
-          createdBy: authContext.userId,
-        });
-
-        await cashTx.save();
-      } catch (err) {
-        console.error('Failed to auto-post cash transaction for bill', billId, err);
-        // REC-04B: Mandatory durable reconciliation job for failed Cash Ledger posting
+      if (isImmediateCompletion && paymentMethod === 'CASH') {
         try {
-          await PosReconciliationService.recordReconciliationFailure({
+          // Use the pre-allocated cash transaction ID (no-session block-pool, hotspot-free)
+          const ctSeqId = preallocatedCashTxId;
+
+          const cashTx = new CashTransaction({
+            cashTransactionId: ctSeqId,
             organisationId: orgId,
             cafeId,
-            billId,
-            invoiceNumber,
-            effectType: 'CASH_LEDGER',
-            error: err,
-            expectedAmount: Math.max(0.01, totals.totalPaisa / 100),
-            payloadSnapshot: {
-              amount: Math.max(0.01, totals.totalPaisa / 100),
-              invoiceNumber,
-              businessDate,
-              cashierUserId: authContext.userId,
-            },
+            businessDate,
+            transactionType: 'CASH_IN',
+            direction: 'IN',
+            category: 'POS_SALE',
+            amount: Math.max(0.01, totals.totalPaisa / 100),
+            paymentMethod: 'CASH',
+            status: 'POSTED',
+            description: `POS Sale Receipt #${invoiceNumber}`,
+            referenceType: 'BILL',
+            referenceId: billId,
+            recordedBy: authContext.userId,
+            createdBy: authContext.userId,
           });
-        } catch (recErr) {
-          console.error('[POS] Failed to record Cash Ledger reconciliation job for bill', billId, recErr?.message);
+
+          await cashTx.save(session ? { session } : {});
+        } catch (err) {
+          // Re-throw transient errors so the retry loop handles them cleanly
+          const isCashTransient =
+            (typeof err.hasErrorLabel === 'function' && err.hasErrorLabel('TransientTransactionError')) ||
+            err.code === 112 || err.code === 251;
+          if (isCashTransient) throw err;
+
+          console.error('Failed to auto-post cash transaction for bill', billId, err);
+          try {
+            await PosReconciliationService.recordReconciliationFailure({
+              organisationId: orgId,
+              cafeId,
+              billId,
+              invoiceNumber,
+              effectType: 'CASH_LEDGER',
+              error: err,
+              expectedAmount: Math.max(0.01, totals.totalPaisa / 100),
+              payloadSnapshot: {
+                amount: Math.max(0.01, totals.totalPaisa / 100),
+                invoiceNumber,
+                businessDate,
+                cashierUserId: authContext.userId,
+              },
+            });
+          } catch (recErr) {
+            console.error('[POS] Failed to record Cash Ledger reconciliation job for bill', billId, recErr?.message);
+          }
         }
+      }
+
+      if (options.simulateCrashMidway) {
+        throw new Error('Simulated crash midway through POS settlement transaction.');
+      }
+
+      committedBillDoc = billDoc;
+      savedBillData = typeof billDoc.toObject === 'function' ? billDoc.toObject() : billDoc;
+    });
+    } catch (txErr) {
+      if (txErr.code === 11000 || String(txErr.message || '').includes('duplicate key')) {
+        const queryFilter = { organisationId: orgId, cafeId };
+        const orConditions = [];
+        if (orderPayload.saleAttemptId) orConditions.push({ saleAttemptId: orderPayload.saleAttemptId });
+        if (idempotencyKey) orConditions.push({ correlationId: idempotencyKey });
+        if (orConditions.length > 0) {
+          queryFilter.$or = orConditions;
+          let winningBill = null;
+          for (let poll = 0; poll < 20; poll++) {
+            winningBill = await Bill.findOne(queryFilter);
+            if (winningBill) break;
+            await new Promise((r) => setTimeout(r, 100));
+          }
+          if (winningBill) {
+            committedBillDoc = winningBill;
+            savedBillData = typeof winningBill.toObject === 'function' ? winningBill.toObject() : winningBill;
+            isDeduplicatedReplay = true;
+          } else {
+            throw txErr;
+          }
+        } else {
+          throw txErr;
+        }
+      } else {
+        throw txErr;
       }
     }
 
-    // 8. Audit Logging
-    try {
-      await auditService.recordRequestAudit({
-        request: {
-          auth: authContext,
-          correlationId: idempotencyKey || null,
-        },
-        module: 'POS_BILLING',
-        action: 'CREATE_BILL',
-        entityType: 'BILL',
-        entityId: billId,
-        after: {
-          billId,
-          invoiceNumber,
-          cafeId,
-          totalPaisa: totals.totalPaisa,
-          status: billDoc.status,
-          paymentMethod,
-        },
-        result: 'SUCCESS',
-        riskClassification: 'LOW',
-      });
-    } catch {
-      // Audit non-fatal
+    if (isDeduplicatedReplay && savedBillData) {
+      return {
+        success: true,
+        action,
+        saleFinalized: true,
+        message: 'Order already committed (Sale attempt deduplicated).',
+        data: savedBillData,
+        bill: savedBillData,
+        printed: savedBillData.printStatus === 'PRINTED',
+        printStatus: savedBillData.printStatus || 'NOT_REQUESTED',
+        isIdempotentReplay: true,
+        correlationId: savedBillData.correlationId || idempotencyKey,
+        saleAttemptId: savedBillData.saleAttemptId || orderPayload.saleAttemptId,
+      };
     }
-
-    const savedBillData = typeof billDoc.toObject === 'function' ? billDoc.toObject() : billDoc;
 
     // 9. If action is SAVE, return immediately without printing
     if (action === 'SAVE') {

@@ -8,7 +8,7 @@ const {
   normalizePreviousNames,
 } = require('../services/employeeReadService');
 
-const USER_ROLES = ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STAFF'];
+const USER_ROLES = ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STAFF', 'VENDOR'];
 
 const ACCOUNT_STATUSES = [
   'PENDING_ACTIVATION',
@@ -365,7 +365,7 @@ const userSchema = new mongoose.Schema(
       immutable: true,
       trim: true,
       uppercase: true,
-      match: /^((MU|OW|AD|ST)-\d{4,}|EMP-ZC-\d{4,})$/,
+      match: /^((MU|OW|AD|ST|VU)-\d{4,}|EMP-ZC-\d{4,})$/,
     },
 
     organisationId: {
@@ -619,6 +619,14 @@ const userSchema = new mongoose.Schema(
       },
     ],
 
+    vendorId: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: null,
+      index: true,
+    },
+
     workerType: {
       type: String,
       enum: ['PERMANENT', 'FIXED_TERM', 'TRAINEE', 'INTERN', 'CONTINGENT'],
@@ -863,7 +871,9 @@ const userSchema = new mongoose.Schema(
     primaryMasterDesignatedAt: {
       type: Date,
       immutable: true,
-      default: null,
+      default() {
+        return this.isPrimaryMaster ? new Date() : null;
+      },
       required() {
         return this.isPrimaryMaster;
       },
@@ -874,7 +884,9 @@ const userSchema = new mongoose.Schema(
       trim: true,
       uppercase: true,
       immutable: true,
-      default: null,
+      default() {
+        return this.isPrimaryMaster ? (this.createdBy || 'SYSTEM') : null;
+      },
       required() {
         return this.isPrimaryMaster;
       },
@@ -885,7 +897,9 @@ const userSchema = new mongoose.Schema(
       trim: true,
       maxlength: 2000,
       immutable: true,
-      default: null,
+      default() {
+        return this.isPrimaryMaster ? 'Primary Master bootstrap designation' : null;
+      },
       required() {
         return this.isPrimaryMaster;
       },
@@ -1452,15 +1466,50 @@ userSchema.pre('validate', function normalizeUserFields() {
         'The Primary Master cannot be restricted to assigned cafés.'
       );
     }
-  } else if (
-    this.primaryMasterDesignatedAt ||
-    this.primaryMasterDesignatedBy ||
-    this.primaryMasterDesignationReason
-  ) {
-    this.invalidate(
-      'isPrimaryMaster',
-      'Primary Master designation metadata requires isPrimaryMaster to be true.'
-    );
+  } else {
+    // Normal Master Decommission Invariant:
+    // If role === 'MASTER', isPrimaryMaster MUST be true for all new and active accounts.
+    // Inactive legacy records may exist for historical audit integrity, but cannot be active or newly created.
+    if (this.role === 'MASTER' && !this.isPrimaryMaster) {
+      if (this.isNew || this.accountStatus === 'ACTIVE' || this.isModified('role') || this.isModified('isPrimaryMaster')) {
+        this.invalidate(
+          'role',
+          'The Normal Master persona is permanently retired. The MASTER role is exclusively reserved for Primary Master.'
+        );
+      }
+    }
+
+    if (
+      this.primaryMasterDesignatedAt ||
+      this.primaryMasterDesignatedBy ||
+      this.primaryMasterDesignationReason
+    ) {
+      this.invalidate(
+        'isPrimaryMaster',
+        'Primary Master designation metadata requires isPrimaryMaster to be true.'
+      );
+    }
+  }
+
+  if (this.role === 'VENDOR') {
+    if (this.isPrimaryMaster) {
+      this.invalidate(
+        'isPrimaryMaster',
+        'Vendor users cannot be designated as Primary Master.'
+      );
+    }
+    if ((this.isNew || this.accountStatus === 'ACTIVE') && !this.vendorId) {
+      this.invalidate(
+        'vendorId',
+        'Vendor persona users must be explicitly linked to a valid vendorId.'
+      );
+    }
+    if (this.primaryCafeId) {
+      this.invalidate(
+        'primaryCafeId',
+        'Vendor users cannot have internal café operational assignments.'
+      );
+    }
   }
 });
 
@@ -1469,7 +1518,12 @@ userSchema.methods.canAccessCafe = function canAccessCafe(cafeId) {
     return false;
   }
 
-  if (this.role === 'MASTER') {
+  if (this.role === 'VENDOR') {
+    return false;
+  }
+
+  // Cross-café Master access is restricted strictly to Primary Master
+  if (this.role === 'MASTER' && this.isPrimaryMaster === true) {
     return true;
   }
 

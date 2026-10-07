@@ -25,7 +25,6 @@ const WORKSPACE_MODE = Object.freeze({
 const ACTOR_ROLE = Object.freeze({
   CAFE_ADMIN: 'CAFE_ADMIN',
   MASTER_PRIMARY: 'MASTER_PRIMARY',
-  MASTER_NORMAL: 'MASTER_NORMAL',
 });
 
 const AUTH_METHOD = Object.freeze({

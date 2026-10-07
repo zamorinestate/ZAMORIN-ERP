@@ -1455,8 +1455,10 @@ async function seedCafeOperationsData(orgOrObj, mUserId) {
   const { User } = require('../models/User');
   const bcrypt = require('bcrypt');
 
-  // 0. Seed Active Cafes with 6-digit Operations PIN (default: 123456)
-  const defaultCafePinHash = await bcrypt.hash('123456', 10);
+  // 0. Seed Active Cafes with 6-digit Operations PIN
+  const crypto = require('crypto');
+  const defaultCafePin = process.env.INITIAL_CAFE_PIN || crypto.randomInt(100000, 999999).toString();
+  const defaultCafePinHash = await bcrypt.hash(defaultCafePin, 10);
 
   const cafe1 = await Cafe.findOne({ organisationId, cafeId: 'ZC-0001' });
   if (!cafe1) {
@@ -1552,8 +1554,13 @@ async function seedCafeOperationsData(orgOrObj, mUserId) {
   }
 
   // 2. Seed Sample Operator Users with 6-digit PIN
-  const pin1Hash = await bcrypt.hash('147258', 10);
-  const pin2Hash = await bcrypt.hash('258369', 10);
+  const pin1 = process.env.INITIAL_OPERATOR_PIN_1 || crypto.randomInt(100000, 999999).toString();
+  const pin2 = process.env.INITIAL_OPERATOR_PIN_2 || crypto.randomInt(100000, 999999).toString();
+  const pin1Hash = await bcrypt.hash(pin1, 10);
+  const pin2Hash = await bcrypt.hash(pin2, 10);
+
+  const demoUserPassword = process.env.INITIAL_DEMO_PASSWORD || crypto.randomBytes(24).toString('base64url');
+  const defaultPasswordHash = await bcrypt.hash(demoUserPassword, 10);
 
   const existingAdmin1 = await User.findOne({ organisationId, userId: 'AD-0001' });
   if (!existingAdmin1) {
@@ -1566,7 +1573,7 @@ async function seedCafeOperationsData(orgOrObj, mUserId) {
       accountStatus: 'ACTIVE',
       primaryCafeId: 'ZC-0001',
       assignedCafeIds: ['ZC-0001'],
-      passwordHash: await bcrypt.hash('PK@NilaVega_8427!Cedar', 10),
+      passwordHash: defaultPasswordHash,
       operatorPinHash: pin1Hash,
       operatorPinSetAt: new Date(),
       isPrimaryMaster: false,
@@ -1590,7 +1597,7 @@ async function seedCafeOperationsData(orgOrObj, mUserId) {
       accountStatus: 'ACTIVE',
       primaryCafeId: 'ZC-0002',
       assignedCafeIds: ['ZC-0002'],
-      passwordHash: await bcrypt.hash('PK@NilaVega_8427!Cedar', 10),
+      passwordHash: defaultPasswordHash,
       operatorPinHash: pin2Hash,
       operatorPinSetAt: new Date(),
       isPrimaryMaster: false,
@@ -1604,23 +1611,14 @@ async function seedCafeOperationsData(orgOrObj, mUserId) {
   }
 
   // 3. Seed Canonical Role Accounts for Complete Role Recognition
-  const defaultPasswordHash = await bcrypt.hash('PK@NilaVega_8427!Cedar', 10);
 
-  // Normal Master Account (role MASTER, isPrimaryMaster: false)
+  // Normal Master Account is permanently retired under Four-Persona Topology.
+  // Legacy account (if present) must be disabled with reason ROLE_RETIRED_NORMAL_MASTER.
   const existingNormalMaster = await User.findOne({ organisationId, email: 'normal.master@example.com' });
-  if (!existingNormalMaster) {
-    await User.create({
-      userId: 'MU-0002',
-      organisationId,
-      name: 'Zamorin Normal Master',
-      email: 'normal.master@example.com',
-      role: 'MASTER',
-      accountStatus: 'ACTIVE',
-      passwordHash: defaultPasswordHash,
-      isPrimaryMaster: false,
-      createdBy: masterUserId,
-      updatedBy: masterUserId,
-    });
+  if (existingNormalMaster && existingNormalMaster.accountStatus !== 'DISABLED') {
+    existingNormalMaster.accountStatus = 'DISABLED';
+    existingNormalMaster.statusReason = 'ROLE_RETIRED_NORMAL_MASTER';
+    await existingNormalMaster.save();
   }
 
   // Owner Account
@@ -1690,11 +1688,18 @@ async function runSeed() {
   await connectDatabase({ uri: env.mongodbUri });
   try {
     const organisationId = env.initialOrganisationId || 'ZAMORIN';
+    const masterPassword =
+      env.initialMasterPassword ||
+      process.env.INITIAL_MASTER_PASSWORD ||
+      (process.env.NODE_ENV !== 'production' ? crypto.randomBytes(24).toString('base64url') : '');
+    if (!masterPassword) {
+      throw new Error('Initial master password is required to seed master user.');
+    }
     const master = await seedMasterUser({
       organisationId,
       masterName: env.initialMasterName || 'Zamorin Master',
       masterEmail: env.initialMasterEmail || 'master@example.com',
-      masterPassword: env.initialMasterPassword || 'PK@NilaVega_8427!Cedar',
+      masterPassword,
     });
     await seedPermissionRules({ organisationId, masterUserId: master.userId });
     await seedSystemCommunicationSettings({ organisationId, masterEmail: env.initialMasterEmail || 'master@example.com' });

@@ -89,6 +89,7 @@ const ROLE_LABELS = {
   [ROLES.OWNER]: "Owner",
   [ROLES.CAFE_ADMIN]: "Cafe Operations",
   [ROLES.STAFF]: "Staff",
+  [ROLES.VENDOR]: "Vendor Portal",
 };
 
 export function showNavProgressBar() {
@@ -119,15 +120,6 @@ export function getIsPrimaryMaster() {
   if (state.auth?.user?.isPrimaryMaster !== undefined) return Boolean(state.auth.user.isPrimaryMaster);
   if (state.user?.isPrimaryMaster !== undefined) return Boolean(state.user.isPrimaryMaster);
   if (state.isPrimaryMaster !== undefined) return Boolean(state.isPrimaryMaster);
-  // In dev / preview / master context, default to Primary Master unless explicitly marked as normal
-  if (state.role === ROLES.MASTER || state.role === "master") {
-    const isExplicitNormal = Boolean(
-      state.auth?.user?.isPrimaryMaster === false ||
-      state.user?.isPrimaryMaster === false ||
-      state.isPrimaryMaster === false
-    );
-    return !isExplicitNormal;
-  }
   return false;
 }
 
@@ -136,9 +128,17 @@ export function navigate(route) {
   cancelPendingRouteReads();
   showNavProgressBar();
 
-  // Route-layer guard: deny by default, exactly per Part B.3 / Part R's
-  // closing rule ("any action not explicitly marked defaults to no access").
+  // Route-layer guard: deny by default
   const isPrimary = getIsPrimaryMaster();
+
+  // Normal Master Decommission Invariant:
+  // Non-primary master is strictly blocked from all routes.
+  if ((state.role === ROLES.MASTER || state.role === "master") && !isPrimary) {
+    setState({ route: "__blocked__" });
+    renderShell();
+    hideNavProgressBar();
+    return;
+  }
 
   if (route !== "notifications" && !isRouteAllowed(state.role, route, isPrimary)) {
     setState({ route: "__blocked__" });
@@ -922,6 +922,21 @@ async function renderPage() {
       });
       break;
     // ── End Stage-2 Terminal Auth ─────────────────────────────────────────────
+
+    // ── Vendor Portal Routes (Fifth Window — Strictly Read-Only) ─────────────
+    case "vendor-dashboard":
+    case "vendor-orders":
+    case "vendor-deliveries":
+    case "vendor-statements":
+    case "vendor-profile":
+    case "vendor-portal": {
+      // Lazy-load vendor portal page
+      const { renderVendorPortal, wireVendorPortal } = await import("./pages/vendorPortal.js");
+      content.innerHTML = renderVendorPortal(baseRoute, subroute);
+      wireVendorPortal(content, baseRoute);
+      break;
+    }
+    // ── End Vendor Portal Routes ──────────────────────────────────────────────
 
     default:
       content.innerHTML = renderNotAvailable();

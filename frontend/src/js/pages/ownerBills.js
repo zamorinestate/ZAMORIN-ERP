@@ -946,7 +946,7 @@ function renderAdjustmentsSubpanel() {
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
             <div>
               <h3 style="font-size:15px; font-weight:700; margin:0 0 2px; color:var(--ink);">Controlled Post-Sale Voids</h3>
-              <p style="font-size:12px; color:var(--muted); margin:0;">Same-day voids: Normal Master · Historical voids: Primary Master only</p>
+              <p style="font-size:12px; color:var(--muted); margin:0;">Post-sale invoice voids: Primary Master authority only</p>
             </div>
             <span class="status danger" style="font-size:11px;">Audited Action</span>
           </div>

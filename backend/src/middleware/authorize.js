@@ -147,7 +147,7 @@ function canAccessCafe(
     return false;
   }
 
-  if (auth.role === 'MASTER') {
+  if (auth.role === 'MASTER' && auth.isPrimaryMaster === true) {
     return true;
   }
 
@@ -169,7 +169,7 @@ function ruleAppliesToRequest({
 
   switch (rule.scope) {
     case 'ORGANISATION':
-      return auth.role === 'MASTER' ||
+      return (auth.role === 'MASTER' && auth.isPrimaryMaster === true) ||
         auth.role === 'OWNER';
 
     case 'ASSIGNED_CAFES':
@@ -389,7 +389,16 @@ function authorize(
         );
       }
       const authRole = String(request.auth.role).toUpperCase();
-      const isMasterRole = authRole === 'MASTER' || authRole === 'PRIMARY_MASTER' || Boolean(request.auth.isPrimaryMaster);
+      if (authRole === 'MASTER' && !request.auth.isPrimaryMaster) {
+        return sendAuthorizationError(
+          response,
+          'ROLE_RETIRED',
+          'The Normal Master role has been permanently retired.',
+          403,
+          request
+        );
+      }
+      const isMasterRole = (authRole === 'MASTER' || authRole === 'PRIMARY_MASTER') && Boolean(request.auth.isPrimaryMaster);
       const isRoleAllowed = roles.includes(authRole) || (roles.includes('MASTER') && isMasterRole);
       if (!isRoleAllowed) {
         return sendAuthorizationError(
@@ -423,6 +432,28 @@ function authorize(
           401,
           request
         );
+      }
+
+      if (request.auth.role === 'MASTER' && !request.auth.isPrimaryMaster) {
+        return sendAuthorizationError(
+          response,
+          'ROLE_RETIRED',
+          'The Normal Master role has been permanently retired.',
+          403,
+          request
+        );
+      }
+
+      if (request.auth.role === 'VENDOR') {
+        if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
+          return sendAuthorizationError(
+            response,
+            'VENDOR_READ_ONLY',
+            'Vendor accounts have strictly read-only access to business records.',
+            403,
+            request
+          );
+        }
       }
 
       const auth = request.auth;
@@ -647,11 +678,51 @@ function requireReason(
   return next();
 }
 
+/**
+ * requireVendor — ensures the authenticated user is a verified VENDOR account.
+ * Rejects non-vendor users with 403 VENDOR_ACCESS_REQUIRED.
+ * Enforces strict read-only boundary: rejects any mutation with 403 VENDOR_READ_ONLY.
+ */
+function requireVendor(request, response, next) {
+  if (!request.auth) {
+    return sendAuthorizationError(
+      response,
+      'AUTHENTICATION_REQUIRED',
+      'Authentication is required.',
+      401,
+      request
+    );
+  }
+
+  if (request.auth.role !== 'VENDOR' || !request.auth.vendorId) {
+    return sendAuthorizationError(
+      response,
+      'VENDOR_ACCESS_REQUIRED',
+      'This endpoint is exclusively accessible to verified Vendor accounts.',
+      403,
+      request
+    );
+  }
+
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
+    return sendAuthorizationError(
+      response,
+      'VENDOR_READ_ONLY',
+      'Vendor accounts have strictly read-only access to business records.',
+      403,
+      request
+    );
+  }
+
+  return next();
+}
+
 module.exports = {
   ABSOLUTE_ROLE_RESTRICTIONS,
   authorize,
   requireReason,
   requirePrimaryMaster,
   requirePrimaryMasterOrOwner,
+  requireVendor,
   canAccessCafe,
 };

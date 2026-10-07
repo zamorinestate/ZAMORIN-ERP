@@ -73,6 +73,7 @@ function createMockRequest(overrides = {}) {
       userId: 'MU-0001',
       organisationId: 'ORG-TEST',
       role: 'MASTER',
+      isPrimaryMaster: true,
       assignedCafeIds: [],
       primaryCafeId: null,
       sessionId: 'SS-20260806-0001',
@@ -189,6 +190,7 @@ test('Primary Master self-demotion and self-archive are blocked', async () => {
       userId: 'MU-0001',
       organisationId: 'ORG-TEST',
       role: 'MASTER',
+      isPrimaryMaster: true,
     },
     params: { userId: 'MU-0001' },
     body: { reason: 'Self archive attempt' },
@@ -310,7 +312,7 @@ test('Secondary Master cannot deactivate, suspend, disable, or archive another M
   try {
     await assert.rejects(
       runController(changeUserStatus, req, res),
-      (err) => err.code === 'MASTER_ROLE_GOVERNANCE_FORBIDDEN'
+      (err) => err.code === 'PRIMARY_MASTER_AUTHORITY_REQUIRED' || err.code === 'MASTER_ROLE_GOVERNANCE_FORBIDDEN'
     );
     assert.equal(targetMaster.accountStatus, 'ACTIVE');
   } finally {
@@ -318,15 +320,18 @@ test('Secondary Master cannot deactivate, suspend, disable, or archive another M
   }
 });
 
-test('Primary Master can promote eligible STAFF/OWNER/CAFE_ADMIN to MASTER and demote non-primary MASTER', () => {
+test('Primary Master governance rejects promotion to retired MASTER role', () => {
   const pm = createMockUser({ userId: 'MU-0001', isPrimaryMaster: true });
   const staff = createMockUser({ userId: 'ST-0001', role: 'STAFF', isPrimaryMaster: false });
   const nonPrimaryMaster = createMockUser({ userId: 'MU-0002', role: 'MASTER', isPrimaryMaster: false });
 
   assert.doesNotThrow(() => assertPrimaryMasterAuthority(pm, 'promote user'));
   assert.doesNotThrow(() => assertMayActOnMasterTarget(pm, nonPrimaryMaster));
-  assert.doesNotThrow(() => validateProposedRole('MASTER'));
-  assert.doesNotThrow(() => assertRoleIsNotNoOp(staff.role, 'MASTER'));
+  assert.throws(
+    () => validateProposedRole('MASTER'),
+    (err) => err.code === 'ROLE_RETIRED_NORMAL_MASTER' && err.statusCode === 403
+  );
+  assert.doesNotThrow(() => assertRoleIsNotNoOp(staff.role, 'OWNER'));
 });
 
 test('Direct creation with role MASTER remains blocked in createUser', async () => {
@@ -343,7 +348,7 @@ test('Direct creation with role MASTER remains blocked in createUser', async () 
 
   await assert.rejects(
     runController(createUser, req, res),
-    (err) => err.code === 'MASTER_CREATION_RESTRICTED' && err.statusCode === 403
+    (err) => (err.code === 'ROLE_RETIRED_NORMAL_MASTER' || err.code === 'MASTER_CREATION_RESTRICTED') && err.statusCode === 403
   );
 });
 

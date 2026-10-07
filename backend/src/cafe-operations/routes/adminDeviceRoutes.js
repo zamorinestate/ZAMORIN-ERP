@@ -7,8 +7,8 @@ const { requireGovernanceRole } = require('../middleware/requireGovernanceRole')
 const { ok, fail } = require('../utils/responses');
 
 const router = express.Router();
-const GOVERNANCE_ROLES = ['MASTER_PRIMARY', 'MASTER_NORMAL', 'OWNER', 'CAFE_ADMIN'];
-const DEVICE_GOVERNING_ROLES = ['MASTER_PRIMARY', 'MASTER_NORMAL', 'OWNER'];
+const GOVERNANCE_ROLES = ['MASTER_PRIMARY', 'OWNER', 'CAFE_ADMIN'];
+const DEVICE_GOVERNING_ROLES = ['MASTER_PRIMARY', 'OWNER'];
 
 router.get('/', requireGovernanceRole(...GOVERNANCE_ROLES), async (req, res, next) => {
   try {

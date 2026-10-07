@@ -1,6 +1,6 @@
 // =============================================================================
 // ZAMORIN CAFÉ ERP — CAFÉ OPERATIONS ACCESS MANAGEMENT MODAL
-// Supported Roles: Primary Master, Normal Master, Owner
+// Supported Roles: Primary Master, Owner
 // Design System: Ledger & Roastery Dark / Porcelain Light Theme
 // =============================================================================
 

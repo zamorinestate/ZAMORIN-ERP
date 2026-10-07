@@ -6,8 +6,8 @@
 //   - Items not listed for a role here are unreachable by that role anywhere.
 //   - Navigation is structured in logical groups (COMMAND, OPERATIONS, PEOPLE,
 //     FINANCE, COMMERCIAL, INSIGHTS, ADMINISTRATION, SYSTEM).
-//   - Primary Master vs Normal Master distinction is enforced here and in
-//     router.js — no 5th/6th role is created.
+//   - Four-Persona Topology is enforced here and in
+//     router.js — exactly 4 active personas (Primary Master, Owner, Cafe Operations, Staff).
 //   - User-facing CAFE_ADMIN terminology is "Cafe Operations" / "Operator".
 //   - My Profile, My Payslip → Avatar menu / Settings (not main sidebar).
 //   - My Payslips, My Loans & Advances → Settings → My Employment (not STAFF sidebar).
@@ -23,6 +23,7 @@ export const ROLES = {
   OWNER: 'owner',
   CAFE_ADMIN: 'cafe_admin',
   STAFF: 'staff',
+  VENDOR: 'vendor',
 };
 
 // ─── Primary Master Navigation ────────────────────────────────────────────────
@@ -73,20 +74,13 @@ const PRIMARY_MASTER_ITEMS = [
   { id: 'settings',      label: 'Settings',               icon: 'settings',     route: 'settings',          group: 'SYSTEM' },
 ];
 
-// ─── Normal Master Navigation ─────────────────────────────────────────────────
-// Same as Primary Master EXCEPT: no Personal Ledger, no Universal Payroll,
-// no Staff Loans & Advances, no Revenue Share.
-const NORMAL_MASTER_ITEMS = PRIMARY_MASTER_ITEMS.filter(
-  (item) => !item.primaryMasterOnly
-);
-
 export const NAVIGATION = {
   // ── MASTER ───────────────────────────────────────────────────────────────────
   [ROLES.MASTER]: {
-    scopeLabel: 'Master View',
+    scopeLabel: 'Primary Master',
+    items: PRIMARY_MASTER_ITEMS,
     primaryItems: PRIMARY_MASTER_ITEMS,
-    normalItems: NORMAL_MASTER_ITEMS,
-    footnote: 'Full operational and financial control across all cafés.',
+    footnote: 'Primary Master — Full enterprise governance and operational control across all cafés.',
   },
 
   // ── OWNER ────────────────────────────────────────────────────────────────────
@@ -139,9 +133,12 @@ export const NAVIGATION = {
       { id: 'procurement',  label: 'Procurement',             icon: 'procurement',  route: 'procurement',     group: 'OPERATIONS' },
       { id: 'assets',       label: 'Assets & Maintenance',    icon: 'assets',       route: 'assets',          group: 'OPERATIONS' },
       { id: 'quality',      label: 'Quality & Compliance',    icon: 'quality',      route: 'quality',         group: 'OPERATIONS' },
+      { id: 'employees',    label: 'Café Staff Team',         icon: 'employees',    route: 'employees',       group: 'PEOPLE' },
       { id: 'expenses',     label: 'Expenses',                icon: 'expenses',     route: 'expenses',        group: 'FINANCE' },
       { id: 'sales-cash',   label: 'Sales & Cash',            icon: 'finance',      route: 'sales-cash',      group: 'FINANCE' },
       { id: 'customers',    label: 'Customers & Loyalty',     icon: 'customers',    route: 'customers',       group: 'COMMERCIAL' },
+      { id: 'menu',         label: 'Menu & Availability',     icon: 'menuItem',     route: 'menu',            group: 'COMMERCIAL' },
+      { id: 'vendors',      label: 'Vendors & Catalogue',     icon: 'vendors',      route: 'vendors',         group: 'COMMERCIAL' },
       { id: 'reports',      label: 'Reports (this café)',      icon: 'reports',      route: 'reports',         group: 'INSIGHTS' },
       { id: 'tasks',        label: 'Action Centre',           icon: 'tasks',        route: 'tasks',           group: 'INSIGHTS' },
       { id: 'cafe-ops-devices', label: 'Devices & Sessions',  icon: 'devices',      route: 'cafe-ops-devices',group: 'SYSTEM' },
@@ -161,6 +158,19 @@ export const NAVIGATION = {
       { id: 'settings',      label: 'Settings',       icon: 'settings',   route: 'staff-settings',   group: 'SYSTEM' },
     ],
     footnote: 'Self-service only. Payslips & Loans are inside Settings.',
+  },
+
+  // ── VENDOR (SUPPLIER PARTNER) ────────────────────────────────────────────────
+  [ROLES.VENDOR]: {
+    scopeLabel: 'Vendor Portal',
+    items: [
+      { id: 'vendor-dashboard',  label: 'Supplier Overview',  icon: 'home',        route: 'vendor-dashboard',  group: 'PORTAL' },
+      { id: 'vendor-orders',     label: 'Issued Orders',      icon: 'procurement', route: 'vendor-orders',     group: 'PURCHASING' },
+      { id: 'vendor-deliveries', label: 'Delivery Receipts',  icon: 'inventory',   route: 'vendor-deliveries', group: 'PURCHASING' },
+      { id: 'vendor-statements', label: 'Account Statements', icon: 'finance',     route: 'vendor-statements', group: 'FINANCE' },
+      { id: 'vendor-profile',    label: 'Business Profile',   icon: 'user',        route: 'vendor-profile',    group: 'PORTAL' },
+    ],
+    footnote: 'Vendor Portal — Strictly read-only enterprise purchasing and delivery records.',
   },
 };
 
@@ -206,7 +216,32 @@ const IMPLICIT_ROUTES_CAFE_ADMIN = new Set([
 export function isRouteAllowed(role, rawRoute, isPrimaryMaster = false) {
   const cleanRoute = (rawRoute || '').replace(/^#/, '');
   const route = cleanRoute.split('?')[0];
-  // Implicit routes allowed for all authenticated roles
+
+  // Vendor Persona Strict Isolation Guard:
+  // Vendor is restricted purely to vendor portal routes and personal profile/settings.
+  if (role === ROLES.VENDOR || role === 'vendor') {
+    const VENDOR_ALLOWED_ROUTES = new Set([
+      'vendor-dashboard',
+      'vendor-orders',
+      'vendor-deliveries',
+      'vendor-statements',
+      'vendor-profile',
+      'vendor-portal',
+    ]);
+    const pathOnly = route ? route.split('?')[0] : '';
+    const baseRoute = pathOnly ? pathOnly.split('/')[0] : '';
+    if (VENDOR_ALLOWED_ROUTES.has(pathOnly) || VENDOR_ALLOWED_ROUTES.has(route) || VENDOR_ALLOWED_ROUTES.has(baseRoute)) {
+      return true;
+    }
+    if (route === 'profile' || route === 'my-profile') return true;
+    if (route.startsWith('settings/')) {
+      const sub = route.slice('settings/'.length).toLowerCase();
+      return ['profile', 'notifications', 'appearance', 'security', 'help', 'accessibility', 'privacy'].includes(sub);
+    }
+    return false;
+  }
+
+  // Implicit routes allowed for all authenticated non-vendor roles
   if (IMPLICIT_ROUTES_ALL.has(route)) return true;
 
   // Primary Master has 100% universal unrestricted access to every route and module
@@ -264,18 +299,16 @@ export function isRouteAllowed(role, rawRoute, isPrimaryMaster = false) {
     if (OWNER_OPERATIONAL_DRILLDOWN_ROUTES.has(route)) return true;
   }
 
+  // Normal Master Decommission Invariant:
+  // If role is MASTER, isPrimaryMaster MUST be true. Non-primary Master is denied all routes.
+  if (role === ROLES.MASTER && !isPrimaryMaster) {
+    return false;
+  }
+
   const navConfig = NAVIGATION[role];
   if (!navConfig) return false;
 
-  // For MASTER: use the appropriate item set
-  let items;
-  if (role === ROLES.MASTER) {
-    items = isPrimaryMaster
-      ? navConfig.primaryItems
-      : navConfig.normalItems;
-  } else {
-    items = navConfig.items;
-  }
+  const items = navConfig.items || navConfig.primaryItems || [];
 
   const pathOnly = route ? route.split("?")[0] : "";
   const baseRoute = pathOnly ? pathOnly.split("/")[0] : "";
@@ -293,15 +326,6 @@ export function isRouteAllowed(role, rawRoute, isPrimaryMaster = false) {
     'staff-settings': 'settings',
   };
 
-  // Block Primary-Master-only routes for Normal Masters
-  if (
-    role === ROLES.MASTER &&
-    !isPrimaryMaster &&
-    (PRIMARY_MASTER_ONLY_ROUTES.has(pathOnly) || PRIMARY_MASTER_ONLY_ROUTES.has(route) || PRIMARY_MASTER_ONLY_ROUTES.has(baseRoute))
-  ) {
-    return false;
-  }
-
   const allowed = items.map((i) => i.route);
 
   // Check direct route match or base module match or alias match
@@ -317,15 +341,15 @@ export function isRouteAllowed(role, rawRoute, isPrimaryMaster = false) {
 
 // ─── Grouped navigation for sidebar rendering ─────────────────────────────────
 export function getGroupedNavItems(role, isPrimaryMaster = false) {
+  // Normal Master Decommission Invariant:
+  if (role === ROLES.MASTER && !isPrimaryMaster) {
+    return {};
+  }
+
   const navConfig = NAVIGATION[role];
   if (!navConfig) return {};
 
-  let items;
-  if (role === ROLES.MASTER) {
-    items = isPrimaryMaster ? navConfig.primaryItems : navConfig.normalItems;
-  } else {
-    items = navConfig.items;
-  }
+  const items = navConfig.items || navConfig.primaryItems || [];
 
   const groups = {};
   for (const item of items) {

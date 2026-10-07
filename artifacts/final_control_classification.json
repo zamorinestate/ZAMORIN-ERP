@@ -1,0 +1,51 @@
+{
+  "metadata": {
+    "generatedAt": "2026-10-05T04:05:36.992Z",
+    "auditVersion": "2.1.0",
+    "totalContracts": 1595,
+    "arithmeticMatch": true
+  },
+  "counts": {
+    "WORKING": 1468,
+    "INTENTIONALLY_DISABLED_VALID": 2,
+    "POLICY_HIDDEN": 106,
+    "BLOCKED_BUSINESS_DECISION": 2,
+    "N/A_BUSINESS_PROCESS": 4,
+    "RETIRED_CONTROL": 13,
+    "FAILED": 0,
+    "UNTESTED": 0,
+    "UNCLASSIFIED": 0
+  },
+  "personaBreakdown": {
+    "PRIMARY_MASTER": {
+      "visibleWorking": 1468,
+      "policyHidden": 0,
+      "blocked": 2,
+      "total": 1470
+    },
+    "NORMAL_MASTER": {
+      "visibleWorking": 1410,
+      "policyHidden": 58,
+      "blocked": 2,
+      "total": 1470
+    },
+    "OWNER": {
+      "visibleWorking": 1430,
+      "policyHidden": 38,
+      "blocked": 2,
+      "total": 1470
+    },
+    "CAFE_ADMIN": {
+      "visibleWorking": 1000,
+      "policyHidden": 468,
+      "blocked": 2,
+      "total": 1470
+    },
+    "STAFF": {
+      "visibleWorking": 240,
+      "policyHidden": 1228,
+      "blocked": 2,
+      "total": 1470
+    }
+  }
+}

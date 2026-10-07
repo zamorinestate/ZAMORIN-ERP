@@ -1,4 +1,4 @@
-﻿{
+{
     "name":  "zamorin-cafe-erp-root",
     "version":  "1.0.0",
     "description":  "Zamorin Cafe ERP â€” Enterprise Management System Root Workspace",
@@ -22,6 +22,8 @@
                     "validate:routes":  "node scripts/validate_routes.mjs",
                     "test:smoke":  "node scripts/smoke_test.mjs",
                     "test:load":  "node scripts/load_test.mjs",
+                    "benchmark:real":  "node scripts/run_real_scalability_benchmark.mjs",
+                    "benchmark:synthetic":  "node scripts/run_scalability_stress.mjs",
                     "verify:backup":  "node scripts/verify_backup_config.mjs",
                     "verify:rollback":  "node scripts/verify_rollback_compatibility.mjs",
                     "rollback:manage":  "node scripts/rollback_manager.mjs",

@@ -18,8 +18,9 @@ const { generateUniversalQr } = require('./universalQrService');
 const { ApiError } = require('../utils/ApiError');
 const auditService = require('./auditService');
 const { numberToIndianRupeeWords } = require('./gstTaxService');
+const { StatutoryRule } = require('../models/StatutoryRule');
 
-// Centrally Configured Authoritative Statutory Rules & Ceilings
+// Centrally Configured Authoritative Statutory Rules & Ceilings (Baseline Defaults)
 const STATUTORY_CONFIG = {
   EPF: {
     WAGE_CEILING_PAISA: 1500000, // ₹15,000.00 / month
@@ -39,6 +40,85 @@ const STATUTORY_CONFIG = {
 
 const EPF_WAGE_CEILING_PAISA = STATUTORY_CONFIG.EPF.WAGE_CEILING_PAISA;
 const ESI_WAGE_CEILING_PAISA = STATUTORY_CONFIG.ESI.STANDARD_WAGE_CEILING_PAISA;
+
+/**
+ * Resolves an effective-dated statutory rule (P1-B).
+ * Resolves from MongoDB StatutoryRule collection if available; falls back to baseline defaults.
+ */
+async function resolveStatutoryRule(ruleType, { jurisdiction = 'ALL_INDIA', effectiveDate = new Date(), organisationId = 'GLOBAL' } = {}) {
+  try {
+    if (StatutoryRule && typeof StatutoryRule.findEffectiveRule === 'function') {
+      const dbRule = await StatutoryRule.findEffectiveRule({
+        ruleType,
+        jurisdiction,
+        effectiveDate,
+        organisationId,
+      });
+      if (dbRule) return dbRule;
+    }
+  } catch (_) {}
+
+  // Fallback to baseline frozen statutory configurations (100% backward compatible)
+  if (ruleType === 'EPF') {
+    return {
+      ruleType: 'EPF',
+      jurisdiction: 'ALL_INDIA',
+      employeeRate: STATUTORY_CONFIG.EPF.EMPLOYEE_RATE,
+      employerRate: STATUTORY_CONFIG.EPF.EMPLOYER_PF_RATE + STATUTORY_CONFIG.EPF.EMPLOYER_EPS_RATE,
+      wageCeilingPaise: STATUTORY_CONFIG.EPF.WAGE_CEILING_PAISA,
+      configuration: {
+        employerPfRate: STATUTORY_CONFIG.EPF.EMPLOYER_PF_RATE,
+        employerEpsRate: STATUTORY_CONFIG.EPF.EMPLOYER_EPS_RATE,
+        epsMaxContributionPaise: STATUTORY_CONFIG.EPF.EPS_MAX_CONTRIBUTION_PAISA,
+        epsMaxAge: STATUTORY_CONFIG.EPF.EPS_MAX_AGE,
+      },
+    };
+  }
+
+  if (ruleType === 'ESI') {
+    return {
+      ruleType: 'ESI',
+      jurisdiction: 'ALL_INDIA',
+      employeeRate: STATUTORY_CONFIG.ESI.EMPLOYEE_RATE,
+      employerRate: STATUTORY_CONFIG.ESI.EMPLOYER_RATE,
+      wageCeilingPaise: STATUTORY_CONFIG.ESI.STANDARD_WAGE_CEILING_PAISA,
+      configuration: {
+        standardWageCeilingPaise: STATUTORY_CONFIG.ESI.STANDARD_WAGE_CEILING_PAISA,
+        disabledWageCeilingPaise: STATUTORY_CONFIG.ESI.DISABLED_WAGE_CEILING_PAISA,
+      },
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Resolves full effective statutory profile for a payroll period and jurisdiction.
+ */
+async function resolveEffectiveStatutoryProfile({
+  effectiveDate = new Date(),
+  periodKey,
+  state = 'Kerala',
+  organisationId = 'GLOBAL',
+} = {}) {
+  let targetDate = effectiveDate;
+  if (!targetDate && periodKey && /^\d{4}-\d{2}/.test(periodKey)) {
+    targetDate = new Date(`${periodKey}-01T00:00:00.000Z`);
+  }
+
+  const [epfRule, esiRule, ptRule] = await Promise.all([
+    resolveStatutoryRule('EPF', { jurisdiction: 'ALL_INDIA', effectiveDate: targetDate, organisationId }),
+    resolveStatutoryRule('ESI', { jurisdiction: 'ALL_INDIA', effectiveDate: targetDate, organisationId }),
+    resolveStatutoryRule('PROFESSIONAL_TAX', { jurisdiction: state.toUpperCase(), effectiveDate: targetDate, organisationId }),
+  ]);
+
+  return {
+    effectiveDate: targetDate,
+    epfRule,
+    esiRule,
+    ptRule,
+  };
+}
 
 /**
  * Calculate Attendance-Linked Basic Pay & Overtime
@@ -78,8 +158,25 @@ function calculateAttendancePay({
 /**
  * Calculate Professional Tax (PT) based on Gross Wage & State
  */
-function calculateProfessionalTax(grossMonthlyPaise, state = 'Kerala') {
+/**
+ * Calculate Professional Tax (PT) based on Gross Wage & State
+ * Supports effective-dated StatutoryRule configurations and custom slabs (P1-B)
+ */
+function calculateProfessionalTax(grossMonthlyPaise, state = 'Kerala', options = {}) {
   const gross = Math.max(0, Math.round(Number(grossMonthlyPaise || 0)));
+  const effectiveRule = options?.effectiveRule || (options?.ruleType === 'PROFESSIONAL_TAX' ? options : null);
+  const slabs = options?.slabs || effectiveRule?.configuration?.slabs;
+
+  if (Array.isArray(slabs) && slabs.length > 0) {
+    for (const slab of slabs) {
+      const min = Number(slab.minPaise ?? slab.min ?? 0);
+      const max = slab.maxPaise !== undefined && slab.maxPaise !== null ? Number(slab.maxPaise) : (slab.max !== undefined && slab.max !== null ? Number(slab.max) : Infinity);
+      if (gross >= min && gross <= max) {
+        return Math.max(0, Math.round(Number(slab.taxPaise ?? slab.tax ?? 0)));
+      }
+    }
+  }
+
   const normState = String(state || 'Kerala').trim().toLowerCase();
 
   if (normState === 'karnataka') {
@@ -163,6 +260,7 @@ function evaluateEsiCoverage({
   isEmployeeEnrolled = true,
   hasDisability = false,
   periodKey = '2026-09',
+  effectiveRule = null,
 }) {
   if (!isEsiCoveredEstablishment || !isEmployeeEnrolled) {
     return {
@@ -174,9 +272,12 @@ function evaluateEsiCoverage({
     };
   }
 
-  const ceiling = hasDisability
-    ? STATUTORY_CONFIG.ESI.DISABLED_WAGE_CEILING_PAISA
-    : STATUTORY_CONFIG.ESI.STANDARD_WAGE_CEILING_PAISA;
+  const standardCeiling = effectiveRule?.wageCeilingPaise ?? STATUTORY_CONFIG.ESI.STANDARD_WAGE_CEILING_PAISA;
+  const disabledCeiling = effectiveRule?.configuration?.disabledWageCeilingPaise ?? STATUTORY_CONFIG.ESI.DISABLED_WAGE_CEILING_PAISA;
+  const ceiling = hasDisability ? disabledCeiling : standardCeiling;
+
+  const employeeRate = effectiveRule?.employeeRate ?? STATUTORY_CONFIG.ESI.EMPLOYEE_RATE;
+  const employerRate = effectiveRule?.employerRate ?? STATUTORY_CONFIG.ESI.EMPLOYER_RATE;
 
   const currentWageExcludingOt = Math.max(0, Math.round(Number(wageExcludingOtPaise || 0)));
   const currentTotalGross = Math.max(0, Math.round(Number(totalGrossPaise || currentWageExcludingOt)));
@@ -211,9 +312,9 @@ function evaluateEsiCoverage({
     };
   }
 
-  // Once covered, contributions (0.75% employee + 3.25% employer) are paid on TOTAL GROSS
-  const employeeContributionPaise = Math.round(currentTotalGross * STATUTORY_CONFIG.ESI.EMPLOYEE_RATE);
-  const employerContributionPaise = Math.round(currentTotalGross * STATUTORY_CONFIG.ESI.EMPLOYER_RATE);
+  // Once covered, contributions are paid on TOTAL GROSS
+  const employeeContributionPaise = Math.round(currentTotalGross * employeeRate);
+  const employerContributionPaise = Math.round(currentTotalGross * employerRate);
 
   return {
     isCovered: true,
@@ -232,12 +333,7 @@ function evaluateEsiCoverage({
 
 /**
  * Statutory EPF Membership & Wage Ceiling Engine (EPF Scheme 1952)
- *
- * Implements:
- *  - Wage base: Basic + DA + Retaining Allowance
- *  - Existing members remain covered even if wages exceed ₹15,000 ceiling
- *  - Fresh employees joining with wages > ₹15,000 are excluded unless voluntary higher agreement exists
- *  - EPS cap ₹1,250/month (8.33% of max ₹15k) and age >= 58 EPS-to-EPF divert
+ * Supports effective-dated StatutoryRule configurations (P1-B)
  */
 function evaluateEpfCoverage({
   basicPayPaise,
@@ -249,6 +345,7 @@ function evaluateEpfCoverage({
   voluntaryPfPaise = 0,
   employeeAge = 30,
   isEpfApplicable = true,
+  effectiveRule = null,
 }) {
   if (!isEpfApplicable) {
     return {
@@ -265,7 +362,12 @@ function evaluateEpfCoverage({
   const da = Math.max(0, Math.round(Number(dearnessAllowancePaise || 0)));
   const retaining = Math.max(0, Math.round(Number(retainingAllowancePaise || 0)));
   const epfWages = basic + da + retaining;
-  const ceiling = STATUTORY_CONFIG.EPF.WAGE_CEILING_PAISA;
+
+  const ceiling = effectiveRule?.wageCeilingPaise ?? STATUTORY_CONFIG.EPF.WAGE_CEILING_PAISA;
+  const employeeRate = effectiveRule?.employeeRate ?? STATUTORY_CONFIG.EPF.EMPLOYEE_RATE;
+  const employerEpsRate = effectiveRule?.configuration?.employerEpsRate ?? STATUTORY_CONFIG.EPF.EMPLOYER_EPS_RATE;
+  const epsMaxContribution = effectiveRule?.configuration?.epsMaxContributionPaise ?? STATUTORY_CONFIG.EPF.EPS_MAX_CONTRIBUTION_PAISA;
+  const epsMaxAge = effectiveRule?.configuration?.epsMaxAge ?? STATUTORY_CONFIG.EPF.EPS_MAX_AGE;
 
   const isFresh = !isExistingMember && !hasUan;
   if (isFresh && epfWages > ceiling && !voluntaryHigherPf) {
@@ -283,18 +385,18 @@ function evaluateEpfCoverage({
   }
 
   const epfBase = voluntaryHigherPf ? epfWages : Math.min(epfWages, ceiling);
-  const employeeContributionPaise = Math.round(epfBase * STATUTORY_CONFIG.EPF.EMPLOYEE_RATE) + Math.max(0, Math.round(Number(voluntaryPfPaise || 0)));
+  const employeeContributionPaise = Math.round(epfBase * employeeRate) + Math.max(0, Math.round(Number(voluntaryPfPaise || 0)));
 
   let employerEpsPaise = 0;
   let employerPfPaise = 0;
 
-  if (employeeAge >= STATUTORY_CONFIG.EPF.EPS_MAX_AGE) {
+  if (employeeAge >= epsMaxAge) {
     employerEpsPaise = 0;
-    employerPfPaise = Math.round(epfBase * STATUTORY_CONFIG.EPF.EMPLOYEE_RATE);
+    employerPfPaise = Math.round(epfBase * employeeRate);
   } else {
     const epsBase = Math.min(epfWages, ceiling);
-    employerEpsPaise = Math.min(STATUTORY_CONFIG.EPF.EPS_MAX_CONTRIBUTION_PAISA, Math.round(epsBase * STATUTORY_CONFIG.EPF.EMPLOYER_EPS_RATE));
-    employerPfPaise = Math.round(epfBase * STATUTORY_CONFIG.EPF.EMPLOYEE_RATE) - employerEpsPaise;
+    employerEpsPaise = Math.min(epsMaxContribution, Math.round(epsBase * employerEpsRate));
+    employerPfPaise = Math.round(epfBase * employeeRate) - employerEpsPaise;
   }
 
   return {
@@ -312,6 +414,7 @@ function evaluateEpfCoverage({
 
 /**
  * Unified Statutory Deductions Computation
+ * Supports effective-dated StatutoryProfile/Rules (P1-B)
  */
 function calculateStatutoryDeductions({
   basicPayPaise,
@@ -334,11 +437,19 @@ function calculateStatutoryDeductions({
   periodKey = '2026-09',
   state = 'Kerala',
   incomeTaxTdsPaise = 0,
+  statutoryProfile = null,
+  epfRule = null,
+  esiRule = null,
+  ptRule = null,
 }) {
   const basic = Math.max(0, Math.round(Number(basicPayPaise || 0)));
   const gross = Math.max(0, Math.round(Number(grossPayPaise || 0)));
   const overtime = Math.max(0, Math.round(Number(overtimePayPaise || 0)));
   const wageExcludingOt = Math.max(0, gross - overtime);
+
+  const resolvedEpfRule = epfRule || statutoryProfile?.epfRule;
+  const resolvedEsiRule = esiRule || statutoryProfile?.esiRule;
+  const resolvedPtRule = ptRule || statutoryProfile?.ptRule;
 
   // 1. EPF Engine
   const epfResult = evaluateEpfCoverage({
@@ -351,6 +462,7 @@ function calculateStatutoryDeductions({
     voluntaryPfPaise,
     employeeAge,
     isEpfApplicable,
+    effectiveRule: resolvedEpfRule,
   });
 
   // 2. ESI Engine (Statutory Rule 50 continuity)
@@ -363,10 +475,11 @@ function calculateStatutoryDeductions({
     isEmployeeEnrolled: isEsiApplicable && isEmployeeEsiEnrolled,
     hasDisability,
     periodKey,
+    effectiveRule: resolvedEsiRule,
   });
 
   // 3. Professional Tax
-  const professionalTaxPaise = calculateProfessionalTax(gross, state);
+  const professionalTaxPaise = calculateProfessionalTax(gross, state, { effectiveRule: resolvedPtRule });
 
   // 4. TDS
   const tdsPaise = Math.max(0, Math.round(Number(incomeTaxTdsPaise || 0)));
@@ -690,6 +803,9 @@ module.exports = {
   STATUTORY_CONFIG,
   EPF_WAGE_CEILING_PAISA,
   ESI_WAGE_CEILING_PAISA,
+  StatutoryRule,
+  resolveStatutoryRule,
+  resolveEffectiveStatutoryProfile,
   getEsiContributionPeriod,
   evaluateEsiCoverage,
   evaluateEpfCoverage,

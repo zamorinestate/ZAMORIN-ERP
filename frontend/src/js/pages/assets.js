@@ -3,7 +3,7 @@
 // Design System v2 (Ledger & Roastery Dark / Porcelain Light Theme)
 //
 // Asset Lifecycle + Maintenance + Work Orders + Inspections + Warranty + Reliability
-// Primary Master / Normal Master Authority Model
+// Primary Master Authority Model
 // =============================================================================
 
 import { apiGet, apiPost, apiPatch } from "../apiClient.js";

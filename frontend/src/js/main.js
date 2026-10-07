@@ -76,18 +76,6 @@ export const DEV_PREVIEW_USERS = Object.freeze({
     isDevPreview: true,
   }),
 
-  master_normal: Object.freeze({
-    _id: "MU-0002",
-    id: "MU-0002",
-    name: "Zamorin Normal Master",
-    email: "normal.master@example.com",
-    role: "MASTER",
-    organisationId: "ZAMORIN",
-    status: "ACTIVE",
-    isPrimaryMaster: false,
-    isDevPreview: true,
-  }),
-
   owner: Object.freeze({
     _id: "OU-0001",
     id: "OU-0001",
@@ -121,6 +109,18 @@ export const DEV_PREVIEW_USERS = Object.freeze({
     role: "STAFF",
     primaryCafeId: "",
     assignedCafeIds: [],
+    organisationId: "ZAMORIN",
+    status: "ACTIVE",
+    isDevPreview: true,
+  }),
+
+  vendor: Object.freeze({
+    _id: "VU-0001",
+    id: "VU-0001",
+    name: "Demo Supplier Co.",
+    email: "vendor@example.com",
+    role: "VENDOR",
+    vendorId: "VENDOR-DEMO-001",
     organisationId: "ZAMORIN",
     status: "ACTIVE",
     isDevPreview: true,
@@ -171,7 +171,12 @@ export function getRequestedDevRole() {
     requested === "master_normal" ||
     (requested === "master" && authority === "normal")
   ) {
-    return "master_normal";
+    // Normal Master is permanently retired
+    return null;
+  }
+
+  if (requested === "vendor" || requested === "supplier") {
+    return "vendor";
   }
 
   return "master";
@@ -378,6 +383,13 @@ function resolveAuthenticatedRole(user) {
   if (rawRole === "STAFF" || rawRole === "EMPLOYEE") {
     return {
       role: "staff",
+      isPrimaryMaster: false,
+    };
+  }
+
+  if (rawRole === "VENDOR") {
+    return {
+      role: "vendor",
       isPrimaryMaster: false,
     };
   }
@@ -801,7 +813,9 @@ function applyAuthenticatedUser(
     (
       role === "staff"
         ? "staff-home"
-        : "dashboard"
+        : role === "vendor"
+          ? "vendor-orders"
+          : "dashboard"
     );
 
   const initialRoute =
@@ -963,8 +977,24 @@ async function boot() {
   // Local development / automated testing persona resolution
   if (isDirectDashboardAllowed() && (params?.get("role") || params?.get("devRole") || localStorage.getItem("zamorin-dev-role"))) {
     const devKey = getRequestedDevRole();
-    const devUser = DEV_PREVIEW_USERS[devKey] || DEV_PREVIEW_USERS.master;
-    const canonicalRole = devKey === "master_normal" ? "master" : devKey;
+    if (!devKey || !DEV_PREVIEW_USERS[devKey]) {
+      clearAllAuthTokens();
+      setState({
+        auth: {
+          authenticated: false,
+          loading: false,
+          user: null,
+          authentication: null,
+          error: "The Normal Master persona has been permanently retired.",
+        },
+        user: null,
+        isPrimaryMaster: false,
+      });
+      mountAuthScreen("login");
+      return;
+    }
+    const devUser = DEV_PREVIEW_USERS[devKey];
+    const canonicalRole = devKey;
     const isPrimary = Boolean(devUser?.isPrimaryMaster);
     const roleNavigation = NAVIGATION[canonicalRole] || NAVIGATION.master;
     const defaultRoute = roleNavigation?.items?.[0]?.route || (canonicalRole === "staff" ? "staff-home" : "dashboard");

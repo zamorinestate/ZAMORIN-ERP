@@ -30,13 +30,13 @@ router.get(
 // Loyalty Ledger Operations (Idempotent)
 router.post(
   '/loyalty/accrue',
-  authorize('ADMIN_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STORE_MANAGER', 'STAFF'] }),
+  authorize('ADMIN_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STORE_MANAGER'] }),
   (req, res) => controller.accrueLoyaltyPoints(req, res)
 );
 
 router.post(
   '/loyalty/redeem',
-  authorize('ADMIN_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STORE_MANAGER', 'STAFF'] }),
+  authorize('ADMIN_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STORE_MANAGER'] }),
   (req, res) => controller.redeemLoyaltyPoints(req, res)
 );
 

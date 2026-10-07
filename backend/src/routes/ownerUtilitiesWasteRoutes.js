@@ -30,21 +30,21 @@ router.post(
 
 router.post(
   '/readings',
-  authorize('ADMIN_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STORE_MANAGER', 'STAFF'] }),
+  authorize('ADMIN_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STORE_MANAGER'] }),
   (req, res) => controller.recordMeterReading(req, res)
 );
 
 // Solid & General Waste Records
 router.post(
   '/waste',
-  authorize('ADMIN_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STORE_MANAGER', 'STAFF'] }),
+  authorize('ADMIN_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STORE_MANAGER'] }),
   (req, res) => controller.recordWaste(req, res)
 );
 
 // Used Cooking Oil (UCO) & 25% TPC Governance
 router.post(
   '/used-cooking-oil',
-  authorize('ADMIN_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STORE_MANAGER', 'STAFF'] }),
+  authorize('ADMIN_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STORE_MANAGER'] }),
   (req, res) => controller.recordUsedCookingOil(req, res)
 );
 

@@ -3,7 +3,7 @@
 // Design System v2 (Ledger & Roastery Dark / Porcelain Light Theme)
 //
 // Multi-Café Graphical ERP Command Centre with:
-//   - Primary Master vs Normal Master vs Owner authority enforcement
+//   - Primary Master vs Owner authority enforcement
 //   - Global Operational Status Strip (Section 28)
 //   - Metric Definitions & KPI Governance (Section 80)
 //   - Portfolio Pulse KPIs (Sales, Orders, AOV, Expenses, Staff, Exceptions, Stock, Actions)
@@ -1168,7 +1168,7 @@ function renderDashboardContent(root, data) {
       trendType: (kpis.aov?.deltaPercent ?? 0) >= 0 ? "up" : "down",
     });
 
-    // Expenses card: show value for Primary Master / Owner; show Restricted for Normal Master
+    // Expenses card: show value for Primary Master / Owner; restricted for scoped roles
     let expenseValueStr = "—";
     let expenseTrendStr = "Operating Outflows";
     if (kpis.expenses?.restricted) {

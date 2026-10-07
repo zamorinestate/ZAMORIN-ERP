@@ -3,7 +3,6 @@
 //
 // Shared canonical POS engine supporting:
 //   - Primary Master (Full org scope, void authority)
-//   - Normal Master (Full org scope, void authority)
 //   - Cafe Operations / CAFE_ADMIN (Strict single-cafe scope, Operator Session attribution,
 //     no void authority, fixed device context)
 // =============================================================================

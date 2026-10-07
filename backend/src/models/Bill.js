@@ -848,6 +848,17 @@ billSchema.index(
 );
 
 billSchema.index(
+  { organisationId: 1, cafeId: 1, correlationId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      correlationId: { $gt: '' },
+    },
+    name: 'org_cafe_correlation_unique',
+  }
+);
+
+billSchema.index(
   { organisationId: 1, 'lineItems.consumedLots.lotId': 1 },
   { name: 'org_lineitem_consumed_lot' }
 );

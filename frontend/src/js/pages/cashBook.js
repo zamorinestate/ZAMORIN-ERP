@@ -210,7 +210,7 @@ export function renderCashBook() {
     .join("");
 
   const roleLabel = isMaster()
-    ? (isPrimary() ? "Primary Master · Enterprise Cash Governance" : "Normal Master · Multi-Café Control")
+    ? "Primary Master · Enterprise Cash Governance"
     : isOwner() ? "Owner View · Executive Cash & Drawer Audit"
     : "Café Operations · Till Drawer & Cash Book Control";
 

@@ -8,7 +8,7 @@ const { ok, fail } = require('../utils/responses');
 const { SECURITY_EVENT_TYPE, SESSION_END_REASON } = require('../utils/constants');
 
 const router = express.Router();
-const GOVERNANCE_ROLES = ['MASTER_PRIMARY', 'MASTER_NORMAL', 'OWNER', 'CAFE_ADMIN'];
+const GOVERNANCE_ROLES = ['MASTER_PRIMARY', 'OWNER', 'CAFE_ADMIN'];
 
 router.get('/', requireGovernanceRole(...GOVERNANCE_ROLES), async (req, res, next) => {
   try {

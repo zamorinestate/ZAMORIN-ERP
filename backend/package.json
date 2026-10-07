@@ -6,6 +6,8 @@
   "scripts": {
     "test": "node --test --test-concurrency=1 test/stage01UniversalExportSuite.test.js test/stage02UniversalQrSuite.test.js test/stage03CafeReadinessSuite.test.js test/stage04EmployeeSuite.test.js test/stage05HardwareSuite.test.js test/stage06PosSuite.test.js test/stage07InventoryProcurementSuite.test.js test/stage08FinanceGstSuite.test.js test/stage09PayrollSuite.test.js test/stage10AnalyticsSuite.test.js test/statutoryEsiEpfSuite.test.js test/crossSystemSpecificationFinal.test.js test/stage10PostReleaseOperations.test.js test/sharedInfrastructureSuite.test.js test/rec17VendorShortSupplyBackorder.test.js test/rec17VendorAccountsPayableLedger.test.js test/rec17aClosure.test.js test/rec17bReconciliation.test.js test/rec17cReconciliation.test.js test/rec18CanonicalLogin2Removal.test.js test/rec19AuthUiPasskeyPerformanceHardening.test.js test/acp05e02BiometricPasskeyPin.test.js",
     "test:all": "node --test",
+    "test:release": "node src/scripts/runTestSuite.js --release",
+    "test:full": "node src/scripts/runTestSuite.js --full",
     "start": "node src/server.js",
     "dev": "node src/scripts/startDev.js",
     "seed": "node src/scripts/seedInitialData.js",
@@ -37,7 +39,8 @@
   },
   "devDependencies": {
     "@types/node": "^26.4.1",
-    "mongodb-memory-server": "^11.2.0"
+    "mongodb-memory-server": "^11.2.0",
+    "supertest": "^7.3.1"
   },
   "overrides": {
     "qs": "6.16.0"

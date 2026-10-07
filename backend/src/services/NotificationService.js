@@ -55,6 +55,9 @@ class NotificationService {
       }).select('userId email name role primaryCafeId assignedCafeIds isPrimaryMaster');
 
       for (const u of users) {
+        // Enforce Four-Persona Topology: Normal Master is retired
+        if (u.role === 'MASTER' && !u.isPrimaryMaster) continue;
+
         // Enforce cafe scope for CAFE_ADMIN
         if (cafeId && u.role === 'CAFE_ADMIN') {
           const isAssigned = u.primaryCafeId === cafeId || (u.assignedCafeIds && u.assignedCafeIds.includes(cafeId));
@@ -77,6 +80,17 @@ class NotificationService {
         role: { $in: recipientRoles },
         accountStatus: 'ACTIVE',
       };
+
+      if (recipientRoles.includes('MASTER')) {
+        // Enforce Four-Persona Topology: only Primary Master receives MASTER notifications
+        query.$and = query.$and || [];
+        query.$and.push({
+          $or: [
+            { role: { $ne: 'MASTER' } },
+            { isPrimaryMaster: true },
+          ],
+        });
+      }
 
       if (cafeId && recipientRoles.includes('CAFE_ADMIN')) {
         // Find admins for this specific cafe

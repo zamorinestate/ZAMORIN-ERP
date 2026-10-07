@@ -29,7 +29,21 @@ async function main() {
   let uri = process.env.MONGODB_URI;
   let mongod = null;
 
-  if (!uri) {
+  // Try primary URI if provided, otherwise detect local or spin up in-memory Mongo
+  let connected = false;
+  if (uri && process.env.USE_IN_MEMORY_DB !== 'true') {
+    try {
+      console.log('[dev] Attempting connection to configured MONGODB_URI...');
+      await connectDatabase({ uri, serverSelectionTimeoutMs: 2500 });
+      connected = true;
+      console.log('[dev] Connected to configured MongoDB cluster.');
+    } catch (err) {
+      console.warn(`[dev] Could not connect to configured MONGODB_URI: ${err.message}`);
+      console.log('[dev] Falling back to local/in-memory MongoDB...');
+    }
+  }
+
+  if (!connected) {
     const net = require('net');
     const isLocalMongo = await new Promise((resolve) => {
       const socket = new net.Socket();
@@ -51,13 +65,11 @@ async function main() {
       uri = mongod.getUri();
       console.log(`[dev] In-memory MongoDB ready at ${uri}`);
     }
+
+    // Override MONGODB_URI so the environment validator and subsequent connections accept it
+    process.env.MONGODB_URI = uri;
+    await connectDatabase({ uri });
   }
-
-  // Override MONGODB_URI so the environment validator accepts it
-  process.env.MONGODB_URI = uri;
-
-  // Connect once for seeding
-  await connectDatabase({ uri });
 
   const organisationId =
     process.env.INITIAL_ORGANISATION_ID || 'ZAMORIN';
@@ -65,9 +77,11 @@ async function main() {
     process.env.INITIAL_MASTER_NAME || 'Zamorin Primary Master';
   const masterEmail =
     process.env.INITIAL_MASTER_EMAIL || 'pradeeshk331@gmail.com';
+  const crypto = require('crypto');
   const masterPassword =
     process.env.INITIAL_MASTER_PASSWORD ||
-    'PRADEESHK@94309';
+    process.env.DEFAULT_ADMIN_PASSWORD ||
+    crypto.randomBytes(24).toString('base64url');
 
   console.log('[dev] Seeding MASTER account and canonical role users...');
 

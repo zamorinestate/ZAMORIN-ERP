@@ -17,6 +17,7 @@ test('STAGE 04 — Employee Registration, Onboarding & Staff Settings Reduction 
   const authMaster = {
     userId: 'MU-0001',
     role: 'MASTER',
+    isPrimaryMaster: true,
     organisationId: 'ORG-ZAMORIN',
   };
 
@@ -44,6 +45,7 @@ test('STAGE 04 — Employee Registration, Onboarding & Staff Settings Reduction 
       name: 'Primary Master Admin',
       email: 'master@zamorin.test',
       role: 'MASTER',
+      isPrimaryMaster: true,
       createdBy: 'SYSTEM',
       accountStatus: 'ACTIVE',
       passwordHash,

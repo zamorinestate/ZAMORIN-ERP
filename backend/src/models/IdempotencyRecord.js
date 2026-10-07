@@ -68,6 +68,20 @@ const idempotencyRecordSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.Mixed,
       default: null,
     },
+    processingStartedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    leaseExpiresAt: {
+      type: Date,
+      default: () => new Date(Date.now() + 300000),
+      index: true,
+    },
+    ownerId: {
+      type: String,
+      default: null,
+      trim: true,
+    },
   },
   {
     timestamps: true,
@@ -78,6 +92,11 @@ const idempotencyRecordSchema = new mongoose.Schema(
 idempotencyRecordSchema.index(
   { organisationId: 1, cafeId: 1, idempotencyKey: 1 },
   { unique: true }
+);
+
+idempotencyRecordSchema.index(
+  { organisationId: 1, cafeId: 1, idempotencyKey: 1, status: 1, leaseExpiresAt: 1 },
+  { name: 'org_cafe_key_status_lease' }
 );
 
 // Automatic 7-day retention TTL index

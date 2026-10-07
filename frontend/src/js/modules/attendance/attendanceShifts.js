@@ -1110,7 +1110,7 @@ function renderExceptionsSubpanel() {
           <div>
             <h3 style="font-size:16px; font-weight:800; margin:0 0 2px; color:var(--ink);">Overtime Governance &amp; Decision Queue</h3>
             <p style="font-size:12px; color:var(--muted); margin:0;">
-              ${isCafeAdmin ? "Review & recommend overtime for Primary Master decision" : "CAFE_ADMIN verify → Normal Master review → Primary Master final decision"}
+              ${isCafeAdmin ? "Review & recommend overtime for Primary Master decision" : "CAFE_ADMIN verify → Primary Master final decision"}
             </p>
           </div>
           <span class="status ${otRecords.length > 0 ? 'warning' : 'success'}" style="font-size:11px; font-weight:700;">

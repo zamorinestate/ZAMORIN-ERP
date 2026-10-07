@@ -3,6 +3,7 @@ import { showToast, skeleton, openModal, closeModal, confirmAction, renderCafeCo
 import { state } from '../state.js';
 import { ROLES } from '../navigation.js';
 import { navigate } from '../router.js';
+import { openInvoiceIntelligenceReviewModal } from './invoiceIntelligenceReview.js';
 
 let activeTab = 'overview';
 let cachedOverview = null;
@@ -2462,6 +2463,9 @@ async function loadPoDocuments(po, countOnly = false) {
                   <div style="display:flex;gap:4px;justify-content:center;">
                     <button class="btn btn-sm btn-ghost" data-preview-doc="${d.documentId}" style="padding:2px 6px;font-size:11px;" ${!isClean ? 'disabled title="Document scan pending or infected"' : 'title="Safe Inline Preview"'}>👁️ Preview</button>
                     <button class="btn btn-sm btn-ghost" data-download-doc="${d.documentId}" style="padding:2px 6px;font-size:11px;" ${!isClean ? 'disabled title="Document scan pending or infected"' : 'title="Download binary"'}>⬇️ Download</button>
+                    ${['SUPPLIER_INVOICE', 'INVOICE'].includes(d.documentType) && isClean ? `
+                      <button class="btn btn-sm btn-ghost" data-ai-review-doc="${d.documentId}" style="padding:2px 6px;font-size:11px;color:var(--accent, #b45309);font-weight:700;" title="Zamorin AI Invoice Intelligence">⚡ AI Review</button>
+                    ` : ''}
                     ${canMutate ? `
                       <button class="btn btn-sm btn-ghost" data-replace-doc="${d.documentId}" style="padding:2px 6px;font-size:11px;" title="Upload revised version">🔄 Replace</button>
                       <button class="btn btn-sm btn-ghost" data-archive-doc="${d.documentId}" style="padding:2px 6px;font-size:11px;color:var(--coral, #ef4444);" title="Archive from active PO">🗑️</button>
@@ -2476,6 +2480,15 @@ async function loadPoDocuments(po, countOnly = false) {
     `;
 
     // Wire actions
+    wrapper.querySelectorAll('[data-ai-review-doc]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        openInvoiceIntelligenceReviewModal(btn.dataset.aiReviewDoc, {
+          previewUrl: `/api/v1/procurement/orders/${po.purchaseOrderId}/documents/${btn.dataset.aiReviewDoc}/preview`,
+          onApproved: () => loadPoDocuments(po),
+        });
+      });
+    });
+
     wrapper.querySelectorAll('[data-preview-doc]').forEach((btn) => {
       btn.addEventListener('click', () => {
         openPoDocumentPreviewModal(po.purchaseOrderId, btn.dataset.previewDoc);

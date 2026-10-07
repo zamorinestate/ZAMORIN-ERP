@@ -85,11 +85,11 @@ function normalizeCafeIds(value) {
 }
 
 function requireMaster(request) {
-  if (request.auth.role !== 'MASTER') {
+  if (request.auth.role !== 'MASTER' || !request.auth.isPrimaryMaster) {
     throw new ApiError(
       403,
-      'MASTER_ACCESS_REQUIRED',
-      'Only the MASTER role may perform this action.'
+      'PRIMARY_MASTER_AUTHORITY_REQUIRED',
+      'Only the Primary Master may perform this action.'
     );
   }
 }
@@ -386,8 +386,8 @@ const createUser = asyncHandler(
     if (normalizedRole === 'MASTER') {
       throw new ApiError(
         403,
-        'MASTER_CREATION_RESTRICTED',
-        'Additional MASTER accounts cannot be created through this endpoint.'
+        'ROLE_RETIRED_NORMAL_MASTER',
+        'The Normal Master role is permanently retired. The MASTER role is exclusively reserved for Primary Master.'
       );
     }
 

@@ -309,7 +309,7 @@ const getLiveAttendance = asyncHandler(async (request, response) => {
   });
 });
 
-// 3. POST /api/v1/attendance/master-manual (Primary AND Normal Master authority)
+// 3. POST /api/v1/attendance/master-manual (Primary Master authority)
 const recordMasterManualAttendance = asyncHandler(async (request, response) => {
   const {
     userId: rawUserId,
@@ -711,7 +711,7 @@ const listShiftsForRoster = asyncHandler(async (request, response) => {
   });
 });
 
-// 6. Overtime Decision (CAFE_ADMIN verify -> Normal Master review -> Primary Master final decision)
+// 6. Overtime Decision (CAFE_ADMIN verify -> Primary Master final decision)
 const decideOvertime = asyncHandler(async (request, response) => {
   const { attendanceId: rawAttId, decision, approvedMinutes = 0, reason = '' } = request.body || {};
   const attendanceId = normalizeIdentifier(rawAttId);
@@ -728,7 +728,7 @@ const decideOvertime = asyncHandler(async (request, response) => {
   const isPrimary = request.auth.isPrimaryMaster === true;
 
   if (decision === 'APPROVE') {
-    if (!isPrimary && request.auth.role !== 'MASTER') {
+    if (!isPrimary || request.auth.role !== 'MASTER') {
       throw new ApiError(403, 'PRIMARY_MASTER_AUTHORITY_REQUIRED', 'Primary Master authority is required for final Overtime decision.');
     }
     attendance.overtimeStatus = 'APPROVED_BY_PRIMARY';
@@ -739,7 +739,7 @@ const decideOvertime = asyncHandler(async (request, response) => {
   } else if (decision === 'VERIFY_ADMIN') {
     attendance.overtimeStatus = 'VERIFIED_BY_ADMIN';
   } else {
-    if (!isPrimary && request.auth.role !== 'MASTER') {
+    if (!isPrimary || request.auth.role !== 'MASTER') {
       throw new ApiError(403, 'PRIMARY_MASTER_AUTHORITY_REQUIRED', 'Primary Master authority is required for final Overtime decision.');
     }
     attendance.overtimeStatus = 'REJECTED';

@@ -27,6 +27,10 @@ class RedisClientFactory {
     this.lastError = null;
   }
 
+  isReady() {
+    return this.status === 'READY';
+  }
+
   /**
    * Validates runtime cluster configuration.
    */
@@ -74,7 +78,19 @@ class RedisClientFactory {
     this.status = 'CONNECTING';
 
     try {
-      this.commandClient = redis.createClient({ url: redisUrl });
+      const maxRetries = options.maxRetriesPerRequest !== undefined ? options.maxRetriesPerRequest : 2;
+      this.commandClient = redis.createClient({
+        url: redisUrl,
+        socket: {
+          connectTimeout: options.connectTimeout || 2000,
+          reconnectStrategy: (retries) => {
+            if (retries >= maxRetries) {
+              return new Error('REDIS_CONNECTION_RETRIES_EXHAUSTED');
+            }
+            return 50;
+          },
+        },
+      });
       this.commandClient.on('error', (err) => {
         this.lastError = err.message;
         this.status = 'DEGRADED';

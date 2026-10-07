@@ -89,6 +89,7 @@ class BomDepletionService {
     referenceType = 'POS_SALE',
     userId = 'SYSTEM',
     businessDate = null,
+    session = null,
   } = {}) {
     if (!organisationId || !cafeId) {
       throw new ApiError(400, 'MISSING_ORG_OR_CAFE', 'organisationId and cafeId are required for BOM depletion.');
@@ -99,11 +100,13 @@ class BomDepletionService {
     const normBillId = normalizeId(billId);
     if (normBillId && (mongoose.connection?.readyState === 1 || StockMovement.findOne?.mock)) {
       try {
-        const existing = await StockMovement.findOne({
+        let existingQuery = StockMovement.findOne({
           referenceId: normBillId,
           referenceType: 'POS_SALE',
           movementType: 'CONSUMPTION',
-        }).lean().select('_id movementId').lean();
+        }).select('_id movementId');
+        if (session) existingQuery = existingQuery.session(session);
+        const existing = await existingQuery.lean();
         if (existing) {
           return {
             success: true,
@@ -133,10 +136,12 @@ class BomDepletionService {
       const quantity = Math.max(1, Number(item.quantity) || 1);
 
       // Find menu item to inspect linked recipe
-      const menuItem = await MenuItem.findOne({
+      let itemQuery = MenuItem.findOne({
         menuItemId,
         organisationId: normOrgId,
-      }).lean();
+      });
+      if (session) itemQuery = itemQuery.session(session);
+      const menuItem = await itemQuery.lean();
 
       if (menuItem && menuItem.primaryRecipeId) {
         const ingredients = await this.explodeRecipe(menuItem.primaryRecipeId, normOrgId, quantity);
@@ -180,6 +185,7 @@ class BomDepletionService {
           referenceId: billId,
           referenceType,
           userId,
+          session,
         });
 
         if (Array.isArray(fefoResult.allocatedLots)) {

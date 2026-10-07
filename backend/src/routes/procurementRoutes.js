@@ -262,28 +262,28 @@ router.get(
   getPoDocumentMatchingStatus
 );
 
-// Writes: MASTER, CAFE_ADMIN, STAFF
+// Writes: MASTER, CAFE_ADMIN
 router.post(
   '/orders',
-  authorize('PROCUREMENT_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN', 'STAFF'] }),
+  authorize('PROCUREMENT_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
   createOrder
 );
 
 router.put(
   '/orders/:purchaseOrderId/edit',
-  authorize('PROCUREMENT_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN', 'STAFF'] }),
+  authorize('PROCUREMENT_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
   editOrder
 );
 
 router.post(
   '/orders/:purchaseOrderId/edit',
-  authorize('PROCUREMENT_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN', 'STAFF'] }),
+  authorize('PROCUREMENT_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
   editOrder
 );
 
 router.post(
   '/orders/:purchaseOrderId/submit',
-  authorize('PROCUREMENT_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN', 'STAFF'] }),
+  authorize('PROCUREMENT_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
   submitOrder
 );
 
@@ -301,32 +301,32 @@ router.post(
 
 router.post(
   '/orders/:purchaseOrderId/order',
-  authorize('PROCUREMENT_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN', 'STAFF'] }),
+  authorize('PROCUREMENT_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
   orderSent
 );
 
 router.post(
   '/orders/:purchaseOrderId/receive',
-  authorize('PROCUREMENT_RECEIVE', { allowedRoles: ['MASTER', 'CAFE_ADMIN', 'STAFF'] }),
+  authorize('PROCUREMENT_RECEIVE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
   receiveOrder
 );
 
 router.post(
   '/orders/:purchaseOrderId/verify-delivery',
-  authorize('PROCUREMENT_RECEIVE', { allowedRoles: ['MASTER', 'CAFE_ADMIN', 'STAFF'] }),
+  authorize('PROCUREMENT_RECEIVE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
   upload.single('file'),
   verifyDeliveryAndSubmitBill
 );
 
 router.get(
   '/orders/:purchaseOrderId/receipt-bill',
-  authorize('PROCUREMENT_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STAFF'] }),
+  authorize('PROCUREMENT_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
   downloadOrderReceiptBill
 );
 
 router.get(
   '/orders/:purchaseOrderId/receipt-bill/:attachmentId',
-  authorize('PROCUREMENT_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STAFF'] }),
+  authorize('PROCUREMENT_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
   downloadOrderReceiptBill
 );
 
@@ -397,4 +397,9 @@ router.post(
   sendToAccounts
 );
 
+// ── ZAMORIN AI INVOICE INTELLIGENCE (PHASE 26) ───────────────────────────────
+const invoiceIntelligenceRoutes = require('./invoiceIntelligenceRoutes');
+router.use('/', invoiceIntelligenceRoutes);
+
 module.exports = router;
+

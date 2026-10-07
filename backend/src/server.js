@@ -33,6 +33,10 @@ const {
 const apiRouter = require('./routes');
 const { documentStorageAdapter } = require('./services/documentStorageAdapter');
 const { getTrustedClientIp, getTrustedProxies } = require('./utils/clientIp');
+const { redisClientFactory } = require('./services/redisClientFactory');
+const { defaultLimiter } = require('./services/distributedRateLimiter');
+const { defaultJobCoordinator } = require('./services/jobCoordinationService');
+const { setDistributedLimiter } = require('./cafe-operations/services/rateLimitService');
 
 const SERVICE_NAME =
   'zamorin-cafe-erp-api';
@@ -185,6 +189,60 @@ function createCsrfOriginProtection(environment) {
   };
 }
 
+async function initializeDistributedInfrastructure(environment) {
+  const adapterMode = environment.distributedAdapter || 'memory';
+
+  if (adapterMode === 'redis') {
+    const redisOptions = {
+      url: environment.redisUrl,
+      host: environment.redisHost,
+      port: environment.redisPort,
+      clusterMode: Boolean(environment.production || process.env.CLUSTER_MODE === 'true'),
+    };
+
+    try {
+      console.log(
+        `[DistributedInfra] Initializing Redis adapter (${environment.redisUrl || `${environment.redisHost}:${environment.redisPort}`})...`
+      );
+      const initResult = await redisClientFactory.initializeClients(redisOptions);
+
+      if (initResult.initialized && redisClientFactory.commandClient) {
+        defaultLimiter.setRedisClient(redisClientFactory.commandClient);
+        defaultJobCoordinator.setRedisClient(redisClientFactory.commandClient);
+        setDistributedLimiter(defaultLimiter);
+        console.log(
+          '[DistributedInfra] Successfully registered Redis adapter for distributed rate limiting, locks, and job coordination.'
+        );
+        return { mode: 'redis', ready: true, factory: redisClientFactory };
+      }
+    } catch (err) {
+      console.error(`[DistributedInfra] FATAL: Redis initialization failed: ${err.message}`);
+      if (
+        environment.production ||
+        process.env.CLUSTER_MODE === 'true' ||
+        process.env.FAIL_CLOSED_ON_REDIS_ERROR === 'true'
+      ) {
+        const failClosedError = new Error(
+          `REDIS_CLUSTER_INITIALIZATION_FAILED: Clustered production requires operational Redis. Cannot safely fall back to process-local Maps. Original error: ${err.message}`
+        );
+        failClosedError.code = 'REDIS_CLUSTER_INITIALIZATION_FAILED';
+        throw failClosedError;
+      }
+      throw err;
+    }
+  }
+
+  // Explicit in-memory adapter (development / single-node test only)
+  console.log(
+    '[DistributedInfra] Explicit in-memory adapter active (DISTRIBUTED_ADAPTER=memory). Single-node process-local mode.'
+  );
+  redisClientFactory.status = 'IN_MEMORY';
+  defaultLimiter.isDistributed = false;
+  defaultLimiter.degraded = false;
+  setDistributedLimiter(defaultLimiter);
+  return { mode: 'memory', ready: true, factory: redisClientFactory };
+}
+
 function createApp(environment) {
   const app = express();
 
@@ -288,8 +346,23 @@ function createApp(environment) {
 
     const isStorageReady = storageStatus === 'OK' || storageStatus === 'HEALTHY';
     const isDbReady = database.readyState === 1;
+
+    // Check distributed Redis adapter health
+    let redisHealth = {
+      status: environment.distributedAdapter === 'redis' ? 'DISCONNECTED' : 'IN_MEMORY',
+      isConnected: environment.distributedAdapter !== 'redis',
+    };
+    if (environment.distributedAdapter === 'redis') {
+      try {
+        redisHealth = await redisClientFactory.getHealthStatus();
+      } catch (err) {
+        redisHealth = { status: 'ERROR', isConnected: false, error: err.message };
+      }
+    }
+
+    const isRedisReady = environment.distributedAdapter !== 'redis' || Boolean(redisHealth.isConnected);
     const isProd = process.env.NODE_ENV === 'production';
-    const ready = isProd ? (isDbReady && isStorageReady) : isDbReady;
+    const ready = isProd ? (isDbReady && isStorageReady && isRedisReady) : isDbReady;
 
     const { malwareScannerService } = require('./services/malwareScannerService');
     let scannerReport = { CORE_APP_READY: true, DOCUMENT_SCANNER_READY: false };
@@ -307,6 +380,10 @@ function createApp(environment) {
         service: SERVICE_NAME,
         database: database.status,
         storage: storageStatus,
+        distributed: {
+          adapter: environment.distributedAdapter,
+          redis: redisHealth,
+        },
         scanner: {
           coreAppReady: scannerReport.CORE_APP_READY,
           documentScannerReady: scannerReport.DOCUMENT_SCANNER_READY,
@@ -437,6 +514,9 @@ async function startServer() {
       environment.mongodbMinPoolSize,
   });
 
+  // Explicit infrastructure initialization: Redis & distributed services
+  await initializeDistributedInfrastructure(environment);
+
   try {
     const { initRepositories } = require('./cafe-operations/repositories');
     initRepositories('mongo');
@@ -530,6 +610,7 @@ function registerShutdownHandlers(
       );
 
       await closeHttpServer(server);
+      await redisClientFactory.close().catch(() => {});
       await disconnectDatabase();
 
       console.log(
@@ -628,4 +709,5 @@ module.exports = {
   closeHttpServer,
   registerShutdownHandlers,
   startServer,
+  initializeDistributedInfrastructure,
 };

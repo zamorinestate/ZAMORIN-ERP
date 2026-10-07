@@ -45,8 +45,8 @@ const productionAdapter = {
       const authResult = await authService.authenticatePassword({ email: identifier, password });
       if (!authResult || !authResult.user) return { ok: false };
       const user = authResult.user;
-      if (user.role !== 'MASTER') return { ok: false };
-      const role = user.isPrimaryMaster ? 'MASTER_PRIMARY' : 'MASTER_NORMAL';
+      if (user.role !== 'MASTER' || !user.isPrimaryMaster) return { ok: false };
+      const role = 'MASTER_PRIMARY';
       const employeeId = String(user.userId || user._id);
       const organisationId = String(user.organisationId || '');
 
@@ -80,14 +80,14 @@ const productionAdapter = {
       if (!decoded || !decoded.userId) return { ok: false };
       const User = require('mongoose').model('User');
       const user = await User.findOne({ userId: decoded.userId });
-      if (!user || user.role !== 'MASTER') return { ok: false };
+      if (!user || user.role !== 'MASTER' || !user.isPrimaryMaster) return { ok: false };
       const isValid = await mfaService.verifyTotpCode(user, code);
       if (!isValid) return { ok: false };
       return {
         ok: true,
         employeeId: String(user.userId || user._id),
         organisationId: String(user.organisationId || ''),
-        role: user.isPrimaryMaster ? 'MASTER_PRIMARY' : 'MASTER_NORMAL',
+        role: 'MASTER_PRIMARY',
       };
     } catch (_) {
       return { ok: false };
@@ -99,7 +99,7 @@ const productionAdapter = {
     try {
       const User = require('mongoose').model('User');
       const user = await User.findOne({ $or: [{ userId: employeeId }, { _id: employeeId }] });
-      if (!user || user.role !== 'MASTER') return { ok: false };
+      if (!user || user.role !== 'MASTER' || !user.isPrimaryMaster) return { ok: false };
       const authResult = await authService.authenticatePassword({ email: user.email, password });
       if (!authResult || !authResult.user) return { ok: false };
       if (authResult.requiresMfa && mfaCode) {
@@ -109,7 +109,7 @@ const productionAdapter = {
       return {
         ok: true,
         organisationId: String(user.organisationId || ''),
-        role: user.isPrimaryMaster ? 'MASTER_PRIMARY' : 'MASTER_NORMAL',
+        role: 'MASTER_PRIMARY',
       };
     } catch (_) {
       return { ok: false };

@@ -21,6 +21,8 @@ class JobCoordinationService {
     this.localLocks = new Map(); // key -> { owner, expiresAt, fencingToken }
     this.idempotencyLedger = new Map(); // key -> { result, timestamp, fencingToken }
     this.fencingCounter = 0;
+    this.distributedAdapter = options.distributedAdapter || process.env.DISTRIBUTED_ADAPTER || (process.env.NODE_ENV === 'production' ? 'redis' : 'memory');
+    this.isDistributed = options.isDistributed !== undefined ? options.isDistributed : (this.distributedAdapter === 'redis' || Boolean(this.redisClient));
     this.metrics = {
       locksAcquired: 0,
       locksDenied: 0,
@@ -31,8 +33,19 @@ class JobCoordinationService {
     };
   }
 
+  isClusteredOrDistributed() {
+    return (
+      this.isDistributed ||
+      this.distributedAdapter === 'redis' ||
+      Boolean(this.redisClient) ||
+      process.env.NODE_ENV === 'production' ||
+      process.env.CLUSTER_MODE === 'true'
+    );
+  }
+
   setRedisClient(client) {
     this.redisClient = client;
+    this.isDistributed = Boolean(client);
   }
 
   _generateFencingToken() {
@@ -42,6 +55,7 @@ class JobCoordinationService {
 
   /**
    * Attempts to acquire an exclusive lock for a job name.
+   * In clustered or production mode, fails closed if Redis is unavailable.
    * @param {string} jobName - Unique job identifier.
    * @param {string} ownerId - Unique identifier of the requesting instance/worker.
    * @param {number} ttlMs - Lock lease duration in milliseconds (default: 60s).
@@ -65,10 +79,22 @@ class JobCoordinationService {
         this.metrics.locksDenied++;
         return { acquired: false, fencingToken: null };
       } catch (err) {
-        console.warn(`[JobCoordination] Redis lock failed, falling back to local: ${err.message}`);
+        console.warn(`[JobCoordination] Redis lock failed: ${err.message}`);
+        if (this.isClusteredOrDistributed()) {
+          this.metrics.locksDenied++;
+          const lockErr = new Error(`DISTRIBUTED_LOCK_BACKEND_UNAVAILABLE: Redis lock backend failed (${err.message}). Fail-closed in clustered mode.`);
+          lockErr.code = 'DISTRIBUTED_LOCK_BACKEND_UNAVAILABLE';
+          throw lockErr;
+        }
       }
+    } else if (this.isClusteredOrDistributed()) {
+      this.metrics.locksDenied++;
+      const lockErr = new Error('DISTRIBUTED_LOCK_BACKEND_UNAVAILABLE: Redis client is not initialized in clustered mode. Fail-closed.');
+      lockErr.code = 'DISTRIBUTED_LOCK_BACKEND_UNAVAILABLE';
+      throw lockErr;
     }
 
+    // Explicit single-node in-memory mode ONLY (e.g. DISTRIBUTED_ADAPTER=memory in non-production)
     const existing = this.localLocks.get(lockKey);
     if (existing && existing.expiresAt > now && existing.owner !== ownerId) {
       this.metrics.locksDenied++;
@@ -105,7 +131,17 @@ class JobCoordinationService {
           return true;
         }
         return false;
-      } catch (_) {}
+      } catch (err) {
+        if (this.isClusteredOrDistributed()) {
+          const lockErr = new Error(`DISTRIBUTED_LOCK_BACKEND_UNAVAILABLE: Redis lock extend failed (${err.message}). Fail-closed in clustered mode.`);
+          lockErr.code = 'DISTRIBUTED_LOCK_BACKEND_UNAVAILABLE';
+          throw lockErr;
+        }
+      }
+    } else if (this.isClusteredOrDistributed()) {
+      const lockErr = new Error('DISTRIBUTED_LOCK_BACKEND_UNAVAILABLE: Redis client is not initialized in clustered mode. Fail-closed.');
+      lockErr.code = 'DISTRIBUTED_LOCK_BACKEND_UNAVAILABLE';
+      throw lockErr;
     }
 
     const existing = this.localLocks.get(lockKey);
@@ -137,7 +173,15 @@ class JobCoordinationService {
         }
         this.metrics.staleCommitsBlocked++;
         return false;
-      } catch (_) {}
+      } catch (_) {
+        if (this.isClusteredOrDistributed()) {
+          this.metrics.staleCommitsBlocked++;
+          return false;
+        }
+      }
+    } else if (this.isClusteredOrDistributed()) {
+      this.metrics.staleCommitsBlocked++;
+      return false;
     }
 
     const existing = this.localLocks.get(lockKey);
@@ -169,7 +213,17 @@ class JobCoordinationService {
         await this.redisClient.eval(lua, 1, lockKey, ownerId);
         this.metrics.locksReleased++;
         return true;
-      } catch (_) {}
+      } catch (err) {
+        if (this.isClusteredOrDistributed()) {
+          const lockErr = new Error(`DISTRIBUTED_LOCK_BACKEND_UNAVAILABLE: Redis lock release failed (${err.message}). Fail-closed in clustered mode.`);
+          lockErr.code = 'DISTRIBUTED_LOCK_BACKEND_UNAVAILABLE';
+          throw lockErr;
+        }
+      }
+    } else if (this.isClusteredOrDistributed()) {
+      const lockErr = new Error('DISTRIBUTED_LOCK_BACKEND_UNAVAILABLE: Redis client is not initialized in clustered mode. Fail-closed.');
+      lockErr.code = 'DISTRIBUTED_LOCK_BACKEND_UNAVAILABLE';
+      throw lockErr;
     }
 
     const existing = this.localLocks.get(lockKey);
@@ -185,11 +239,13 @@ class JobCoordinationService {
    * Wraps a background job with distributed lock acquisition, fencing protection, and release.
    */
   async runExclusive(jobName, taskFn, { ttlMs = 60000, ownerId = `inst-${process.pid}` } = {}) {
-    const { acquired, fencingToken } = await this.acquireLock(jobName, ownerId, ttlMs);
-    if (!acquired) {
+    const lockRes = await this.acquireLock(jobName, ownerId, ttlMs);
+
+    if (!lockRes || !lockRes.acquired) {
       return { executed: false, reason: 'LOCKED_BY_ANOTHER_INSTANCE', fencingToken: null };
     }
 
+    const { fencingToken } = lockRes;
     try {
       // Pass fencing token and lease verification hook to taskFn
       const context = {
@@ -199,7 +255,7 @@ class JobCoordinationService {
       const result = await taskFn(context);
       return { executed: true, result, fencingToken };
     } finally {
-      await this.releaseLock(jobName, ownerId);
+      await this.releaseLock(jobName, ownerId).catch(() => {});
     }
   }
 
