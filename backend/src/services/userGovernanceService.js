@@ -318,6 +318,7 @@ const PROTECTED_USER_FIELDS = new Set([
   'archivedBy',
   'status',
   'accountStatus',
+  'vendorId',
 ]);
 
 /**

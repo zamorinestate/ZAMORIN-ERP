@@ -459,19 +459,20 @@ async function getVendorStatements(req, res, next) {
       vendorId,
       organisationId: orgId,
     })
-      .sort({ postingDate: -1 })
+      .sort({ entryTimestamp: -1, createdAt: -1 })
       .limit(100)
       .lean();
 
     return res.status(200).json({
       data: entries.map((e) => ({
-        entryId: e.entryId,
-        postingDate: e.postingDate,
-        transactionType: e.transactionType,
-        documentReference: e.documentReference,
-        amountPaisa: e.amountPaisa,
+        entryId: e.ledgerEntryId || e.entryId,
+        entryDate: e.entryDate || (e.entryTimestamp ? new Date(e.entryTimestamp).toISOString().slice(0, 10) : null),
+        entryType: e.entryType || e.transactionType,
+        documentReference: e.referenceId || e.purchaseOrderId || e.documentReference,
+        creditPaisa: e.creditPaisa || 0,
+        debitPaisa: e.debitPaisa || 0,
         runningBalancePaisa: e.runningBalancePaisa,
-        status: e.status || 'SETTLED',
+        status: e.status || (e.isReversed ? 'REVERSED' : 'SETTLED'),
       })),
       readOnlyNotice: 'Financial ledger records are maintained by Enterprise Accounts Payable.',
     });

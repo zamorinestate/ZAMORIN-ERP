@@ -66,10 +66,10 @@ jobs:
           fi
           echo "Commit $CURRENT_SHA is verified reachable from origin/main."
 
-      - name: Setup Node.js v20
+      - name: Setup Node.js v24 LTS
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: 'npm'
           cache-dependency-path: package-lock.json
 

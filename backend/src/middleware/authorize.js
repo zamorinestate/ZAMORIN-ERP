@@ -398,6 +398,15 @@ function authorize(
           request
         );
       }
+      if (authRole === 'VENDOR' && !['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
+        return sendAuthorizationError(
+          response,
+          'VENDOR_READ_ONLY',
+          'Vendor accounts have strictly read-only access to business records.',
+          403,
+          request
+        );
+      }
       const isMasterRole = (authRole === 'MASTER' || authRole === 'PRIMARY_MASTER') && Boolean(request.auth.isPrimaryMaster);
       const isRoleAllowed = roles.includes(authRole) || (roles.includes('MASTER') && isMasterRole);
       if (!isRoleAllowed) {
@@ -683,7 +692,7 @@ function requireReason(
  * Rejects non-vendor users with 403 VENDOR_ACCESS_REQUIRED.
  * Enforces strict read-only boundary: rejects any mutation with 403 VENDOR_READ_ONLY.
  */
-function requireVendor(request, response, next) {
+async function requireVendor(request, response, next) {
   if (!request.auth) {
     return sendAuthorizationError(
       response,
@@ -714,7 +723,57 @@ function requireVendor(request, response, next) {
     );
   }
 
+  // Active organization and vendor existence check
+  try {
+    const { Vendor } = require('../models/Vendor');
+    const vendorRecord = await Vendor.findOne({
+      vendorId: request.auth.vendorId,
+      organisationId: request.auth.organisationId,
+    }).lean();
+
+    if (!vendorRecord) {
+      return sendAuthorizationError(
+        response,
+        'VENDOR_NOT_FOUND',
+        'The authenticated vendor account is not linked to an existing vendor record in this organisation.',
+        403,
+        request
+      );
+    }
+
+    if (['SUSPENDED', 'BLACKLISTED', 'ARCHIVED', 'INACTIVE'].includes(vendorRecord.status)) {
+      return sendAuthorizationError(
+        response,
+        'VENDOR_INACTIVE',
+        'The vendor organisation is currently inactive, suspended, or archived.',
+        403,
+        request
+      );
+    }
+  } catch (err) {
+    return sendAuthorizationError(
+      response,
+      'VENDOR_VALIDATION_ERROR',
+      'Unable to verify vendor organisation status.',
+      500,
+      request
+    );
+  }
+
   return next();
+}
+
+/**
+ * blockVendorMutation — Explicit standalone mutation rejection middleware
+ */
+function blockVendorMutation(request, response) {
+  return sendAuthorizationError(
+    response,
+    'VENDOR_READ_ONLY',
+    'The Vendor portal is strictly read-only for business records. All mutation actions are disabled.',
+    403,
+    request
+  );
 }
 
 module.exports = {
@@ -724,5 +783,6 @@ module.exports = {
   requirePrimaryMaster,
   requirePrimaryMasterOrOwner,
   requireVendor,
+  blockVendorMutation,
   canAccessCafe,
 };

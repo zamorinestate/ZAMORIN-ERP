@@ -41,7 +41,11 @@
                  ],
     "author":  "Zamorin Cafe Operations Engineering",
     "license":  "UNLICENSED",
-    "devDependencies":  {
-                            "puppeteer-core":  "^25.9.0"
-                        }
+    "devDependencies": {
+        "puppeteer-core": "^25.9.0"
+    },
+    "engines": {
+        "node": ">=22.12.0 <25.0.0",
+        "npm": ">=10.0.0"
+    }
 }

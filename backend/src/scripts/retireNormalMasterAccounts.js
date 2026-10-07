@@ -11,14 +11,18 @@ const mongoose = require('mongoose');
  * Normal Masters (role === 'MASTER' && isPrimaryMaster !== true) are permanently
  * disabled with reason 'ROLE_RETIRED_NORMAL_MASTER', versions bumped, and sessions revoked.
  */
-async function retireNormalMasterAccounts(providedMongoose = mongoose) {
+async function retireNormalMasterAccounts(providedMongoose = mongoose, options = {}) {
   const db = providedMongoose.connection.db;
   if (!db) {
     throw new Error('Database connection must be open before running migration.');
   }
 
+  const dryRun = Boolean(options.dryRun);
+  const migrationRunId = options.migrationRunId || `MIG-NM-RET-${Date.now()}`;
+
   const usersCollection = db.collection('users');
   const sessionsCollection = db.collection('sessions');
+  const auditCollection = db.collection('audit_events');
 
   const legacyNormalMasters = await usersCollection.find({
     role: 'MASTER',
@@ -26,6 +30,8 @@ async function retireNormalMasterAccounts(providedMongoose = mongoose) {
   }).toArray();
 
   const report = {
+    migrationRunId,
+    dryRun,
     totalFound: legacyNormalMasters.length,
     accountsDisabled: 0,
     alreadyDisabled: 0,
@@ -44,38 +50,81 @@ async function retireNormalMasterAccounts(providedMongoose = mongoose) {
     const nextSessionVersion = (user.sessionVersion || 1) + 1;
     const nextPermissionsVersion = (user.permissionsVersion || 1) + 1;
 
-    // Update user record to DISABLED with reason ROLE_RETIRED_NORMAL_MASTER
-    await usersCollection.updateOne(
-      { _id: user._id },
-      {
-        $set: {
-          accountStatus: 'DISABLED',
-          statusReason: 'ROLE_RETIRED_NORMAL_MASTER',
-          sessionVersion: nextSessionVersion,
-          permissionsVersion: nextPermissionsVersion,
-          updatedAt: new Date(),
-        },
-      }
-    );
+    const preChangeSnapshot = {
+      accountStatus: user.accountStatus,
+      statusReason: user.statusReason || null,
+      sessionVersion: user.sessionVersion || 1,
+      permissionsVersion: user.permissionsVersion || 1,
+      role: user.role,
+      isPrimaryMaster: Boolean(user.isPrimaryMaster),
+    };
 
-    // Invalidate / revoke all active sessions for this retired account
-    const sessionRevokeResult = await sessionsCollection.updateMany(
-      {
+    let revokedCount = 0;
+
+    if (!dryRun) {
+      const updateFields = {
+        accountStatus: 'DISABLED',
+        statusReason: 'ROLE_RETIRED_NORMAL_MASTER',
+        sessionVersion: nextSessionVersion,
+        permissionsVersion: nextPermissionsVersion,
+        updatedAt: new Date(),
+      };
+
+      if (!user.migrationMetadata?.retireNormalMaster) {
+        updateFields['migrationMetadata.retireNormalMaster'] = {
+          migrationRunId,
+          preChangeSnapshot,
+          migratedAt: new Date(),
+        };
+      }
+
+      await usersCollection.updateOne(
+        { _id: user._id, role: 'MASTER', isPrimaryMaster: { $ne: true } },
+        { $set: updateFields }
+      );
+
+      // Invalidate / revoke all active sessions for this retired account
+      const sessionRevokeResult = await sessionsCollection.updateMany(
+        {
+          organisationId: user.organisationId,
+          userId: user.userId,
+          status: 'ACTIVE',
+        },
+        {
+          $set: {
+            status: 'REVOKED',
+            revokedAt: new Date(),
+            revokedBy: `SYSTEM_MIGRATION:${migrationRunId}`,
+            revocationReason: 'ROLE_RETIRED_NORMAL_MASTER',
+          },
+        }
+      );
+
+      revokedCount = sessionRevokeResult.modifiedCount || 0;
+
+      // Log traceable audit event
+      try {
+        await auditCollection.insertOne({
+          eventType: 'SECURITY_MIGRATION_NORMAL_MASTER_RETIRED',
+          migrationRunId,
+          userId: user.userId,
+          organisationId: user.organisationId,
+          preChangeSnapshot,
+          postChangeStatus: 'DISABLED',
+          statusReason: 'ROLE_RETIRED_NORMAL_MASTER',
+          sessionsRevoked: revokedCount,
+          timestamp: new Date(),
+        });
+      } catch (_) {}
+    } else {
+      // In dryRun, estimate active sessions that would be revoked
+      revokedCount = await sessionsCollection.countDocuments({
         organisationId: user.organisationId,
         userId: user.userId,
         status: 'ACTIVE',
-      },
-      {
-        $set: {
-          status: 'REVOKED',
-          revokedAt: new Date(),
-          revokedBy: 'SYSTEM_MIGRATION_ROLE_TOPOLOGY',
-          revocationReason: 'ROLE_RETIRED_NORMAL_MASTER',
-        },
-      }
-    );
+      });
+    }
 
-    const revokedCount = sessionRevokeResult.modifiedCount || 0;
     report.sessionsRevoked += revokedCount;
 
     report.accounts.push({
@@ -87,6 +136,7 @@ async function retireNormalMasterAccounts(providedMongoose = mongoose) {
       newStatus: 'DISABLED',
       statusReason: 'ROLE_RETIRED_NORMAL_MASTER',
       activeSessionsRevoked: revokedCount,
+      dryRun,
     });
   }
 

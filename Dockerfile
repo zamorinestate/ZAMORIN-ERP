@@ -1,5 +1,5 @@
 # Production Dockerfile — Zamorin Cafe ERP (v1.1.0)
-FROM node:20-alpine AS base
+FROM node:24-alpine AS base
 
 WORKDIR /app
 
