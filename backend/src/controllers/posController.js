@@ -31,6 +31,13 @@ function assertCafeAccess(request, cafeId) {
       'Staff role is restricted to self-service only and does not have POS & Billing operational authority.'
     );
   }
+  if (request.auth?.role === 'OWNER') {
+    throw new ApiError(
+      403,
+      'PERMISSION_DENIED',
+      'Owner persona is restricted to executive oversight and governance and does not have direct POS terminal operational authority.'
+    );
+  }
   const normCafeId = normalizeId(cafeId);
   const effectiveCafe = resolveEffectiveCafeScope(request);
   if (effectiveCafe && normCafeId && normCafeId !== effectiveCafe) {
@@ -40,7 +47,7 @@ function assertCafeAccess(request, cafeId) {
       'Cross-café access is denied. You are not authorized for the requested café.'
     );
   }
-  if (request.auth.role === 'MASTER' || request.auth.role === 'OWNER') return;
+  if (request.auth.role === 'MASTER') return;
   if (!request.auth.assignedCafeIds || !request.auth.assignedCafeIds.map(normalizeId).includes(normCafeId)) {
     throw new ApiError(
       403,

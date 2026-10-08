@@ -104,7 +104,10 @@ async function retireNormalMasterAccounts(providedMongoose = mongoose, options =
 
       // Log traceable audit event
       try {
+        const dayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        const randSeq = Math.floor(1000 + Math.random() * 9000);
         await auditCollection.insertOne({
+          auditEventId: `AE-${dayStr}-${randSeq}`,
           eventType: 'SECURITY_MIGRATION_NORMAL_MASTER_RETIRED',
           migrationRunId,
           userId: user.userId,

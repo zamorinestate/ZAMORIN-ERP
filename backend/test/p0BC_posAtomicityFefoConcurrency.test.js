@@ -14,6 +14,10 @@ const { CashTransaction } = require('../src/models/CashTransaction');
 const { RegisterSession } = require('../src/models/RegisterSession');
 const { Cafe } = require('../src/models/Cafe');
 const { SequenceCounter } = require('../src/models/SequenceCounter');
+const { MenuItem } = require('../src/models/MenuItem');
+const { Recipe } = require('../src/models/Recipe');
+const { IdempotencyRecord } = require('../src/models/IdempotencyRecord');
+const { PrintJob } = require('../src/models/PrintJob');
 
 let replSet;
 const ORG_ID = 'ORG-P0BC';
@@ -23,12 +27,18 @@ test.before(async () => {
   replSet = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   await mongoose.connect(replSet.getUri());
 
-  await Bill.createCollection();
-  await CashTransaction.createCollection();
-  await SequenceCounter.createCollection();
-  await RegisterSession.createCollection();
-  await InventoryLot.createCollection();
-  await StockMovement.createCollection();
+  await Promise.all([
+    Bill.init(),
+    CashTransaction.init(),
+    SequenceCounter.init(),
+    RegisterSession.init(),
+    InventoryLot.init(),
+    StockMovement.init(),
+    MenuItem.init(),
+    Recipe.init(),
+    IdempotencyRecord.init(),
+    PrintJob.init(),
+  ]);
 
   await Cafe.create({
     organisationId: ORG_ID,

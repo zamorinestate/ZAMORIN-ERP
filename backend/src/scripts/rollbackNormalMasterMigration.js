@@ -69,7 +69,10 @@ async function rollbackNormalMasterMigration(providedMongoose = mongoose, option
 
       if (!dryRun) {
         try {
+          const dayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+          const randSeq = Math.floor(1000 + Math.random() * 9000);
           await auditCollection.insertOne({
+            auditEventId: `AE-${dayStr}-${randSeq}`,
             eventType: 'SECURITY_MIGRATION_ROLLBACK_BLOCKED',
             migrationRunId,
             userId: user.userId,
@@ -77,7 +80,9 @@ async function rollbackNormalMasterMigration(providedMongoose = mongoose, option
             reason: 'Prevented revival of retired Normal Master to active status.',
             timestamp: new Date(),
           });
-        } catch (_) {}
+        } catch (err) {
+          console.error('Audit insert error:', err);
+        }
       }
       continue;
     }
@@ -104,7 +109,10 @@ async function rollbackNormalMasterMigration(providedMongoose = mongoose, option
       );
 
       try {
+        const dayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        const randSeq = Math.floor(1000 + Math.random() * 9000);
         await auditCollection.insertOne({
+          auditEventId: `AE-${dayStr}-${randSeq}`,
           eventType: 'SECURITY_MIGRATION_ROLLBACK_RESTORED',
           migrationRunId,
           userId: user.userId,

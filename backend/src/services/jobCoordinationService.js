@@ -70,7 +70,12 @@ class JobCoordinationService {
     if (this.redisClient) {
       try {
         const payload = JSON.stringify({ ownerId, fencingToken, acquiredAt: now });
-        const result = await this.redisClient.set(lockKey, payload, 'NX', 'PX', ttlMs);
+        let result;
+        try {
+          result = await this.redisClient.set(lockKey, payload, { NX: true, PX: ttlMs });
+        } catch (_) {
+          result = await this.redisClient.set(lockKey, payload, 'NX', 'PX', ttlMs);
+        }
         if (result === 'OK') {
           await this.redisClient.set(fencingKey, String(fencingToken));
           this.metrics.locksAcquired++;
@@ -125,7 +130,12 @@ class JobCoordinationService {
           end
           return 0
         `;
-        const res = await this.redisClient.eval(lua, 1, lockKey, ownerId, additionalTtlMs);
+        let res;
+        try {
+          res = await this.redisClient.eval(lua, { keys: [lockKey], arguments: [ownerId, String(additionalTtlMs)] });
+        } catch (_) {
+          res = await this.redisClient.eval(lua, 1, lockKey, ownerId, additionalTtlMs);
+        }
         if (res === 1) {
           this.metrics.locksExtended++;
           return true;
@@ -210,7 +220,11 @@ class JobCoordinationService {
           end
           return 0
         `;
-        await this.redisClient.eval(lua, 1, lockKey, ownerId);
+        try {
+          await this.redisClient.eval(lua, { keys: [lockKey], arguments: [ownerId] });
+        } catch (_) {
+          await this.redisClient.eval(lua, 1, lockKey, ownerId);
+        }
         this.metrics.locksReleased++;
         return true;
       } catch (err) {
@@ -293,7 +307,11 @@ class JobCoordinationService {
 
     if (this.redisClient) {
       try {
-        await this.redisClient.set(key, JSON.stringify(result), 'EX', Math.ceil(ttlMs / 1000));
+        try {
+          await this.redisClient.set(key, JSON.stringify(result), { EX: Math.ceil(ttlMs / 1000) });
+        } catch (_) {
+          await this.redisClient.set(key, JSON.stringify(result), 'EX', Math.ceil(ttlMs / 1000));
+        }
       } catch (_) {}
     }
 

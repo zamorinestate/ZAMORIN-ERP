@@ -498,6 +498,13 @@ const createBill = asyncHandler(async (request, response) => {
   } = request.body;
 
   const role = request.auth.role;
+  if (role === 'OWNER') {
+    throw new ApiError(
+      403,
+      'POS_MUTATION_FORBIDDEN',
+      'Owner persona is restricted to read-only audit. Direct POS bill creation is strictly prohibited.'
+    );
+  }
   let cafeId = normalizeId(rawCafeId);
   if (role === 'CAFE_ADMIN') {
     cafeId = request.auth.primaryCafeId || request.auth.assignedCafeIds?.[0] || 'ZC-0001';
@@ -1457,6 +1464,13 @@ const listOpenTickets = asyncHandler(async (request, response) => {
 const openRegisterSession = asyncHandler(async (request, response) => {
   const { cafeId: rawCafeId, registerId = 'REG-01', openingFloatPaisa = 0 } = request.body;
   const role = request.auth.role;
+  if (role === 'OWNER') {
+    throw new ApiError(
+      403,
+      'REGISTER_MUTATION_FORBIDDEN',
+      'Owner persona is restricted to executive oversight. Operational register session opening is strictly prohibited.'
+    );
+  }
   let cafeId = normalizeId(rawCafeId);
   if (role === 'CAFE_ADMIN') {
     cafeId = request.auth.primaryCafeId || request.auth.assignedCafeIds?.[0] || 'ZC-0001';
@@ -1526,6 +1540,13 @@ const openRegisterSession = asyncHandler(async (request, response) => {
  * Records a cash drawer event (Cash In, Cash Out, Safe Drop, No Sale).
  */
 const recordCashEvent = asyncHandler(async (request, response) => {
+  if (request.auth.role === 'OWNER') {
+    throw new ApiError(
+      403,
+      'REGISTER_MUTATION_FORBIDDEN',
+      'Owner persona is restricted to executive oversight. Operational cash drawer mutations are strictly prohibited.'
+    );
+  }
   const { registerSessionId, eventType, amountPaisa = 0, reason = '' } = request.body;
   if (!registerSessionId) {
     throw new ApiError(400, 'SESSION_ID_REQUIRED', 'registerSessionId is required.');
@@ -1586,6 +1607,13 @@ const recordCashEvent = asyncHandler(async (request, response) => {
  * Closes a register session with blind count and variance calculation.
  */
 const closeRegisterSession = asyncHandler(async (request, response) => {
+  if (request.auth.role === 'OWNER') {
+    throw new ApiError(
+      403,
+      'REGISTER_MUTATION_FORBIDDEN',
+      'Owner persona is restricted to executive oversight. Operational register session closing is strictly prohibited.'
+    );
+  }
   const { registerSessionId, countedCashPaisa = 0, closingDeclarationNote = '' } = request.body;
   if (!registerSessionId) {
     throw new ApiError(400, 'SESSION_ID_REQUIRED', 'registerSessionId is required.');
