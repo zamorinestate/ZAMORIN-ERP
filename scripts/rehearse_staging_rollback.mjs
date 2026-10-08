@@ -29,6 +29,7 @@ const { Vendor } = require('./src/models/Vendor');
 const { AuditEvent } = require('./src/models/AuditEvent');
 const { retireNormalMasterAccounts } = require('./src/scripts/retireNormalMasterAccounts');
 const { rollbackNormalMasterMigration } = require('./src/scripts/rollbackNormalMasterMigration');
+const { createBill } = require('./src/controllers/billController');
 const authService = require('./src/services/authService');
 
 console.log('======================================================================');
@@ -47,6 +48,8 @@ const rehearsalMetrics = {
   dryRunPlannedDisables: 0,
   liveMigrationDisables: 0,
   postMigrationWritesSuccess: 0,
+  staffPosAttemptBlocked: false,
+  cafeOperationsSaleSuccess: false,
   rollbackBlockedRevivals: 0,
   unauthorizedOwnerGrants: 0,
   staleSessionLoginBlocked: false,
@@ -97,9 +100,20 @@ try {
       passwordHash: '$2b$10$abcdefghijklmnopqrstuu',
     },
     {
+      userId: 'AD-0001',
+      organisationId: ORG,
+      name: 'Cafe Operations Supervisor',
+      email: 'ops@zamorin.com',
+      role: 'CAFE_ADMIN',
+      primaryCafeId: 'ZC-0001',
+      accountStatus: 'ACTIVE',
+      createdBy: 'BOOTSTRAP',
+      passwordHash: '$2b$10$abcdefghijklmnopqrstuu',
+    },
+    {
       userId: 'ST-0001',
       organisationId: ORG,
-      name: 'Store Staff Barista',
+      name: 'Store Staff Barista (Self-Service Only)',
       email: 'staff@zamorin.com',
       role: 'STAFF',
       accountStatus: 'ACTIVE',
@@ -108,7 +122,7 @@ try {
     },
   ]);
 
-  // Pre-migration historical bill
+  // Pre-migration historical bill (cashiered by authorized Cafe Operations)
   await Bill.create({
     billId: 'BILL-20261001-0001',
     invoiceNumber: 'ZAM-HIST-001',
@@ -116,7 +130,7 @@ try {
     cafeId: 'ZC-0001',
     businessDate: '2026-10-01',
     status: 'COMPLETED',
-    cashierUserId: 'ST-0001',
+    cashierUserId: 'AD-0001',
     paymentMethod: 'CASH',
     subtotalPaisa: 50000,
     totalPaisa: 50000,
@@ -196,7 +210,49 @@ try {
   console.log(`  -> Primary Master wrote vendor: ${vendor.vendorId}`);
   rehearsalMetrics.postMigrationWritesSuccess++;
 
-  // Staff completes a POS counter sale
+  // Demonstrate Staff restriction: Authenticated STAFF attempting POS cashiering receives 403
+  const staffReq = {
+    auth: {
+      userId: 'ST-0001',
+      role: 'STAFF',
+      organisationId: ORG,
+      assignedCafeIds: ['ZC-0001'],
+    },
+    body: {
+      cafeId: 'ZC-0001',
+      serviceMode: 'QUICK_SALE',
+      lineItems: [{ menuItemId: 'MNU-02', quantity: 1, unitPricePaisa: 30000 }],
+      paymentMethod: 'UPI',
+    },
+  };
+
+  let staffAttemptBlocked = false;
+  const staffRes = {
+    statusCode: 200,
+    status(code) { this.statusCode = code; return this; },
+    json(payload) {
+      if (this.statusCode === 403 && payload.error?.code === 'PERMISSION_DENIED') {
+        staffAttemptBlocked = true;
+      }
+      return this;
+    },
+  };
+
+  try {
+    await createBill(staffReq, staffRes);
+  } catch (err) {
+    if (err.statusCode === 403 && (err.code === 'PERMISSION_DENIED' || err.errorCode === 'PERMISSION_DENIED')) {
+      staffAttemptBlocked = true;
+    }
+  }
+
+  assert.equal(staffAttemptBlocked, true, 'Security Invariant: Authenticated STAFF must receive HTTP 403 on billing mutation');
+  const staffBillsCount = await Bill.countDocuments({ cashierUserId: 'ST-0001', businessDate: '2026-10-07' });
+  assert.equal(staffBillsCount, 0, 'Staff attempt must produce 0 bill records');
+  rehearsalMetrics.staffPosAttemptBlocked = true;
+  console.log('  -> Authenticated STAFF POS attempt strictly blocked: HTTP 403 PERMISSION_DENIED (0 bills created)');
+
+  // Authorised Cafe Operations user (AD-0001, CAFE_ADMIN) completes POS counter sale
   const newBill = await Bill.create({
     billId: 'BILL-20261007-0001',
     invoiceNumber: 'ZAM-POST-001',
@@ -204,7 +260,7 @@ try {
     cafeId: 'ZC-0001',
     businessDate: '2026-10-07',
     status: 'COMPLETED',
-    cashierUserId: 'ST-0001',
+    cashierUserId: 'AD-0001',
     paymentMethod: 'UPI',
     subtotalPaisa: 30000,
     totalPaisa: 30000,
@@ -227,7 +283,8 @@ try {
       },
     ],
   });
-  console.log(`  -> Staff wrote POS bill: ${newBill.billId}`);
+  console.log(`  -> Cafe Operations (AD-0001) wrote POS bill: ${newBill.billId} for cafe ZC-0001`);
+  rehearsalMetrics.cafeOperationsSaleSuccess = true;
   rehearsalMetrics.postMigrationWritesSuccess++;
 
   // ─── STEP 5: ROLLBACK SCRIPT EXECUTION & SECURITY INVARIANTS ──────────────
@@ -297,6 +354,8 @@ console.log('===================================================================
 console.log(`BASELINE_NORMAL_MASTERS:         ${rehearsalMetrics.baselineNormalMasters}`);
 console.log(`DRY_RUN_ACCURACY:                PASS (${rehearsalMetrics.dryRunPlannedDisables} detected, 0 mutated)`);
 console.log(`LIVE_MIGRATION_DECOMMISSION:     PASS (${rehearsalMetrics.liveMigrationDisables} disabled)`);
+console.log(`STAFF_SELF_SERVICE_BOUNDARY:     PASS (HTTP 403 PERMISSION_DENIED, 0 side effects)`);
+console.log(`CAFE_OPERATIONS_MUTATION:        PASS (CAFE_ADMIN AD-0001 authorized sale for ZC-0001)`);
 console.log(`POST_MIGRATION_WRITES:           PASS (${rehearsalMetrics.postMigrationWritesSuccess}/2 successful)`);
 console.log(`BLOCKED_NORMAL_MASTER_REVIVAL:   PASS (${rehearsalMetrics.rollbackBlockedRevivals} revival attempts blocked)`);
 console.log(`UNAUTHORIZED_OWNER_ROLE_GRANTS:  0 (Strict invariant enforced)`);

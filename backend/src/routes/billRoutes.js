@@ -38,6 +38,22 @@ const router = express.Router();
 router.use(authenticate);
 router.use(attachDeviceContext);
 
+// Strict Four-Persona Topology Enforcement: Staff denied POS operational mutations
+router.use((request, response, next) => {
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) {
+    if (request.auth?.role === 'STAFF') {
+      return response.status(403).json({
+        success: false,
+        error: {
+          code: 'PERMISSION_DENIED',
+          message: 'Staff role is restricted to self-service only and does not have POS & Billing operational authority.',
+        },
+      });
+    }
+  }
+  return next();
+});
+
 // Overview & Registers
 router.get('/overview', getBillsOverview);
 router.get('/tax/gst-register', getGstRegister);

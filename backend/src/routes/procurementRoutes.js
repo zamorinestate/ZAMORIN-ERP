@@ -204,16 +204,16 @@ router.get(
   getMatchingSummary
 );
 
-// Orders Reads: MASTER, OWNER, CAFE_ADMIN, STAFF
+// Orders Reads: MASTER, OWNER, CAFE_ADMIN
 router.get(
   '/orders',
-  authorize('PROCUREMENT_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STAFF'] }),
+  authorize('PROCUREMENT_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
   listOrders
 );
 
 router.get(
   '/orders/:purchaseOrderId',
-  authorize('PROCUREMENT_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STAFF'] }),
+  authorize('PROCUREMENT_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
   getOrder
 );
 

@@ -239,7 +239,24 @@ test('OWNER Persona Authorization Matrix — Security Gate Verification', async 
 
   // ─── 3. VENDOR MASTER MUTATIONS (STRICTLY FORBIDDEN FOR OWNER) ────────────
 
-  await t.test('3.1 Negative: Owner cannot update vendor master (PUT /api/v1/vendors/:id)', async () => {
+  await t.test('3.1 Negative: Owner cannot create vendor master (POST /api/v1/vendors)', async () => {
+    const middleware = authorize('VENDORS_WRITE', { allowedRoles: ['MASTER'] });
+    const req = {
+      auth: { ...ownerAuth },
+      body: { name: 'Unauthorized Vendor', category: 'SUPPLIES' },
+      method: 'POST',
+    };
+    const res = createMockResponse();
+
+    let nextCalled = false;
+    await middleware(req, res, () => { nextCalled = true; });
+
+    assert.equal(nextCalled, false, 'Middleware must NOT call next() for Owner on Vendor creation');
+    assert.equal(res.statusCode, 403);
+    assert.equal(res.body.error.code, 'ROLE_NOT_ALLOWED');
+  });
+
+  await t.test('3.2 Negative: Owner cannot update vendor master (PUT /api/v1/vendors/:id)', async () => {
     const middleware = authorize('VENDORS_WRITE', { allowedRoles: ['MASTER'] });
     const req = {
       auth: { ...ownerAuth },
@@ -256,7 +273,7 @@ test('OWNER Persona Authorization Matrix — Security Gate Verification', async 
     assert.equal(res.body.error.code, 'ROLE_NOT_ALLOWED');
   });
 
-  await t.test('3.2 Negative: Owner cannot patch vendor master (PATCH /api/v1/vendors/:id)', async () => {
+  await t.test('3.3 Negative: Owner cannot patch vendor master (PATCH /api/v1/vendors/:id)', async () => {
     const middleware = authorize('VENDORS_WRITE', { allowedRoles: ['MASTER'] });
     const req = {
       auth: { ...ownerAuth },
@@ -273,7 +290,7 @@ test('OWNER Persona Authorization Matrix — Security Gate Verification', async 
     assert.equal(res.body.error.code, 'ROLE_NOT_ALLOWED');
   });
 
-  await t.test('3.3 Negative: Owner cannot delete vendor master (DELETE /api/v1/vendors/:id)', async () => {
+  await t.test('3.4 Negative: Owner cannot delete vendor master (DELETE /api/v1/vendors/:id)', async () => {
     const middleware = authorize('VENDORS_WRITE', { allowedRoles: ['MASTER'] });
     const req = {
       auth: { ...ownerAuth },
@@ -290,7 +307,7 @@ test('OWNER Persona Authorization Matrix — Security Gate Verification', async 
     assert.equal(res.body.error.code, 'ROLE_NOT_ALLOWED');
   });
 
-  await t.test('3.4 Negative: Owner cannot deactivate vendor (POST /api/v1/vendors/:id/deactivate)', async () => {
+  await t.test('3.5 Negative: Owner cannot deactivate vendor (POST /api/v1/vendors/:id/deactivate)', async () => {
     const middleware = authorize('VENDORS_WRITE', { allowedRoles: ['MASTER'] });
     const req = {
       auth: { ...ownerAuth },

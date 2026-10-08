@@ -228,7 +228,7 @@ test('SCR-019: POS & Billing Terminal Master Control Test Suite', async (t) => {
 
   await t.test('1. Create Quick Sale order with modifier snapshot and server-calculated totals', async () => {
     const req = {
-      auth: createMockAuthContext('STAFF', 'ZC-0001'),
+      auth: createMockAuthContext('CAFE_ADMIN', 'ZC-0001'),
       body: {
         cafeId: 'ZC-0001',
         serviceMode: 'QUICK_SALE',
@@ -268,7 +268,7 @@ test('SCR-019: POS & Billing Terminal Master Control Test Suite', async (t) => {
   await t.test('2. Hold and resume open ticket workflow', async () => {
     // Create open bill
     const createReq = {
-      auth: createMockAuthContext('STAFF', 'ZC-0001'),
+      auth: createMockAuthContext('CAFE_ADMIN', 'ZC-0001'),
       body: {
         cafeId: 'ZC-0001',
         serviceMode: 'DINE_IN',
@@ -290,7 +290,7 @@ test('SCR-019: POS & Billing Terminal Master Control Test Suite', async (t) => {
 
     // Hold ticket
     const holdReq = {
-      auth: createMockAuthContext('STAFF', 'ZC-0001'),
+      auth: createMockAuthContext('CAFE_ADMIN', 'ZC-0001'),
       body: {
         billId: openBillId,
         holdName: 'Table 04 (Hold)',
@@ -303,7 +303,7 @@ test('SCR-019: POS & Billing Terminal Master Control Test Suite', async (t) => {
 
     // List open tickets
     const listReq = {
-      auth: createMockAuthContext('STAFF', 'ZC-0001'),
+      auth: createMockAuthContext('CAFE_ADMIN', 'ZC-0001'),
       query: {},
     };
     const listRes = await invokeHandler(listOpenTickets, listReq);
@@ -315,7 +315,7 @@ test('SCR-019: POS & Billing Terminal Master Control Test Suite', async (t) => {
   await t.test('3. Open register, record cash events, and perform blind cash count with variance', async () => {
     // Open session
     const openReq = {
-      auth: createMockAuthContext('STAFF', 'ZC-0001'),
+      auth: createMockAuthContext('CAFE_ADMIN', 'ZC-0001'),
       body: {
         cafeId: 'ZC-0001',
         registerId: 'REG-01',
@@ -331,7 +331,7 @@ test('SCR-019: POS & Billing Terminal Master Control Test Suite', async (t) => {
 
     // Record Cash In event
     const eventReq = {
-      auth: createMockAuthContext('STAFF', 'ZC-0001'),
+      auth: createMockAuthContext('CAFE_ADMIN', 'ZC-0001'),
       body: {
         registerSessionId: session.registerSessionId,
         eventType: 'CASH_IN',
@@ -346,7 +346,7 @@ test('SCR-019: POS & Billing Terminal Master Control Test Suite', async (t) => {
 
     // Close session with blind count of 250000 (0 variance)
     const closeReq = {
-      auth: createMockAuthContext('STAFF', 'ZC-0001'),
+      auth: createMockAuthContext('CAFE_ADMIN', 'ZC-0001'),
       body: {
         registerSessionId: session.registerSessionId,
         countedCashPaisa: 250000,
@@ -410,7 +410,7 @@ test('SCR-019: POS & Billing Terminal Master Control Test Suite', async (t) => {
 
     // Reprint receipt
     const reprintReq = {
-      auth: createMockAuthContext('STAFF', 'ZC-0001'),
+      auth: createMockAuthContext('CAFE_ADMIN', 'ZC-0001'),
       params: { billId: completedBill.billId },
       body: {
         reason: 'Customer requested another copy',
@@ -512,5 +512,60 @@ test('SCR-019: POS & Billing Terminal Master Control Test Suite', async (t) => {
     assert.equal(res.body.data.paymentMethod, 'SPLIT');
     assert.equal(res.body.data.tenders.length, 2);
     assert.equal(res.body.data.status, 'COMPLETED');
+  });
+
+  await t.test('10. Negative & Invariant: Authenticated STAFF attempt receives HTTP 403 and produces 0 bills or side-effects, while CAFE_ADMIN succeeds', async () => {
+    const initialBillCount = mockBills.length;
+
+    // Staff attempt
+    const staffReq = {
+      auth: createMockAuthContext('STAFF', 'ZC-0001'),
+      body: {
+        cafeId: 'ZC-0001',
+        serviceMode: 'QUICK_SALE',
+        lineItems: [{ menuItemId: 'MNU-01', quantity: 1 }],
+        paymentMethod: 'CASH',
+        isImmediateCompletion: true,
+      },
+    };
+
+    let caughtError = null;
+    let staffRes = null;
+    try {
+      staffRes = await invokeHandler(createBill, staffReq);
+    } catch (err) {
+      caughtError = err;
+    }
+
+    if (caughtError) {
+      assert.equal(caughtError.statusCode, 403);
+      assert.equal(caughtError.code || caughtError.errorCode, 'PERMISSION_DENIED');
+    } else {
+      assert.equal(staffRes.statusCode, 403);
+      assert.equal(staffRes.body.error.code, 'PERMISSION_DENIED');
+    }
+
+    // Invariant: zero bills created
+    assert.equal(mockBills.length, initialBillCount, 'Staff 403 attempt must produce 0 bills or side effects');
+
+    // Equivalent valid sale by authorized CAFE_ADMIN
+    const opsReq = {
+      auth: createMockAuthContext('CAFE_ADMIN', 'ZC-0001'),
+      body: {
+        cafeId: 'ZC-0001',
+        serviceMode: 'QUICK_SALE',
+        lineItems: [{ menuItemId: 'MNU-01', quantity: 1 }],
+        paymentMethod: 'CASH',
+        isImmediateCompletion: true,
+      },
+    };
+
+    const opsRes = await invokeHandler(createBill, opsReq);
+    assert.equal(opsRes.statusCode, 200);
+    assert.equal(opsRes.body.success, true);
+    assert.equal(mockBills.length, initialBillCount + 1, 'CAFE_ADMIN sale must succeed and persist bill');
+    const createdBill = opsRes.body.data.bill || opsRes.body.data;
+    assert.equal(createdBill.cafeId, 'ZC-0001');
+    assert.equal(createdBill.status, 'COMPLETED');
   });
 });

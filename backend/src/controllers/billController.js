@@ -498,6 +498,13 @@ const createBill = asyncHandler(async (request, response) => {
   } = request.body;
 
   const role = request.auth.role;
+  if (role === 'STAFF') {
+    throw new ApiError(
+      403,
+      'PERMISSION_DENIED',
+      'Staff role is restricted to self-service only and does not have POS & Billing operational authority.'
+    );
+  }
   if (role === 'OWNER') {
     throw new ApiError(
       403,
@@ -858,6 +865,13 @@ const reprintBill = asyncHandler(async (request, response) => {
  * Controlled post-sale void with mandatory reason and audit tracking.
  */
 const voidBill = asyncHandler(async (request, response) => {
+  if (request.auth.role === 'STAFF') {
+    throw new ApiError(
+      403,
+      'PERMISSION_DENIED',
+      'Staff role is restricted to self-service only and does not have POS & Billing operational authority.'
+    );
+  }
   if (request.auth.role === 'OWNER') {
     throw new ApiError(
       403,
@@ -935,6 +949,20 @@ const voidBill = asyncHandler(async (request, response) => {
  * Controlled refund orchestrated via canonical refundService.
  */
 const refundBill = asyncHandler(async (request, response) => {
+  if (request.auth.role === 'STAFF') {
+    throw new ApiError(
+      403,
+      'PERMISSION_DENIED',
+      'Staff role is restricted to self-service only and does not have POS & Billing operational authority.'
+    );
+  }
+  if (request.auth.role === 'OWNER') {
+    throw new ApiError(
+      403,
+      'REFUND_FORBIDDEN',
+      'Owner does not possess POS refund mutation authority.'
+    );
+  }
   const billId = normalizeId(request.params.billId);
   const { refundType = 'FULL', amountPaisa, amount, reason, tender, idempotencyKey } = request.body;
 
@@ -1149,6 +1177,13 @@ const getReconciliationStatus = asyncHandler(async (request, response) => {
  * Business-day billing close gate.
  */
 const closeBusinessDayBilling = asyncHandler(async (request, response) => {
+  if (request.auth.role === 'STAFF') {
+    throw new ApiError(
+      403,
+      'PERMISSION_DENIED',
+      'Staff role is restricted to self-service only and does not have POS & Billing operational authority.'
+    );
+  }
   if (request.auth.role === 'OWNER') {
     throw new ApiError(
       403,
@@ -1464,6 +1499,13 @@ const listOpenTickets = asyncHandler(async (request, response) => {
 const openRegisterSession = asyncHandler(async (request, response) => {
   const { cafeId: rawCafeId, registerId = 'REG-01', openingFloatPaisa = 0 } = request.body;
   const role = request.auth.role;
+  if (role === 'STAFF') {
+    throw new ApiError(
+      403,
+      'PERMISSION_DENIED',
+      'Staff role is restricted to self-service only and does not have POS & Billing operational authority.'
+    );
+  }
   if (role === 'OWNER') {
     throw new ApiError(
       403,
@@ -1540,6 +1582,13 @@ const openRegisterSession = asyncHandler(async (request, response) => {
  * Records a cash drawer event (Cash In, Cash Out, Safe Drop, No Sale).
  */
 const recordCashEvent = asyncHandler(async (request, response) => {
+  if (request.auth.role === 'STAFF') {
+    throw new ApiError(
+      403,
+      'PERMISSION_DENIED',
+      'Staff role is restricted to self-service only and does not have POS & Billing operational authority.'
+    );
+  }
   if (request.auth.role === 'OWNER') {
     throw new ApiError(
       403,
@@ -1607,6 +1656,13 @@ const recordCashEvent = asyncHandler(async (request, response) => {
  * Closes a register session with blind count and variance calculation.
  */
 const closeRegisterSession = asyncHandler(async (request, response) => {
+  if (request.auth.role === 'STAFF') {
+    throw new ApiError(
+      403,
+      'PERMISSION_DENIED',
+      'Staff role is restricted to self-service only and does not have POS & Billing operational authority.'
+    );
+  }
   if (request.auth.role === 'OWNER') {
     throw new ApiError(
       403,
