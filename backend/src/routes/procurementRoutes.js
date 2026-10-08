@@ -62,6 +62,16 @@ const {
   sourceElsewhere,
   getVendorFulfillmentAnalytics,
   sendToAccounts,
+  createOrdersFromRecommendations,
+  approveAndSendOrder,
+  editOrderRevision,
+  recordVendorAcknowledgement,
+  deferRecommendation,
+  rejectRecommendation,
+  requestSupplierAlternative,
+  escalateOrder,
+  runProcurementDispatchWorker,
+  reconcileDispatchJob,
 } = require('../controllers/procurementController');
 
 const UPLOAD_STAGING_DIR = path.join(os.tmpdir(), 'zamorin_procurement_staging');
@@ -260,6 +270,73 @@ router.get(
   '/orders/:purchaseOrderId/matching-status',
   authorize('PROCUREMENT_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
   getPoDocumentMatchingStatus
+);
+
+// P07 Recommendations Conversion
+router.post(
+  '/orders/from-recommendations',
+  authorize('PROCUREMENT_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  createOrdersFromRecommendations
+);
+
+// P07 Approve and Send (Atomic Approval & Dispatch Queueing)
+router.post(
+  '/orders/:purchaseOrderId/approve-and-send',
+  authorize('PROCUREMENT_APPROVE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  approveAndSendOrder
+);
+
+// P07 Immutable PO Revision Editing
+router.post(
+  '/orders/:purchaseOrderId/revisions',
+  authorize('PROCUREMENT_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  editOrderRevision
+);
+
+// P07 Vendor Commercial Acknowledgement (Isolated from Physical GRN & AP)
+router.post(
+  '/orders/:purchaseOrderId/vendor-acknowledgement',
+  authorize('PROCUREMENT_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  recordVendorAcknowledgement
+);
+
+// P07 Escalation to Primary Master
+router.post(
+  '/orders/:purchaseOrderId/escalate',
+  authorize('PROCUREMENT_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  escalateOrder
+);
+
+// P07 Recommendation Actions: Defer, Reject, Request Alternative
+router.post(
+  '/recommendations/:recommendationId/defer',
+  authorize('PROCUREMENT_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  deferRecommendation
+);
+
+router.post(
+  '/recommendations/:recommendationId/reject',
+  authorize('PROCUREMENT_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  rejectRecommendation
+);
+
+router.post(
+  '/recommendations/:recommendationId/request-alternative',
+  authorize('PROCUREMENT_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  requestSupplierAlternative
+);
+
+// P07 Dispatch Worker & Reconciliation
+router.post(
+  '/dispatch-worker/run',
+  authorize('PROCUREMENT_WRITE', { allowedRoles: ['MASTER'] }),
+  runProcurementDispatchWorker
+);
+
+router.post(
+  '/dispatch-jobs/:dispatchJobId/reconcile',
+  authorize('PROCUREMENT_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  reconcileDispatchJob
 );
 
 // Writes: MASTER, CAFE_ADMIN

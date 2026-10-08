@@ -23,6 +23,7 @@ const mongoose = require('mongoose');
 const PO_STATUSES = [
   'DRAFT',
   'SUBMITTED',
+  'ESCALATED_PENDING_MASTER',
   'APPROVED',
   'ORDER_PLACED',
   'ORDERED',
@@ -347,6 +348,51 @@ const receiptAttachmentSchema = new mongoose.Schema(
   { _id: true }
 );
 
+const poApprovalRecordSchema = new mongoose.Schema(
+  {
+    approvedAt: { type: Date, default: null },
+    approvedByUserId: { type: String, trim: true, uppercase: true, default: null },
+    approvedByRole: { type: String, trim: true, uppercase: true, default: null },
+    approvalPolicyId: { type: String, trim: true, default: 'DEFAULT' },
+    approvalPolicyVersion: { type: String, trim: true, default: '1.0' },
+    purchasingCapability: { type: String, trim: true, default: 'PURCHASE_ORDER_APPROVE' },
+    isEscalatedApproval: { type: Boolean, default: false },
+    notes: { type: String, trim: true, maxlength: 2000, default: '' },
+    decisionFingerprint: { type: String, trim: true, default: '' },
+  },
+  { _id: false }
+);
+
+const poRevisionSchema = new mongoose.Schema(
+  {
+    revisionNumber: { type: Number, required: true, min: 1 },
+    status: {
+      type: String,
+      enum: ['DRAFT', 'SUBMITTED', 'ESCALATED', 'APPROVED', 'SUPERSEDED', 'REVOKED', 'CANCELLED'],
+      default: 'DRAFT',
+    },
+    createdAt: { type: Date, default: Date.now },
+    createdByUserId: { type: String, trim: true, uppercase: true, default: null },
+    changeReason: { type: String, trim: true, default: 'Initial revision' },
+    lineItems: [poLineItemSchema],
+    subtotalPaisa: { type: Number, min: 0, default: 0 },
+    taxPaisa: { type: Number, min: 0, default: 0 },
+    discountPaisa: { type: Number, min: 0, default: 0 },
+    totalPaisa: { type: Number, min: 0, default: 0 },
+    vendorId: { type: String, trim: true, uppercase: true },
+    vendorNameSnapshot: { type: String, trim: true, default: '' },
+    vendorContactEmail: { type: String, trim: true, lowercase: true, default: '' },
+    expectedDeliveryDate: { type: String, trim: true, default: null },
+    deliveryAddress: { type: String, trim: true, default: '' },
+    terms: { type: String, trim: true, default: '' },
+    notes: { type: String, trim: true, default: '' },
+    approval: { type: poApprovalRecordSchema, default: null },
+    dispatchJobId: { type: String, trim: true, default: null },
+    documentHash: { type: String, trim: true, default: null },
+  },
+  { _id: true }
+);
+
 const poEditHistorySchema = new mongoose.Schema(
   {
     editedAt: { type: Date, default: Date.now },
@@ -636,6 +682,74 @@ const purchaseOrderSchema = new mongoose.Schema(
     editHistory: {
       type: [poEditHistorySchema],
       default: [],
+    },
+
+    // ── P07 Immutable Revisions, Dispatch Outbox & Vendor Responses ───────────
+    currentRevision: {
+      type: Number,
+      min: 1,
+      default: 1,
+      index: true,
+    },
+
+    activeApprovedRevision: {
+      type: Number,
+      min: 1,
+      default: null,
+      index: true,
+    },
+
+    revisions: {
+      type: [poRevisionSchema],
+      default: [],
+    },
+
+    sourceRecommendationIds: [
+      {
+        type: String,
+        trim: true,
+        uppercase: true,
+        index: true,
+      },
+    ],
+
+    dispatchStatus: {
+      type: String,
+      enum: [
+        'NOT_QUEUED',
+        'QUEUED',
+        'CLAIMED',
+        'SENDING',
+        'ACCEPTED_BY_PROVIDER',
+        'DELIVERED',
+        'FAILED',
+        'UNKNOWN',
+        'CHANNEL_SETUP_REQUIRED',
+        'CANCELLED',
+      ],
+      default: 'NOT_QUEUED',
+      index: true,
+    },
+
+    vendorResponseStatus: {
+      type: String,
+      enum: ['AWAITING_RESPONSE', 'ACKNOWLEDGED', 'PARTIALLY_CONFIRMED', 'REJECTED', 'NO_RESPONSE'],
+      default: 'AWAITING_RESPONSE',
+      index: true,
+    },
+
+    vendorResponseDetails: {
+      respondedAt: { type: Date, default: null },
+      recordedByUserId: { type: String, trim: true, uppercase: true, default: null },
+      channel: { type: String, trim: true, default: 'EMAIL' },
+      notes: { type: String, trim: true, default: '' },
+      confirmedLines: [
+        {
+          itemId: { type: String, trim: true, uppercase: true },
+          confirmedQuantityBase: { type: Number, min: 0, default: 0 },
+          unavailableQuantityBase: { type: Number, min: 0, default: 0 },
+        },
+      ],
     },
 
     // ── 3-Way Match & MASTER Approval & Inventory Posting ─────────────────────

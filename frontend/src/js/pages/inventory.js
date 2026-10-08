@@ -171,6 +171,7 @@ function renderCurrentWorkspace(wrap) {
     case "valuation": renderValuationTab(wrap); break;
     case "recalls": renderRecallsTab(wrap); break;
     case "integrity": renderIntegrityTab(wrap); break;
+    case "data-quality": renderDataQualityTab(wrap); break;
     default: renderOverviewTab(wrap);
   }
 }
@@ -204,6 +205,7 @@ function renderOverviewContentHtml() {
       { id: "recalls", icon: "🛡️", title: "Recall & Traceability", subtitle: "Lot containment & food safety quarantine logs", badge: `${kpis.activeRecallsCount || 0} Recalls`, badgeType: kpis.activeRecallsCount > 0 ? "danger" : "success" },
       { id: "integrity", icon: "🔒", title: "Inventory Integrity", subtitle: "Invariant verification & negative stock guards", badge: "Zero Violations", badgeType: "success" },
     ] : []),
+    { id: "data-quality", icon: "🛡️", title: "Data Quality & Governance", subtitle: "P05 item identity, UOM consistency, vendor mapping & auto-purchase eligibility", badge: "P05 DQ", badgeType: "accent" },
   ];
 
   return `
@@ -665,27 +667,74 @@ async function loadGlobalItemsData(wrap) {
 
 // ── 4. Replenishment & PAR ───────────────────────────────────────────────────
 async function renderReplenishmentTab(wrap) {
+  await loadCafesList();
+  const canEvaluate = state.user?.role === "MASTER" || state.user?.role === "CAFE_ADMIN";
+
   wrap.innerHTML = `
     <div style="display:flex; flex-direction:column; gap:16px;">
       ${renderChildHeader({
         parentTitle: "Inventory & Stock",
         parentRoute: "inventory",
-        childTitle: "Replenishment & PAR",
-        childSubtitle: "Safety buffers, lead times, min/max thresholds and automated purchase triggers.",
+        childTitle: "Replenishment Recommendations",
+        childSubtitle: "P06 Automatic Engine: Deterministic, explainable purchase suggestions gated by stock, demand, and P05 master data quality.",
         icon: "📊",
         backBtnId: "inv-back-to-hub-btn",
         actionsHtml: `
-          <button id="btn-refresh-replenishment" class="btn btn-secondary btn-sm" style="display:flex; align-items:center; gap:6px;">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-            Recalculate PAR
-          </button>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button id="btn-refresh-replenishment" class="btn btn-secondary btn-sm" style="display:flex; align-items:center; gap:6px;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              Refresh
+            </button>
+            ${canEvaluate ? `
+              <button id="btn-run-replenishment-sweep" class="btn btn-primary btn-sm" style="display:flex; align-items:center; gap:6px; font-weight:700;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                Evaluate Replenishment
+              </button>
+            ` : `
+              <span class="badge-tag" style="background:var(--surface-muted); color:var(--muted); font-size:11px;">Owner Strategic View (Read-Only)</span>
+            `}
+          </div>
         `,
       })}
 
+      <!-- FILTER & SEARCH STRIP -->
+      <div class="glass-card" style="padding:14px 18px; display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between;">
+        <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
+          <div style="display:flex; align-items:center; gap:6px;">
+            <label style="font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase;">Café:</label>
+            <select id="filter-replenishment-cafe" class="input input-sm" style="min-width:160px; font-weight:600;">
+              ${getCafeOptionsHtml(selectedCafeFilter, true, "All Authorised Cafés")}
+            </select>
+          </div>
+
+          <div style="display:flex; align-items:center; gap:6px;">
+            <label style="font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase;">Status:</label>
+            <select id="filter-replenishment-status" class="input input-sm" style="min-width:180px; font-weight:600;">
+              <option value="ACTIVE_ALL" selected>Active Needs (All)</option>
+              <option value="ACTIVE_REVIEW">Ready for Review (P07)</option>
+              <option value="BLOCKED_DATA_QUALITY">Blocked: Data Quality</option>
+              <option value="BLOCKED_CONSTRAINT">Blocked: Operational Limits</option>
+              <option value="ALL">All (Including Resolved)</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:8px;">
+          <input type="text" id="input-replenishment-search" class="input input-sm" placeholder="Filter by SKU or item..." style="width:200px;" />
+        </div>
+      </div>
+
+      <!-- KPI STRIP -->
+      <div id="replenishment-kpi-container" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px;"></div>
+
+      <!-- RECOMMENDATIONS TABLE CONTAINER -->
       <div class="glass-card" style="padding:18px;">
-        <div style="margin-bottom:14px;">
-          <h3 style="font-size:15.5px; font-weight:700; margin:0; color:var(--ink);">Replenishment Recommendations &amp; PAR Control</h3>
-          <p style="font-size:12.5px; color:var(--muted); margin:2px 0 0;">Automatic stockout calculations considering min thresholds, open POs, and in-transit transfers.</p>
+        <div style="margin-bottom:14px; display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <h3 style="font-size:15.5px; font-weight:700; margin:0; color:var(--ink);">Active Purchase Proposals</h3>
+            <p style="font-size:12.5px; color:var(--muted); margin:2px 0 0;">Observing physical stock, quarantine holds, reservations, inbound POs, and vendor pack sizes.</p>
+          </div>
+          <span style="font-size:11.5px; color:var(--muted); font-style:italic;">Shadow Mode: Purchase Orders must be explicitly approved in P07.</span>
         </div>
 
         <div id="replenishment-table-container">
@@ -695,25 +744,122 @@ async function renderReplenishmentTab(wrap) {
     </div>
   `;
 
-  wrap.querySelector("#inventory-back-to-hub-btn")?.addEventListener("click", () => navigate("inventory"));
-  wrap.querySelector("#btn-refresh-replenishment")?.addEventListener("click", () => renderReplenishmentTab(wrap));
+  wrap.querySelector("#inv-back-to-hub-btn")?.addEventListener("click", () => navigate("inventory"));
+  wrap.querySelector("#btn-refresh-replenishment")?.addEventListener("click", () => loadReplenishmentData(wrap));
+
+  const cafeSelect = wrap.querySelector("#filter-replenishment-cafe");
+  cafeSelect?.addEventListener("change", (e) => {
+    selectedCafeFilter = e.target.value;
+    loadReplenishmentData(wrap);
+  });
+
+  const statusSelect = wrap.querySelector("#filter-replenishment-status");
+  statusSelect?.addEventListener("change", () => loadReplenishmentData(wrap));
+
+  const searchInput = wrap.querySelector("#input-replenishment-search");
+  searchInput?.addEventListener("input", () => loadReplenishmentData(wrap));
+
+  const sweepBtn = wrap.querySelector("#btn-run-replenishment-sweep");
+  if (sweepBtn) {
+    sweepBtn.addEventListener("click", async () => {
+      const targetCafe = selectedCafeFilter && selectedCafeFilter !== "ALL" ? selectedCafeFilter : (state.user?.primaryCafeId || "ZC-0001");
+      sweepBtn.disabled = true;
+      sweepBtn.innerHTML = `<span class="spinner" style="width:13px; height:13px;"></span> Evaluating...`;
+      try {
+        const res = await apiPost("/inventory/replenishment/evaluate", { cafeId: targetCafe });
+        showToast(`Replenishment sweep completed for ${targetCafe}!`, "success");
+        await loadReplenishmentData(wrap);
+      } catch (err) {
+        showToast(`Sweep failed: ${err.message}`, "error");
+      } finally {
+        sweepBtn.disabled = false;
+        sweepBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg> Evaluate Replenishment`;
+      }
+    });
+  }
 
   await loadReplenishmentData(wrap);
 }
 
-const DEFAULT_REPLENISHMENT = [];
+let loadedRecommendationsCache = [];
 
 async function loadReplenishmentData(wrap) {
   const container = wrap.querySelector("#replenishment-table-container");
+  const kpiContainer = wrap.querySelector("#replenishment-kpi-container");
+  const statusFilter = wrap.querySelector("#filter-replenishment-status")?.value || "ACTIVE_ALL";
+  const searchFilter = (wrap.querySelector("#input-replenishment-search")?.value || "").trim().toLowerCase();
   if (!container) return;
+
+  container.innerHTML = `<div style="text-align:center; padding:30px;"><div class="spinner"></div></div>`;
 
   let recs = [];
   try {
-    const res = await apiGet("/inventory/replenishment/recommendations");
-    recs = res?.recommendations && res.recommendations.length > 0 ? res.recommendations : DEFAULT_REPLENISHMENT;
+    const queryParams = new URLSearchParams();
+    if (selectedCafeFilter && selectedCafeFilter !== "ALL") {
+      queryParams.set("cafeId", selectedCafeFilter);
+    }
+    if (statusFilter === "ALL") {
+      queryParams.set("activeOnly", "false");
+    } else if (statusFilter === "ACTIVE_ALL") {
+      queryParams.set("activeOnly", "true");
+    } else {
+      queryParams.set("status", statusFilter);
+    }
+
+    const res = await apiGet(`/inventory/replenishment/recommendations?${queryParams.toString()}`);
+    recs = Array.isArray(res?.recommendations) ? res.recommendations : [];
+    loadedRecommendationsCache = recs;
   } catch (err) {
-    console.warn("Replenishment API offline, using fallback recommendations:", err);
-    recs = DEFAULT_REPLENISHMENT;
+    console.warn("Replenishment API offline, using cached or fallback:", err.message);
+    recs = loadedRecommendationsCache || [];
+  }
+
+  // Filter by search query
+  if (searchFilter) {
+    recs = recs.filter((r) => {
+      const name = (r.itemSnapshot?.name || r.name || "").toLowerCase();
+      const sku = (r.itemSnapshot?.sku || r.sku || r.itemId || "").toLowerCase();
+      return name.includes(searchFilter) || sku.includes(searchFilter);
+    });
+  }
+
+  // Render KPI strip
+  if (kpiContainer) {
+    const totalActive = loadedRecommendationsCache.filter((r) => r.isActiveNeed).length;
+    const readyForReview = loadedRecommendationsCache.filter((r) => r.status === "ACTIVE_REVIEW").length;
+    const blockedDataQuality = loadedRecommendationsCache.filter((r) => r.status === "BLOCKED_DATA_QUALITY").length;
+    const blockedConstraints = loadedRecommendationsCache.filter((r) => r.status === "BLOCKED_CONSTRAINT").length;
+
+    kpiContainer.innerHTML = `
+      <div class="card" style="padding:12px 16px; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-card, 12px);">
+        <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase;">Active Purchase Needs</div>
+        <div style="font-size:20px; font-weight:800; color:var(--ink); margin-top:2px;">${totalActive}</div>
+      </div>
+      <div class="card" style="padding:12px 16px; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-card, 12px);">
+        <div style="font-size:11px; font-weight:700; color:#059669; text-transform:uppercase;">Ready for Review (P07)</div>
+        <div style="font-size:20px; font-weight:800; color:#059669; margin-top:2px;">${readyForReview}</div>
+      </div>
+      <div class="card" style="padding:12px 16px; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-card, 12px);">
+        <div style="font-size:11px; font-weight:700; color:var(--warning, #d97706); text-transform:uppercase;">Blocked: Data Quality</div>
+        <div style="font-size:20px; font-weight:800; color:var(--warning, #d97706); margin-top:2px;">${blockedDataQuality}</div>
+      </div>
+      <div class="card" style="padding:12px 16px; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-card, 12px);">
+        <div style="font-size:11px; font-weight:700; color:var(--danger, #dc2626); text-transform:uppercase;">Blocked: Constraints</div>
+        <div style="font-size:20px; font-weight:800; color:var(--danger, #dc2626); margin-top:2px;">${blockedConstraints}</div>
+      </div>
+    `;
+  }
+
+  // Render Recommendations Table
+  if (recs.length === 0) {
+    container.innerHTML = `
+      <div style="text-align:center; padding:36px; color:var(--muted);">
+        <div style="font-size:28px; margin-bottom:8px;">✅</div>
+        <div style="font-weight:700; font-size:14px; color:var(--ink);">All Inventory Positions Are Optimal</div>
+        <p style="font-size:12.5px; margin-top:4px;">No active replenishment needs identified under the selected filters.</p>
+      </div>
+    `;
+    return;
   }
 
   container.innerHTML = `
@@ -723,33 +869,173 @@ async function loadReplenishmentData(wrap) {
           <tr style="text-align:left; border-bottom:1px solid var(--border-color, var(--line));">
             <th style="padding:10px 12px;">Item &amp; SKU</th>
             <th style="padding:10px 12px;">Café</th>
-            <th style="padding:10px 12px; text-align:right;">Current Stock</th>
-            <th style="padding:10px 12px; text-align:right;">Min / Target PAR</th>
-            <th style="padding:10px 12px; text-align:right;">In-Transit</th>
+            <th style="padding:10px 12px; text-align:right;">Usable Stock</th>
+            <th style="padding:10px 12px; text-align:right;">Eligible Inbound</th>
+            <th style="padding:10px 12px; text-align:right;">Reorder / Target</th>
             <th style="padding:10px 12px; text-align:right;">Suggested Order</th>
-            <th style="padding:10px 12px; text-align:center;">Recommended Source</th>
+            <th style="padding:10px 12px;">Suggested Vendor</th>
+            <th style="padding:10px 12px; text-align:center;">Status</th>
+            <th style="padding:10px 12px; text-align:center;">Explain</th>
           </tr>
         </thead>
         <tbody>
-          ${recs.length === 0 ? `<tr><td colspan="7" style="text-align:center; padding:24px; color:#059669; font-weight:600;">All café inventory levels are optimal. Zero replenishment needed.</td></tr>` : ''}
-          ${recs.map((r) => `
-            <tr style="border-bottom:1px solid var(--line);">
-              <td style="padding:10px 12px;">
-                <strong style="color:var(--ink);">${r.name}</strong><br>
-                <span style="font-size:11.5px; font-family:var(--font-mono); color:var(--bronze-600);">${r.sku}</span>
-              </td>
-              <td style="padding:10px 12px; font-weight:600;">${r.cafeId}</td>
-              <td style="padding:10px 12px; text-align:right; font-weight:700; font-family:var(--font-mono); color:var(--danger);">${r.currentStock} ${r.baseUnit}</td>
-              <td style="padding:10px 12px; text-align:right; font-size:12px; font-family:var(--font-mono); color:var(--muted);">${r.min} / ${r.par}</td>
-              <td style="padding:10px 12px; text-align:right; font-family:var(--font-mono); color:var(--muted);">${r.inTransit}</td>
-              <td style="padding:10px 12px; text-align:right; font-weight:800; font-size:13.5px; font-family:var(--font-mono); color:#059669;">${r.suggestedQty} ${r.baseUnit}</td>
-              <td style="padding:10px 12px; text-align:center;"><span class="badge-tag badge-accent" style="font-weight:700;">${r.suggestedSource}</span></td>
-            </tr>
-          `).join("")}
+          ${recs.map((r) => {
+            const itemName = r.itemSnapshot?.name || r.name || r.itemId;
+            const itemSku = r.itemSnapshot?.sku || r.sku || r.itemId;
+            const baseUnit = r.itemSnapshot?.baseUnit || r.baseUnit || 'unit';
+            const usable = r.stockSnapshot?.usableQuantityBase !== undefined ? r.stockSnapshot.usableQuantityBase : (r.currentStock || 0);
+            const inbound = r.stockSnapshot?.eligibleInboundBase !== undefined ? r.stockSnapshot.eligibleInboundBase : (r.inTransit || 0);
+            const reorderPoint = r.policySnapshot?.reorderPointBase !== undefined ? r.policySnapshot.reorderPointBase : (r.min || 0);
+            const targetQty = r.policySnapshot?.targetQuantityBase !== undefined ? r.policySnapshot.targetQuantityBase : (r.par || 0);
+            const proposedBase = r.calculation?.suggestedBaseQuantity !== undefined ? r.calculation.suggestedBaseQuantity : (r.suggestedQty || 0);
+            const proposedPurchase = r.calculation?.suggestedPurchaseQuantity || proposedBase;
+            const purchaseUom = r.calculation?.purchaseUnit || r.supplierCandidate?.uom || baseUnit;
+            const vendorName = r.supplierCandidate?.vendorName || r.suggestedSource || 'Pending Vendor';
+
+            let statusBadge = `<span class="badge-tag" style="background:#059669; color:#fff; font-weight:700;">ACTIVE REVIEW</span>`;
+            if (r.status === "BLOCKED_DATA_QUALITY") {
+              statusBadge = `<span class="badge-tag" style="background:#d97706; color:#fff; font-weight:700;">DATA QUALITY BLOCKED</span>`;
+            } else if (r.status === "BLOCKED_CONSTRAINT") {
+              statusBadge = `<span class="badge-tag" style="background:#dc2626; color:#fff; font-weight:700;">CONSTRAINT BLOCKED</span>`;
+            } else if (r.status === "RESOLVED") {
+              statusBadge = `<span class="badge-tag" style="background:var(--surface-muted); color:var(--muted); font-weight:600;">RESOLVED</span>`;
+            }
+
+            return `
+              <tr style="border-bottom:1px solid var(--line);">
+                <td style="padding:10px 12px;">
+                  <strong style="color:var(--ink);">${itemName}</strong><br>
+                  <span style="font-size:11.5px; font-family:var(--font-mono); color:var(--bronze-600);">${itemSku}</span>
+                </td>
+                <td style="padding:10px 12px; font-weight:600;">${r.cafeId}</td>
+                <td style="padding:10px 12px; text-align:right; font-weight:700; font-family:var(--font-mono); color:${usable <= reorderPoint ? 'var(--danger, #dc2626)' : 'var(--ink)'};">
+                  ${usable} <span style="font-size:11px; font-weight:500; color:var(--muted);">${baseUnit}</span>
+                </td>
+                <td style="padding:10px 12px; text-align:right; font-family:var(--font-mono); color:var(--muted);">
+                  ${inbound} <span style="font-size:11px;">${baseUnit}</span>
+                </td>
+                <td style="padding:10px 12px; text-align:right; font-size:12px; font-family:var(--font-mono); color:var(--muted);">
+                  ${reorderPoint} / ${targetQty}
+                </td>
+                <td style="padding:10px 12px; text-align:right; font-weight:800; font-family:var(--font-mono); color:#059669;">
+                  ${proposedPurchase} ${purchaseUom}
+                  ${purchaseUom !== baseUnit ? `<br><span style="font-size:11px; font-weight:500; color:var(--muted);">(${proposedBase} ${baseUnit})</span>` : ''}
+                </td>
+                <td style="padding:10px 12px; font-size:12.5px; color:var(--ink);">
+                  ${vendorName}
+                  ${r.supplierCandidate?.contractedPricePaisa ? `<br><span style="font-size:11px; color:var(--muted); font-family:var(--font-mono);">₹${(r.supplierCandidate.contractedPricePaisa / 100).toFixed(2)}/${purchaseUom}</span>` : ''}
+                </td>
+                <td style="padding:10px 12px; text-align:center;">
+                  ${statusBadge}
+                </td>
+                <td style="padding:10px 12px; text-align:center;">
+                  <button class="btn btn-secondary btn-xs btn-view-explanation" data-rec-id="${r.recommendationId || r._id}">
+                    Why?
+                  </button>
+                </td>
+              </tr>
+            `;
+          }).join("")}
         </tbody>
       </table>
     </div>
   `;
+
+  // Attach explanation modal triggers
+  container.querySelectorAll(".btn-view-explanation").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const recId = btn.dataset.recId;
+      const rec = loadedRecommendationsCache.find((r) => r.recommendationId === recId || r._id === recId);
+      if (rec) showReplenishmentExplanationModal(rec);
+    });
+  });
+}
+
+function showReplenishmentExplanationModal(rec) {
+  const stock = rec.stockSnapshot || {};
+  const policy = rec.policySnapshot || {};
+  const calc = rec.calculation || {};
+  const exceptions = rec.actionableExceptions || [];
+  const candidate = rec.supplierCandidate || {};
+
+  const contentHtml = `
+    <div style="display:flex; flex-direction:column; gap:16px; font-size:13px;">
+      <div style="background:var(--surface-muted, #f8fafc); padding:12px 14px; border-radius:8px; border:1px solid var(--line);">
+        <strong style="color:var(--ink);">Executive Summary:</strong>
+        <p style="margin:4px 0 0; color:var(--ink-secondary, #334155);">${rec.explanation?.summary || 'Standard deterministic calculation.'}</p>
+      </div>
+
+      <!-- INVENTORY SNAPSHOT BREAKDOWN -->
+      <div>
+        <h4 style="font-size:13px; font-weight:700; margin:0 0 6px; text-transform:uppercase; color:var(--muted);">1. Authoritative Stock & Supply Breakdown</h4>
+        <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:8px; background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:10px;">
+          <div>Physical On-Hand: <strong>${stock.currentQuantityBase || 0}</strong></div>
+          <div>Quarantined / Held: <strong style="color:var(--danger, #dc2626);">${stock.quarantinedQuantityBase || 0}</strong></div>
+          <div>Expired Lots: <strong style="color:var(--danger, #dc2626);">${stock.expiredQuantityBase || 0}</strong></div>
+          <div>Firm Reservations: <strong>${stock.firmAllocationsBase || 0}</strong></div>
+          <div style="grid-column:span 2; border-top:1px solid var(--line); padding-top:6px; margin-top:2px;">
+            Usable Unallocated Stock: <strong style="color:#059669;">${stock.usableQuantityBase || 0}</strong>
+          </div>
+          <div>Eligible Confirmed Inbound: <strong>${stock.eligibleInboundBase || 0}</strong></div>
+          <div>Net Inventory Position: <strong style="color:var(--ink);">${stock.inventoryPositionBase || 0}</strong></div>
+        </div>
+      </div>
+
+      <!-- POLICY & DEMAND HORIZON -->
+      <div>
+        <h4 style="font-size:13px; font-weight:700; margin:0 0 6px; text-transform:uppercase; color:var(--muted);">2. Reorder Policy &amp; Target Horizon</h4>
+        <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:8px; background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:10px;">
+          <div>Policy Applied: <strong>${policy.reorderPolicy || 'MIN_MAX'}</strong></div>
+          <div>Demand Basis: <strong>${policy.demandBasis || 'CONFIGURED_AVG_DAILY_USAGE'}</strong></div>
+          <div>Expected Daily Demand: <strong>${policy.expectedDailyDemandBase || 0} / day</strong></div>
+          <div>Lead Time: <strong>${policy.leadTimeDays || 1} days</strong></div>
+          <div>Safety Stock Buffer: <strong>${policy.safetyStockBase || 0}</strong></div>
+          <div>Calculated Reorder Point: <strong style="color:var(--danger, #dc2626);">${policy.reorderPointBase || 0}</strong></div>
+          <div>Target Stock Horizon: <strong style="color:#059669;">${policy.targetQuantityBase || 0}</strong></div>
+          <div>Raw Purchase Need: <strong>${calc.rawNeedBase || 0}</strong></div>
+        </div>
+      </div>
+
+      <!-- SUPPLIER CONSTRAINTS & PACK CONVERSION -->
+      <div>
+        <h4 style="font-size:13px; font-weight:700; margin:0 0 6px; text-transform:uppercase; color:var(--muted);">3. Supplier Mapping &amp; Pack Adjustments</h4>
+        <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:8px; background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:10px;">
+          <div>Approved Supplier: <strong>${candidate.vendorName || 'None'}</strong></div>
+          <div>Purchase UOM: <strong>${candidate.uom || 'unit'}</strong></div>
+          <div>Conversion Factor: <strong>${calc.conversionFactor || 1} base units / pack</strong></div>
+          <div>Order Multiple: <strong>${calc.orderMultiple || 1}</strong></div>
+          <div>Minimum Order (MOQ): <strong>${calc.moq || 1}</strong></div>
+          <div>Proposed Purchase Qty: <strong style="color:#059669; font-size:14px;">${calc.suggestedPurchaseQuantity || 0} ${candidate.uom || 'unit'} (${calc.suggestedBaseQuantity || 0} base)</strong></div>
+          <div style="grid-column:span 2;">Estimated Cost: <strong>₹${((calc.estimatedCostPaisa || 0) / 100).toFixed(2)}</strong></div>
+        </div>
+      </div>
+
+      <!-- ACTIONABLE EXCEPTIONS / BLOCKERS -->
+      ${exceptions.length > 0 ? `
+        <div>
+          <h4 style="font-size:13px; font-weight:700; margin:0 0 6px; text-transform:uppercase; color:var(--danger, #dc2626);">Actionable Exceptions &amp; Blockers</h4>
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            ${exceptions.map((ex) => `
+              <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:6px; padding:8px 12px;">
+                <div style="font-weight:700; color:#b91c1c; font-size:12px;">[${ex.code}] ${ex.message}</div>
+                ${ex.correctiveAction ? `<div style="font-size:11.5px; color:#7f1d1d; margin-top:2px;"><strong>Action Required:</strong> ${ex.correctiveAction}</div>` : ''}
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      ` : ''}
+
+      <div style="font-size:11px; color:var(--muted); font-style:italic; border-top:1px solid var(--line); padding-top:8px;">
+        Evaluated At: ${rec.lastEvaluatedAt ? new Date(rec.lastEvaluatedAt).toLocaleString('en-IN') : 'N/A'} • Evaluator: ${rec.evaluatedBy || 'SYSTEM'} • Fingerprint: ${(calc.calculationFingerprint || '').slice(0, 16)}...
+      </div>
+    </div>
+  `;
+
+  openModal({
+    title: `Replenishment Calculation: ${rec.itemSnapshot?.name || rec.itemId}`,
+    contentHtml,
+    actionsHtml: `<button class="btn btn-secondary btn-sm" onclick="document.querySelector('#global-modal')?.close()">Close</button>`,
+  });
 }
 
 // ── 5. Receipts & Put-Away ───────────────────────────────────────────────────
@@ -2981,4 +3267,139 @@ function openCreateRecallModal(wrap) {
       }
     });
   }
+}
+
+// ── 15. Data Quality & Mapping Governance (P05) ─────────────────────────────
+async function renderDataQualityTab(wrap) {
+  await loadCafesList();
+  const cafeId = selectedCafeFilter === "ALL" ? (state.user?.primaryCafeId || "ALL") : selectedCafeFilter;
+  wrap.innerHTML = `
+    <div style="display:flex; flex-direction:column; gap:16px;">
+      ${renderChildHeader({
+        parentTitle: "Inventory & Stock",
+        parentRoute: "inventory",
+        childTitle: "Data Quality & Mapping Governance",
+        childSubtitle: "Authoritative P05 item identity, UOM consistency, contracted rates, and purchasing eligibility gating.",
+        icon: "🛡️",
+        backBtnId: "inv-back-to-hub-btn",
+        actionsHtml: `
+          <button id="btn-run-dq-audit" class="btn btn-primary btn-sm" style="display:flex; align-items:center; gap:6px;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            Run Data Quality Audit
+          </button>
+        `,
+      })}
+
+      <div class="glass-card" style="padding:18px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+          <div>
+            <h3 style="font-size:15.5px; font-weight:700; margin:0; color:var(--ink);">Stock Policy &amp; Supplier Mapping Gating</h3>
+            <p style="font-size:12.5px; color:var(--muted); margin:2px 0 0;">Automatic replenishment and purchasing are strictly locked until unit conversions and vendor mappings pass verification.</p>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <label class="form-label" style="font-size:12px; font-weight:600; margin:0;">Café Scope:</label>
+            <select id="sel-dq-cafe" class="form-input" style="padding:4px 8px; font-size:12px;">
+              ${getCafeOptionsHtml(cafeId, true)}
+            </select>
+          </div>
+        </div>
+
+        <div id="data-quality-table-container">
+          <div style="text-align:center; padding:30px;"><div class="spinner"></div></div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  wrap.querySelector("#inv-back-to-hub-btn")?.addEventListener("click", () => navigate("inventory"));
+  wrap.querySelector("#btn-run-dq-audit")?.addEventListener("click", () => loadDataQualityData(wrap, selectedCafeFilter));
+  wrap.querySelector("#sel-dq-cafe")?.addEventListener("change", (e) => {
+    selectedCafeFilter = e.target.value;
+    loadDataQualityData(wrap, e.target.value);
+  });
+
+  await loadDataQualityData(wrap, cafeId);
+}
+
+async function loadDataQualityData(wrap, cafeId) {
+  const container = wrap.querySelector("#data-quality-table-container");
+  if (!container) return;
+
+  container.innerHTML = `<div style="text-align:center; padding:30px;"><div class="spinner"></div></div>`;
+
+  let report = null;
+  try {
+    const url = `/inventory/data-quality${cafeId && cafeId !== "ALL" ? `?cafeId=${encodeURIComponent(cafeId)}` : ""}`;
+    report = await apiGet(url);
+  } catch (err) {
+    console.warn("Data Quality API offline:", err);
+  }
+
+  const items = report?.items || [];
+  const total = report?.totalEvaluated || items.length;
+  const eligible = report?.eligibleCount || items.filter((i) => i.isAutomaticPurchasingEligible).length;
+  const blocked = report?.blockedCount || (total - eligible);
+
+  container.innerHTML = `
+    <!-- SUMMARY KPIS -->
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px; margin-bottom:16px;">
+      <div style="background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:12px 14px;">
+        <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase;">Total Items Evaluated</div>
+        <div style="font-size:20px; font-weight:800; color:var(--ink); margin-top:2px;">${total}</div>
+      </div>
+      <div style="background:var(--surface); border:1px solid rgba(5,150,105,0.2); border-radius:8px; padding:12px 14px;">
+        <div style="font-size:11px; font-weight:700; color:#059669; text-transform:uppercase;">Purchasing Eligible</div>
+        <div style="font-size:20px; font-weight:800; color:#059669; margin-top:2px;">${eligible}</div>
+      </div>
+      <div style="background:var(--surface); border:1px solid rgba(220,38,38,0.2); border-radius:8px; padding:12px 14px;">
+        <div style="font-size:11px; font-weight:700; color:var(--danger); text-transform:uppercase;">Blocked / Incomplete</div>
+        <div style="font-size:20px; font-weight:800; color:var(--danger); margin-top:2px;">${blocked}</div>
+      </div>
+    </div>
+
+    <div style="overflow-x:auto;">
+      <table class="glass-table" style="width:100%; border-collapse:collapse; font-size:13px;">
+        <thead>
+          <tr style="text-align:left; border-bottom:1px solid var(--border-color, var(--line));">
+            <th style="padding:10px 12px;">Item &amp; SKU</th>
+            <th style="padding:10px 12px;">Café</th>
+            <th style="padding:10px 12px; text-align:center;">Vendor Mapped</th>
+            <th style="padding:10px 12px; text-align:center;">Data Quality</th>
+            <th style="padding:10px 12px; text-align:center;">Auto-Purchase Status</th>
+            <th style="padding:10px 12px;">Issues / Incomplete Mappings</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${items.length === 0 ? `<tr><td colspan="6" style="text-align:center; padding:24px; color:var(--muted);">No inventory items found to audit.</td></tr>` : ""}
+          ${items.map((i) => `
+            <tr style="border-bottom:1px solid var(--line);">
+              <td style="padding:10px 12px;">
+                <strong style="color:var(--ink);">${i.name}</strong><br>
+                <span style="font-size:11.5px; font-family:var(--font-mono); color:var(--bronze-600);">${i.sku}</span>
+              </td>
+              <td style="padding:10px 12px; font-weight:600;">${i.cafeId}</td>
+              <td style="padding:10px 12px; text-align:center;">
+                <span class="badge-tag ${i.vendorMapped ? "badge-success" : "badge-danger"}" style="font-weight:700;">
+                  ${i.vendorMapped ? "YES" : "MISSING"}
+                </span>
+              </td>
+              <td style="padding:10px 12px; text-align:center;">
+                <span class="badge-tag ${i.dataQualityStatus === "VALID" ? "badge-success" : "badge-danger"}" style="font-weight:700;">
+                  ${i.dataQualityStatus}
+                </span>
+              </td>
+              <td style="padding:10px 12px; text-align:center;">
+                <span class="badge-tag ${i.isAutomaticPurchasingEligible ? "badge-success" : "badge-warning"}" style="font-weight:700;">
+                  ${i.isAutomaticPurchasingEligible ? "● ELIGIBLE" : "● BLOCKED"}
+                </span>
+              </td>
+              <td style="padding:10px 12px; font-size:12px; color:${i.errors?.length ? "var(--danger)" : "var(--muted)"};">
+                ${(i.errors && i.errors.length) ? i.errors.join(", ") : (i.warnings && i.warnings.length ? i.warnings.join(", ") : "All checks passed.")}
+              </td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
 }

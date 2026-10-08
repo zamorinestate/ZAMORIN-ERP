@@ -2211,6 +2211,24 @@ const cancelOrder = asyncHandler(async (request, response) => {
   order.cancellationReason = reasonText;
   order.lastModifiedByUserId = request.auth.userId;
 
+  // Atomically cancel any queued or claimed dispatch jobs
+  await ProcurementDispatchJob.updateMany(
+    {
+      purchaseOrderId,
+      status: { $in: ['QUEUED', 'CLAIMED'] },
+    },
+    {
+      $set: {
+        status: 'CANCELLED',
+        reconciliationNotes: `Order cancelled by ${request.auth.userId}: ${reasonText}`,
+      },
+    }
+  );
+
+  if (['QUEUED', 'CLAIMED', 'NOT_QUEUED'].includes(order.dispatchStatus)) {
+    order.dispatchStatus = 'CANCELLED';
+  }
+
   await order.save();
 
   await recordRequestAudit({
@@ -5432,6 +5450,287 @@ const sendToAccounts = asyncHandler(async (request, response) => {
   });
 });
 
+// ── P07 CAFÉ OPERATIONS PURCHASE REVIEW, APPROVAL & DISPATCH ──────────────────
+
+const { ProcurementApprovalService } = require('../services/procurementApprovalService');
+const { ProcurementDispatchService, defaultDispatchService } = require('../services/procurementDispatchService');
+const { ReplenishmentRecommendationService } = require('../services/replenishmentRecommendationService');
+
+/**
+ * POST /api/v1/procurement/orders/from-recommendations
+ */
+const createOrdersFromRecommendations = asyncHandler(async (request, response) => {
+  const { recommendationIds, cafeId } = request.body;
+  const effectiveCafeId = cafeId || request.headers['x-cafe-id'] || request.auth.primaryCafeId;
+
+  const orders = await ProcurementApprovalService.createDraftFromRecommendations({
+    organisationId: request.auth.organisationId,
+    cafeId: effectiveCafeId,
+    recommendationIds,
+    auth: request.auth,
+    request,
+  });
+
+  return response.status(201).json({
+    success: true,
+    data: {
+      orders: orders.map((o) => (o.toObject ? o.toObject() : o)),
+      count: orders.length,
+    },
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * POST /api/v1/procurement/orders/:purchaseOrderId/approve-and-send
+ */
+const approveAndSendOrder = asyncHandler(async (request, response) => {
+  const purchaseOrderId = normalizeId(request.params.purchaseOrderId);
+  const {
+    revisionNumber = 1,
+    notes = '',
+    idempotencyKey = null,
+    sendImmediately = true,
+    expectedSnapshotFingerprint = null,
+    expectedVersion = null,
+  } = request.body;
+
+  const result = await ProcurementApprovalService.approveAndQueueDispatch({
+    purchaseOrderId,
+    revisionNumber,
+    notes,
+    idempotencyKey,
+    expectedSnapshotFingerprint,
+    expectedVersion,
+    auth: request.auth,
+    request,
+  });
+
+  if (sendImmediately && result.dispatchJob && result.dispatchJob.status === 'QUEUED') {
+    defaultDispatchService.runDispatchWorker({ limit: 1 }).catch((err) => {
+      console.warn('[ProcurementController] Async dispatch non-fatal error:', err.message);
+    });
+  }
+
+  return response.status(200).json({
+    success: true,
+    data: {
+      order: result.order.toObject ? result.order.toObject() : result.order,
+      dispatchJob: result.dispatchJob ? (result.dispatchJob.toObject ? result.dispatchJob.toObject() : result.dispatchJob) : null,
+      alreadyApproved: Boolean(result.alreadyApproved),
+    },
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * POST /api/v1/procurement/orders/:purchaseOrderId/revisions
+ */
+const editOrderRevision = asyncHandler(async (request, response) => {
+  const purchaseOrderId = normalizeId(request.params.purchaseOrderId);
+  const { lineItems, expectedDeliveryDate, notes, reason } = request.body;
+
+  const order = await ProcurementApprovalService.editOrderRevision({
+    purchaseOrderId,
+    lineItems,
+    expectedDeliveryDate,
+    notes,
+    reason,
+    auth: request.auth,
+    request,
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: {
+      order: order.toObject ? order.toObject() : order,
+      currentRevision: order.currentRevision,
+    },
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * POST /api/v1/procurement/orders/:purchaseOrderId/vendor-acknowledgement
+ */
+const recordVendorAcknowledgement = asyncHandler(async (request, response) => {
+  const purchaseOrderId = normalizeId(request.params.purchaseOrderId);
+  const { status, notes, channel, confirmedLines } = request.body;
+
+  const order = await ProcurementApprovalService.recordVendorAcknowledgement({
+    purchaseOrderId,
+    status,
+    notes,
+    channel,
+    confirmedLines,
+    auth: request.auth,
+    request,
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: {
+      order: order.toObject ? order.toObject() : order,
+      vendorResponseStatus: order.vendorResponseStatus,
+    },
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * POST /api/v1/procurement/recommendations/:recommendationId/defer
+ */
+const deferRecommendation = asyncHandler(async (request, response) => {
+  const recommendationId = normalizeId(request.params.recommendationId);
+  const { deferredUntil, deferReason } = request.body;
+
+  const rec = await ReplenishmentRecommendationService.deferRecommendation({
+    organisationId: request.auth.organisationId,
+    cafeId: request.headers['x-cafe-id'] || request.auth.primaryCafeId,
+    recommendationId,
+    deferredUntil,
+    deferReason,
+    auth: request.auth,
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: {
+      recommendation: rec.toObject ? rec.toObject() : rec,
+      deferredUntil: rec.deferDetails?.deferredUntil,
+    },
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * POST /api/v1/procurement/recommendations/:recommendationId/reject
+ */
+const rejectRecommendation = asyncHandler(async (request, response) => {
+  const recommendationId = normalizeId(request.params.recommendationId);
+  const { reason } = request.body;
+
+  const rec = await ReplenishmentRecommendationService.dismissRecommendation({
+    organisationId: request.auth.organisationId,
+    cafeId: request.headers['x-cafe-id'] || request.auth.primaryCafeId,
+    recommendationId,
+    reason,
+    auth: request.auth,
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: {
+      recommendation: rec.toObject ? rec.toObject() : rec,
+      status: rec.status,
+    },
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * POST /api/v1/procurement/recommendations/:recommendationId/request-alternative
+ */
+const requestSupplierAlternative = asyncHandler(async (request, response) => {
+  const recommendationId = normalizeId(request.params.recommendationId);
+  const { reason } = request.body;
+
+  const rec = await ProcurementApprovalService.requestSupplierAlternative({
+    recommendationId,
+    reason,
+    auth: request.auth,
+    request,
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: {
+      recommendation: rec.toObject ? rec.toObject() : rec,
+      supplierCandidate: rec.supplierCandidate,
+    },
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * POST /api/v1/procurement/orders/:purchaseOrderId/escalate
+ */
+const escalateOrder = asyncHandler(async (request, response) => {
+  const purchaseOrderId = normalizeId(request.params.purchaseOrderId);
+  const { reason = 'Manual escalation to Primary Master' } = request.body;
+
+  const order = await PurchaseOrder.findOne({ purchaseOrderId });
+  if (!order) {
+    throw new ApiError(404, 'NOT_FOUND', `Purchase order ${purchaseOrderId} not found.`);
+  }
+
+  await ProcurementApprovalService.assertPurchasingAuthority(request.auth, order.cafeId, 'ESCALATE');
+
+  order.status = 'ESCALATED_PENDING_MASTER';
+  order.approvalNotes = `Manually escalated to Primary Master by ${request.auth.userId}: ${reason}`;
+  await order.save();
+
+  if (request) {
+    await recordRequestAudit({
+      request,
+      module: 'PROCUREMENT',
+      action: 'PURCHASE_ORDER_ESCALATED',
+      entityType: 'PURCHASE_ORDER',
+      entityId: purchaseOrderId,
+      before: { status: order.status },
+      after: { status: 'ESCALATED_PENDING_MASTER', reason },
+      result: 'SUCCESS',
+      riskClassification: 'HIGH',
+    });
+  }
+
+  return response.status(200).json({
+    success: true,
+    data: {
+      order: order.toObject ? order.toObject() : order,
+      status: order.status,
+    },
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * POST /api/v1/procurement/dispatch-worker/run
+ */
+const runProcurementDispatchWorker = asyncHandler(async (request, response) => {
+  const { limit = 10 } = request.body;
+  const outcomes = await defaultDispatchService.runDispatchWorker({ limit });
+
+  return response.status(200).json({
+    success: true,
+    data: { outcomes, count: outcomes.length },
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * POST /api/v1/procurement/dispatch-jobs/:dispatchJobId/reconcile
+ */
+const reconcileDispatchJob = asyncHandler(async (request, response) => {
+  const dispatchJobId = normalizeId(request.params.dispatchJobId);
+  const { confirmedOutcome, providerReferenceId, notes } = request.body;
+
+  const job = await ProcurementDispatchService.reconcileUnknownDispatch({
+    dispatchJobId,
+    confirmedOutcome,
+    providerReferenceId,
+    notes,
+    auth: request.auth,
+    request,
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: { job: job.toObject ? job.toObject() : job },
+    correlationId: request.correlationId || null,
+  });
+});
+
 module.exports = {
   getOrderDocuments,
   attachOrderDocument,
@@ -5479,6 +5778,16 @@ module.exports = {
   sourceElsewhere,
   getVendorFulfillmentAnalytics,
   sendToAccounts,
+  createOrdersFromRecommendations,
+  approveAndSendOrder,
+  editOrderRevision,
+  recordVendorAcknowledgement,
+  deferRecommendation,
+  rejectRecommendation,
+  requestSupplierAlternative,
+  escalateOrder,
+  runProcurementDispatchWorker,
+  reconcileDispatchJob,
   _setPoLocksDisabled,
   commitWithRetry,
   executeTransactionWithRetry,

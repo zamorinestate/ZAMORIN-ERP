@@ -60,6 +60,22 @@ const REGISTERED_JOBS = [
     staleThresholdMinutes: 1560,
     critical: true,
   },
+  {
+    jobId: 'JOB-REPLENISHMENT-SWEEP',
+    name: 'Scheduled Multi-Café Replenishment Safety Sweep',
+    schedule: 'Daily at 06:00 IST (30 0 * * *)',
+    owner: 'Café Operations & Procurement Lead',
+    staleThresholdMinutes: 1440,
+    critical: false,
+  },
+  {
+    jobId: 'JOB-PROCUREMENT-DISPATCH-WORKER',
+    name: 'Durable Purchase Order Vendor Dispatch Worker',
+    schedule: 'Every 1 minute (* * * * *)',
+    owner: 'Procurement & Logistics Operations',
+    staleThresholdMinutes: 10,
+    critical: true,
+  },
 ];
 
 class ScheduledJobRegistry {

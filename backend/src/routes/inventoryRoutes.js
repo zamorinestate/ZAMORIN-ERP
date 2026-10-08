@@ -36,6 +36,8 @@ const {
   traceForward,
   traceBackward,
   getReplenishmentRecommendations,
+  triggerReplenishmentEvaluation,
+  getReplenishmentExplanation,
   listCycleCounts,
   submitCycleCount,
   approveCycleCount,
@@ -48,6 +50,8 @@ const {
   getItem360,
   getConsumptionRecipeVariance,
   getInventoryValuationReport,
+  getDataQualityReport,
+  evaluateItemQuality,
 } = require('../controllers/inventoryController');
 
 const router = express.Router();
@@ -110,6 +114,18 @@ router.patch(
   '/cafes/:cafeId/stock/:itemId/configure',
   authorize('INVENTORY_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
   configureCafeStock
+);
+
+router.get(
+  '/cafes/:cafeId/stock/:itemId/quality',
+  authorize('INVENTORY_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  evaluateItemQuality
+);
+
+router.get(
+  '/data-quality',
+  authorize('INVENTORY_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  getDataQualityReport
 );
 
 // 4. Stock Movement Ledger & Mutations
@@ -237,11 +253,23 @@ router.post(
   createRecall
 );
 
-// 8. Replenishment & PAR
+// 8. Replenishment & PAR (P06 Automatic Engine)
 router.get(
   '/replenishment/recommendations',
   authorize('INVENTORY_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
   getReplenishmentRecommendations
+);
+
+router.post(
+  '/replenishment/evaluate',
+  authorize('INVENTORY_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  triggerReplenishmentEvaluation
+);
+
+router.get(
+  '/replenishment/recommendations/:id/explanation',
+  authorize('INVENTORY_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  getReplenishmentExplanation
 );
 
 // 9. Cycle Counts & Stocktake

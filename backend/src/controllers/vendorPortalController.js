@@ -187,6 +187,8 @@ async function getIssuedOrders(req, res, next) {
       purchaseOrderId: o.purchaseOrderId,
       cafeId: o.cafeId,
       status: o.status,
+      currentRevision: o.currentRevision || 1,
+      vendorResponseStatus: o.vendorResponseStatus || 'AWAITING_RESPONSE',
       fulfillmentStatus: o.fulfillmentStatus || 'PENDING_RECEIPT',
       orderDate: o.orderDate || o.createdAt,
       expectedDeliveryDate: o.expectedDeliveryDate || null,
@@ -242,24 +244,34 @@ async function getOrderDetail(req, res, next) {
     }
 
     // Sanitize line items — remove internal margins, cost codes, internal notes
-    const sanitizedLineItems = (order.lineItems || []).map((li) => ({
-      itemId: li.itemId,
-      itemName: li.itemNameSnapshot || li.itemId,
-      itemType: li.itemType || 'GOODS',
-      supplierItemCode: li.supplierItemCode || '',
-      packSize: li.packSize || '1 UNIT',
-      quantityOrdered: li.quantityOrdered,
-      quantityReceived: li.quantityReceived || 0,
-      unitPricePaisa: li.unitPricePaisa,
-      gstPercent: li.gstPercent || 0,
-      lineTotalPaisa: li.lineTotalPaisa,
-      fulfillmentStatus: li.fulfillmentStatus || 'PENDING_RECEIPT',
-    }));
+    const sanitizedLineItems = (order.lineItems || []).map((li) => {
+      const qty = li.orderedQuantityBase !== undefined ? li.orderedQuantityBase : (li.quantityOrdered || 0);
+      const total = li.totalLinePaisa !== undefined ? li.totalLinePaisa : (li.lineTotalPaisa || 0);
+      return {
+        itemId: li.itemId,
+        itemName: li.itemNameSnapshot || li.itemId,
+        itemType: li.itemType || 'GOODS',
+        supplierItemCode: li.supplierItemCode || '',
+        packSize: li.packSize || '1 UNIT',
+        baseUnit: li.baseUnit || 'units',
+        quantityOrdered: qty,
+        orderedQuantityBase: qty,
+        quantityReceived: li.receivedQuantityBase || li.quantityReceived || 0,
+        unitPricePaisa: li.unitPricePaisa,
+        gstPercent: li.gstPercent || 5,
+        lineTotalPaisa: total,
+        totalLinePaisa: total,
+        fulfillmentStatus: li.fulfillmentStatus || 'PENDING_RECEIPT',
+      };
+    });
 
     const sanitizedOrder = {
       purchaseOrderId: order.purchaseOrderId,
       cafeId: order.cafeId,
       status: order.status,
+      currentRevision: order.currentRevision || 1,
+      activeApprovedRevision: order.activeApprovedRevision || order.currentRevision || 1,
+      vendorResponseStatus: order.vendorResponseStatus || 'AWAITING_RESPONSE',
       fulfillmentStatus: order.fulfillmentStatus || 'PENDING_RECEIPT',
       orderDate: order.orderDate || order.createdAt,
       expectedDeliveryDate: order.expectedDeliveryDate,
@@ -267,7 +279,7 @@ async function getOrderDetail(req, res, next) {
       taxPaisa: order.taxPaisa || 0,
       totalPaisa: order.totalPaisa,
       paymentTerms: order.paymentTerms || 'NET_30',
-      shippingAddress: order.shippingAddress || `Zamorin Café - Outlet ${order.cafeId}`,
+      shippingAddress: order.shippingAddress || order.deliveryAddress || `Zamorin Café - Outlet ${order.cafeId}`,
       billingAddress: order.billingAddress || 'Zamorin Estate Pvt Ltd',
       lineItems: sanitizedLineItems,
       deliveries: (order.grnReceipts || []).map((g) => ({
@@ -367,17 +379,20 @@ async function downloadOrderPdf(req, res, next) {
       </tr>
     </thead>
     <tbody>
-      ${(order.lineItems || []).map((li, idx) => `
+      ${(order.lineItems || []).map((li, idx) => {
+        const qty = li.orderedQuantityBase !== undefined ? li.orderedQuantityBase : (li.quantityOrdered || 0);
+        const total = li.totalLinePaisa !== undefined ? li.totalLinePaisa : (li.lineTotalPaisa || 0);
+        return `
         <tr>
           <td>${idx + 1}</td>
           <td><strong>${li.itemNameSnapshot || li.itemId}</strong></td>
           <td>${li.packSize || '1 UNIT'}</td>
-          <td style="text-align:right;">${li.quantityOrdered}</td>
+          <td style="text-align:right;">${qty}</td>
           <td style="text-align:right;">₹${((li.unitPricePaisa || 0) / 100).toFixed(2)}</td>
-          <td style="text-align:right;">${li.gstPercent || 0}%</td>
-          <td style="text-align:right;">₹${((li.lineTotalPaisa || 0) / 100).toFixed(2)}</td>
-        </tr>
-      `).join('')}
+          <td style="text-align:right;">${li.gstPercent || 5}%</td>
+          <td style="text-align:right;">₹${((total || 0) / 100).toFixed(2)}</td>
+        </tr>`;
+      }).join('')}
       <tr class="total-row">
         <td colspan="6" style="text-align:right;">Subtotal:</td>
         <td style="text-align:right;">₹${(((order.subtotalPaisa || order.totalPaisa) || 0) / 100).toFixed(2)}</td>

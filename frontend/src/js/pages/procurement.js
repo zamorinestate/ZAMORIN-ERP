@@ -526,6 +526,181 @@ async function loadOrdersForOverview(root) {
   }
 }
 
+async function openReplenishmentReviewModal(root) {
+  openModal({
+    title: '📥 Replenishment Recommendations Review (P07)',
+    content: `
+      <div id="recs-modal-loading" style="padding:24px;text-align:center;">
+        ${skeleton('200px')}
+        <div style="margin-top:12px;font-size:12px;color:var(--muted);">Loading pending recommendations from P06 engine...</div>
+      </div>
+      <div id="recs-modal-content" style="display:none;max-height:70vh;overflow-y:auto;"></div>
+    `,
+  });
+
+  try {
+    const res = await apiGet('/inventory/recommendations?status=ACTIVE_REVIEW');
+    const recs = res?.data?.recommendations || [];
+    const container = document.querySelector('#recs-modal-content');
+    const loading = document.querySelector('#recs-modal-loading');
+
+    if (loading) loading.style.display = 'none';
+    if (!container) return;
+    container.style.display = 'block';
+
+    if (!recs.length) {
+      container.innerHTML = `
+        <div style="text-align:center;padding:32px;color:var(--muted);font-size:13px;">
+          No pending replenishment recommendations for this café.<br>
+          All inventory items are currently above configured reorder levels.
+        </div>
+      `;
+      return;
+    }
+
+    const byVendor = new Map();
+    for (const r of recs) {
+      const vId = r.supplierCandidate?.vendorId || 'UNASSIGNED';
+      if (!byVendor.has(vId)) byVendor.set(vId, []);
+      byVendor.get(vId).push(r);
+    }
+
+    let html = `<div style="display:flex;flex-direction:column;gap:16px;">`;
+
+    for (const [vId, group] of byVendor.entries()) {
+      const vName = group[0].supplierCandidate?.vendorName || vId;
+      const groupCost = group.reduce((sum, item) => sum + (item.calculation?.estimatedCostPaisa || 0), 0);
+
+      html += `
+        <div class="card" style="padding:14px;background:var(--surface);border:1px solid rgba(255,255,255,0.08);border-radius:8px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+            <div>
+              <div style="font-size:14px;font-weight:700;color:var(--ink);">${vName}</div>
+              <div style="font-size:11px;color:var(--muted);">${group.length} item(s) recommended • Est. Total: ${formatPaise(groupCost)}</div>
+            </div>
+            <button class="btn btn-sm btn-primary" data-convert-group="${vId}" data-rec-ids="${group.map((x) => x.recommendationId).join(',')}" style="font-size:11px;font-weight:700;">
+              ✨ Create Draft PO (${group.length} items)
+            </button>
+          </div>
+          <table class="glass-table" style="width:100%;font-size:11px;">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Usable Stock</th>
+                <th>Inbound</th>
+                <th>Suggested Order</th>
+                <th>Rate</th>
+                <th>Line Total</th>
+                <th style="text-align:center;">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${group.map((r) => `
+                <tr>
+                  <td>
+                    <strong>${r.itemSnapshot?.name || r.itemId}</strong>
+                    <div style="font-size:10px;color:var(--muted);">${r.explanation?.summary || ''}</div>
+                  </td>
+                  <td>${r.stockSnapshot?.usableQuantityBase || 0} ${r.itemSnapshot?.baseUnit || ''}</td>
+                  <td>${r.stockSnapshot?.eligibleInboundBase || 0} ${r.itemSnapshot?.baseUnit || ''}</td>
+                  <td><strong>${r.calculation?.suggestedPurchaseQuantity || 0} ${r.calculation?.purchaseUnit || ''}</strong> (${r.calculation?.suggestedBaseQuantity || 0} ${r.itemSnapshot?.baseUnit || ''})</td>
+                  <td>₹${((r.supplierCandidate?.contractedPricePaisa || 0) / 100).toFixed(2)}</td>
+                  <td><strong>${formatPaise(r.calculation?.estimatedCostPaisa || 0)}</strong></td>
+                  <td style="text-align:center;">
+                    <div style="display:inline-flex;gap:4px;">
+                      <button class="btn btn-sm btn-ghost" data-defer-rec="${r.recommendationId}" style="padding:2px 6px;font-size:10px;" title="Defer purchasing">⏳ Defer</button>
+                      <button class="btn btn-sm btn-ghost" data-alt-rec="${r.recommendationId}" style="padding:2px 6px;font-size:10px;" title="Request alternative vendor">🔄 Alt</button>
+                      <button class="btn btn-sm btn-ghost" data-reject-rec="${r.recommendationId}" style="padding:2px 6px;font-size:10px;color:var(--coral);" title="Reject recommendation">❌ Reject</button>
+                    </div>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    html += `</div>`;
+    container.innerHTML = html;
+
+    container.querySelectorAll('[data-convert-group]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const recIds = btn.dataset.recIds.split(',');
+        btn.disabled = true;
+        btn.textContent = 'Creating draft...';
+        try {
+          const res = await apiPost('/procurement/orders/from-recommendations', { recommendationIds: recIds });
+          showToast(`Successfully created ${res?.data?.count || 1} Purchase Order draft(s)!`, 'mint');
+          closeModal();
+          await loadOrdersSubtabData(root);
+        } catch (err) {
+          showToast(err.message || 'Failed to create draft PO', 'coral');
+          btn.disabled = false;
+          btn.textContent = '✨ Create Draft PO';
+        }
+      });
+    });
+
+    container.querySelectorAll('[data-defer-rec]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const recId = btn.dataset.deferRec;
+        const days = prompt('Enter number of days to defer this purchase recommendation (e.g. 1, 2, 7):', '1');
+        if (!days) return;
+        const until = new Date();
+        until.setDate(until.getDate() + parseInt(days, 10));
+        const reason = prompt('Enter reason for deferring:', 'Awaiting consumption trend');
+        try {
+          await apiPost(`/procurement/recommendations/${recId}/defer`, { deferredUntil: until.toISOString(), deferReason: reason || 'Deferred by manager' });
+          showToast(`Recommendation deferred until ${until.toISOString().slice(0, 10)}`, 'mint');
+          openReplenishmentReviewModal(root);
+        } catch (err) {
+          showToast(err.message || 'Failed to defer', 'coral');
+        }
+      });
+    });
+
+    container.querySelectorAll('[data-reject-rec]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const recId = btn.dataset.rejectRec;
+        const reason = prompt('Enter reason for rejecting this replenishment recommendation:');
+        if (!reason) {
+          showToast('A rejection reason is mandatory.', 'amber');
+          return;
+        }
+        try {
+          await apiPost(`/procurement/recommendations/${recId}/reject`, { reason });
+          showToast('Recommendation rejected.', 'mint');
+          openReplenishmentReviewModal(root);
+        } catch (err) {
+          showToast(err.message || 'Failed to reject', 'coral');
+        }
+      });
+    });
+
+    container.querySelectorAll('[data-alt-rec]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const recId = btn.dataset.altRec;
+        const reason = prompt('Enter reason for requesting an alternative supplier:', 'Supplier unavailable or rate unsuitable');
+        if (!reason) return;
+        try {
+          const altRes = await apiPost(`/procurement/recommendations/${recId}/request-alternative`, { reason });
+          showToast(`Switched to alternative supplier: ${altRes?.data?.supplierCandidate?.vendorName || 'Alternative'}`, 'mint');
+          openReplenishmentReviewModal(root);
+        } catch (err) {
+          showToast(err.message || 'Failed to find alternative supplier', 'coral');
+        }
+      });
+    });
+  } catch (err) {
+    const container = document.querySelector('#recs-modal-content');
+    if (container) {
+      container.style.display = 'block';
+      container.innerHTML = `<div style="color:var(--coral);padding:16px;">Failed to load recommendations: ${err.message}</div>`;
+    }
+  }
+}
+
 async function renderOrdersSubtab(root, container) {
   container.innerHTML = `
     <div class="card" style="padding:16px;background:var(--surface);">
@@ -536,14 +711,20 @@ async function renderOrdersSubtab(root, container) {
             <option value="ALL" ${selectedStatus === 'ALL' ? 'selected' : ''}>All Statuses</option>
             <option value="DRAFT" ${selectedStatus === 'DRAFT' ? 'selected' : ''}>Draft</option>
             <option value="SUBMITTED" ${selectedStatus === 'SUBMITTED' ? 'selected' : ''}>Submitted</option>
-            <option value="APPROVED" ${selectedStatus === 'APPROVED' ? 'selected' : ''}>Approved</option>
-            <option value="ORDERED" ${selectedStatus === 'ORDERED' ? 'selected' : ''}>Ordered</option>
+            <option value="ESCALATED_PENDING_MASTER" ${selectedStatus === 'ESCALATED_PENDING_MASTER' ? 'selected' : ''}>Escalated to Master</option>
+            <option value="APPROVED" ${selectedStatus === 'APPROVED' ? 'selected' : ''}>Approved & Queued</option>
+            <option value="ORDERED" ${selectedStatus === 'ORDERED' ? 'selected' : ''}>Sent to Vendor</option>
             <option value="PARTIALLY_RECEIVED" ${selectedStatus === 'PARTIALLY_RECEIVED' ? 'selected' : ''}>Partially Received</option>
             <option value="RECEIVED" ${selectedStatus === 'RECEIVED' ? 'selected' : ''}>Received</option>
             <option value="CANCELLED" ${selectedStatus === 'CANCELLED' ? 'selected' : ''}>Cancelled</option>
           </select>
         </div>
-        <button class="btn btn-sm btn-ghost" id="refresh-orders-btn" style="font-size:12px;" type="button">🔄 Refresh</button>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <button class="btn btn-sm btn-primary" id="btn-review-replenishment-recs" style="font-size:12px;display:flex;align-items:center;gap:6px;font-weight:700;" type="button">
+            <span>📥</span> Replenishment Recommendations
+          </button>
+          <button class="btn btn-sm btn-ghost" id="refresh-orders-btn" style="font-size:12px;" type="button">🔄 Refresh</button>
+        </div>
       </div>
       <div id="orders-table-wrapper">${skeleton('220px')}</div>
     </div>
@@ -560,6 +741,7 @@ async function renderOrdersSubtab(root, container) {
   });
 
   root.querySelector('#refresh-orders-btn')?.addEventListener('click', () => loadOrdersSubtabData(root));
+  root.querySelector('#btn-review-replenishment-recs')?.addEventListener('click', () => openReplenishmentReviewModal(root));
 
   await loadOrdersSubtabData(root);
 }
@@ -697,6 +879,12 @@ function renderFilteredOrders(root) {
             <td style="text-align:center;">
               <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;">
                 <button class="btn btn-sm btn-ghost" data-view-po="${o.purchaseOrderId}" style="padding:3px 8px;font-size:11px;" title="View 360 Detail">🔍 View</button>
+                ${['DRAFT', 'SUBMITTED', 'ESCALATED_PENDING_MASTER'].includes(o.status) ? `
+                  <button class="btn btn-sm btn-primary" data-p07-approve="${o.purchaseOrderId}" data-po-rev="${o.currentRevision || 1}" style="padding:3px 8px;font-size:11px;background:#059669;border-color:#059669;" title="Approve exact PO revision & queue dispatch">✅ Approve & Send</button>
+                ` : ''}
+                ${['ORDERED', 'ACKNOWLEDGED'].includes(o.status) ? `
+                  <button class="btn btn-sm btn-ghost" data-p07-vendor-ack="${o.purchaseOrderId}" style="padding:3px 8px;font-size:11px;border:1px solid rgba(255,255,255,0.15);" title="Record supplier response">📞 Supplier Resp</button>
+                ` : ''}
                 ${canEdit && isEditable ? `
                   <button class="btn btn-sm btn-ghost" data-edit-po="${o.purchaseOrderId}" style="padding:3px 8px;font-size:11px;" title="Rectify or update order request">✏️ Edit</button>
                 ` : ''}
@@ -752,6 +940,51 @@ function renderFilteredOrders(root) {
     btn.addEventListener('click', () => {
       const po = cachedOrders.find((x) => x.purchaseOrderId === btn.dataset.receivePo);
       if (po) openVerifyDeliveryModal(root, po);
+    });
+  });
+
+  wrap.querySelectorAll('[data-p07-approve]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const poId = btn.dataset.p07Approve;
+      const revNum = parseInt(btn.dataset.poRev || '1', 10);
+      const notes = prompt(`Approve and dispatch Purchase Order ${poId} (Rev ${revNum})? Optional notes:`, 'Approved by operations manager');
+      if (notes === null) return;
+      try {
+        btn.disabled = true;
+        btn.textContent = 'Approving...';
+        await apiPost(`/procurement/orders/${poId}/approve-and-send`, {
+          revisionNumber: revNum,
+          notes,
+        });
+        showToast(`Purchase Order ${poId} (Rev ${revNum}) approved and queued for dispatch!`, 'mint');
+        await loadOrdersSubtabData(root);
+        await loadProcurementOverview(root);
+      } catch (err) {
+        showToast(err.message || 'Failed to approve order', 'coral');
+        btn.disabled = false;
+        btn.textContent = '✅ Approve & Send';
+      }
+    });
+  });
+
+  wrap.querySelectorAll('[data-p07-vendor-ack]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const poId = btn.dataset.p07VendorAck;
+      const status = prompt('Select supplier response:\n1 = ACKNOWLEDGED\n2 = PARTIALLY_CONFIRMED\n3 = REJECTED\n4 = NO_RESPONSE', '1');
+      if (!status) return;
+      const statusMap = { '1': 'ACKNOWLEDGED', '2': 'PARTIALLY_CONFIRMED', '3': 'REJECTED', '4': 'NO_RESPONSE' };
+      const selectedResp = statusMap[status.trim()] || status.trim().toUpperCase();
+      const notes = prompt('Enter supplier communication notes/reference:');
+      try {
+        await apiPost(`/procurement/orders/${poId}/vendor-acknowledgement`, {
+          status: selectedResp,
+          notes: notes || '',
+        });
+        showToast(`Supplier response ${selectedResp} recorded for ${poId}!`, 'mint');
+        await loadOrdersSubtabData(root);
+      } catch (err) {
+        showToast(err.message || 'Failed to record supplier response', 'coral');
+      }
     });
   });
 }

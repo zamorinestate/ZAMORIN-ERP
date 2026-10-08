@@ -94,6 +94,16 @@ const cafeInventoryConfigSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    orderMultipleBase: {
+      type: Number,
+      default: 1,
+      min: 0.0001,
+    },
+    reorderPolicy: {
+      type: String,
+      enum: ['MIN_MAX', 'PAR_LEVEL', 'PERIODIC_REVIEW', 'DEMAND_DRIVEN'],
+      default: 'MIN_MAX',
+    },
     minQuantityBase: {
       type: Number,
       default: 0,
@@ -156,10 +166,51 @@ const cafeInventoryConfigSchema = new mongoose.Schema(
       type: [String],
       default: ['Main Store'],
     },
+    storageConstraints: {
+      locationZone: {
+        type: String,
+        default: 'MAIN_STORE',
+        trim: true,
+      },
+      maxStorageCapacityBase: {
+        type: Number,
+        default: null,
+        min: 0,
+      },
+      binLocation: {
+        type: String,
+        default: '',
+        trim: true,
+      },
+      temperatureZone: {
+        type: String,
+        enum: ['AMBIENT', 'CHILLED', 'FROZEN', 'COOL_DRY', 'GENERAL'],
+        default: 'AMBIENT',
+      },
+    },
+    supplierDeliveryDays: {
+      type: [String],
+      default: [],
+    },
     defaultVendorId: {
       type: String,
       trim: true,
       default: null,
+    },
+    isAutomaticPurchasingEligible: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    dataQualityStatus: {
+      type: String,
+      enum: ['VALID', 'WARNING', 'INVALID'],
+      default: 'VALID',
+      index: true,
+    },
+    dataQualityErrors: {
+      type: [String],
+      default: [],
     },
     status: {
       type: String,
@@ -186,6 +237,14 @@ const cafeInventoryConfigSchema = new mongoose.Schema(
 cafeInventoryConfigSchema.index(
   { organisationId: 1, cafeId: 1, itemId: 1 },
   { unique: true }
+);
+
+cafeInventoryConfigSchema.index(
+  { organisationId: 1, cafeId: 1, replenishmentEnabled: 1 }
+);
+
+cafeInventoryConfigSchema.index(
+  { organisationId: 1, cafeId: 1, isAutomaticPurchasingEligible: 1 }
 );
 
 const CafeInventoryConfig =

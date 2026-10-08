@@ -14,6 +14,9 @@ const { SequenceCounter } = require('../models/SequenceCounter');
 const { FefoService } = require('../services/fefoService');
 const { InventoryLotService } = require('../services/inventoryLotService');
 const RecallTraceService = require('../services/recallTraceService');
+const dataFoundationService = require('../services/dataFoundationService');
+const { ReplenishmentRecommendation } = require('../models/ReplenishmentRecommendation');
+const { ReplenishmentRecommendationService } = require('../services/replenishmentRecommendationService');
 const { ApiError } = require('../utils/ApiError');
 const { asyncHandler } = require('../utils/asyncHandler');
 
@@ -400,14 +403,31 @@ const getCafeStockItem = asyncHandler(async (request, response) => {
 const configureCafeStock = asyncHandler(async (request, response) => {
   const { organisationId } = request.auth;
   const { cafeId, itemId } = request.params;
-  const { minQuantity, parQuantity, maxQuantity, safetyStock, primaryLocation, stockedHere, replenishmentEnabled } = request.body;
+  const {
+    minQuantity,
+    parQuantity,
+    maxQuantity,
+    safetyStock,
+    primaryLocation,
+    stockedHere,
+    replenishmentEnabled,
+    orderMultipleBase,
+    reorderPolicy,
+    leadTimeDays,
+    defaultVendorId,
+    supplierDeliveryDays,
+    storageConstraints,
+  } = request.body;
 
   assertCafeAccess(request, cafeId);
 
+  const cleanCafe = cafeId.trim().toUpperCase();
+  const cleanItem = itemId.trim().toUpperCase();
+
   const config = await CafeInventoryConfig.findOne({
     organisationId,
-    cafeId: cafeId.trim().toUpperCase(),
-    itemId: itemId.trim().toUpperCase(),
+    cafeId: cleanCafe,
+    itemId: cleanItem,
   });
 
   if (!config) {
@@ -421,10 +441,57 @@ const configureCafeStock = asyncHandler(async (request, response) => {
   if (primaryLocation) config.primaryLocation = primaryLocation.trim();
   if (stockedHere !== undefined) config.stockedHere = Boolean(stockedHere);
   if (replenishmentEnabled !== undefined) config.replenishmentEnabled = Boolean(replenishmentEnabled);
+  if (orderMultipleBase !== undefined) config.orderMultipleBase = Number(orderMultipleBase);
+  if (reorderPolicy !== undefined) config.reorderPolicy = reorderPolicy;
+  if (leadTimeDays !== undefined) config.leadTimeDays = Number(leadTimeDays);
+  if (defaultVendorId !== undefined) config.defaultVendorId = defaultVendorId ? defaultVendorId.trim().toUpperCase() : null;
+  if (Array.isArray(supplierDeliveryDays)) config.supplierDeliveryDays = supplierDeliveryDays.map((d) => String(d).trim().toUpperCase());
+  if (storageConstraints && typeof storageConstraints === 'object') {
+    config.storageConstraints = {
+      ...config.storageConstraints,
+      ...storageConstraints,
+    };
+  }
 
   await config.save();
 
-  return response.status(200).json({ message: 'Café stocking profile updated.', config });
+  // Run data quality evaluation to validate policy and vendor mapping
+  const qualityResult = await dataFoundationService.validateItemDataQuality({
+    organisationId,
+    itemId: cleanItem,
+    cafeId: cleanCafe,
+  });
+
+  return response.status(200).json({
+    message: 'Café stocking profile updated.',
+    config,
+    quality: qualityResult,
+  });
+});
+
+const getDataQualityReport = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const { cafeId } = request.query;
+  if (cafeId && cafeId !== 'ALL') assertCafeAccess(request, cafeId);
+
+  const report = await dataFoundationService.runDataQualitySweep({
+    organisationId,
+    cafeId,
+  });
+  return response.status(200).json(report);
+});
+
+const evaluateItemQuality = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const { cafeId, itemId } = request.params;
+  assertCafeAccess(request, cafeId);
+
+  const result = await dataFoundationService.validateItemDataQuality({
+    organisationId,
+    itemId,
+    cafeId,
+  });
+  return response.status(200).json(result);
 });
 
 // 4. Stock Movement Ledger & Atomic Balance Mutations
@@ -1053,41 +1120,123 @@ const getFefoAlerts = asyncHandler(async (request, response) => {
   });
 });
 
-// 9. Replenishment Recommendations
+// 9. Replenishment Recommendations (P06 Automatic Engine)
 const getReplenishmentRecommendations = asyncHandler(async (request, response) => {
   const { organisationId } = request.auth;
-  const { cafeId } = request.query;
+  const effectiveCafe = resolveEffectiveCafeScope(request);
+  const requestedCafe = request.query.cafeId;
 
-  const filter = { organisationId, replenishmentEnabled: true };
-  if (cafeId) filter.cafeId = cafeId.trim().toUpperCase();
+  if (requestedCafe) assertCafeAccess(request, requestedCafe);
 
-  const configs = await CafeInventoryConfig.find(filter).lean();
-  const items = await GlobalInventoryItem.find({ organisationId }).lean();
-  const itemMap = new Map(items.map((i) => [i.itemId, i]));
+  const activeScopeCafe =
+    effectiveCafe || (requestedCafe && requestedCafe !== 'ALL' ? requestedCafe.trim().toUpperCase() : null);
 
-  const recommendations = configs
-    .filter((c) => c.currentQuantityBase <= c.minQuantityBase)
-    .map((c) => {
-      const itm = itemMap.get(c.itemId);
-      const needed = Math.max(0, (c.parQuantityBase || c.maxQuantityBase || 30) - c.currentQuantityBase - (c.inTransitQuantityBase || 0));
+  const { status, activeOnly, itemId } = request.query;
 
-      return {
-        itemId: c.itemId,
-        cafeId: c.cafeId,
-        sku: itm?.sku || c.itemId,
-        name: itm?.name || c.itemId,
-        baseUnit: itm?.baseUnit || 'unit',
-        currentStock: c.currentQuantityBase,
-        min: c.minQuantityBase,
-        par: c.parQuantityBase,
-        max: c.maxQuantityBase,
-        inTransit: c.inTransitQuantityBase || 0,
-        suggestedQty: needed,
-        suggestedSource: 'PROCUREMENT',
-      };
+  const filter = { organisationId: organisationId.trim().toUpperCase() };
+  if (activeScopeCafe) {
+    filter.cafeId = activeScopeCafe;
+  }
+  if (itemId) {
+    filter.itemId = itemId.trim().toUpperCase();
+  }
+  if (status) {
+    filter.status = status.trim().toUpperCase();
+  } else if (activeOnly !== 'false') {
+    filter.isActiveNeed = true;
+  }
+
+  const recommendations = await ReplenishmentRecommendation.find(filter)
+    .sort({ updatedAt: -1 })
+    .lean();
+
+  return response.status(200).json({
+    recommendations,
+    totalCount: recommendations.length,
+    activeCount: recommendations.filter((r) => r.isActiveNeed).length,
+    blockedDataQualityCount: recommendations.filter((r) => r.status === 'BLOCKED_DATA_QUALITY').length,
+    blockedConstraintCount: recommendations.filter((r) => r.status === 'BLOCKED_CONSTRAINT').length,
+  });
+});
+
+const triggerReplenishmentEvaluation = asyncHandler(async (request, response) => {
+  const { organisationId, role, userId } = request.auth;
+  const { cafeId, itemId } = request.body || {};
+
+  // Role validation: OWNER has strategic read-only visibility; cannot trigger evaluations
+  if (role === 'OWNER') {
+    throw new ApiError(
+      403,
+      'OWNER_READ_ONLY_POLICY',
+      'The Owner persona has strategic read-only visibility. Replenishment evaluation triggers are reserved for Café Operations and Primary Master.'
+    );
+  }
+
+  if (role !== 'MASTER' && role !== 'CAFE_ADMIN') {
+    throw new ApiError(403, 'AUTHORIZATION_DENIED', 'Unauthorized to trigger replenishment evaluation.');
+  }
+
+  if (!cafeId) {
+    throw new ApiError(400, 'VALIDATION_FAILED', 'cafeId is required to trigger replenishment evaluation.');
+  }
+
+  assertCafeAccess(request, cafeId);
+
+  const cleanOrg = organisationId.trim().toUpperCase();
+  const cleanCafe = cafeId.trim().toUpperCase();
+  const actorId = userId || 'SYSTEM';
+
+  if (itemId) {
+    // Single item evaluation
+    const cleanItem = itemId.trim().toUpperCase();
+    const result = await ReplenishmentRecommendationService.evaluateItem({
+      organisationId: cleanOrg,
+      cafeId: cleanCafe,
+      itemId: cleanItem,
+      source: 'MANUAL_ON_DEMAND',
+      actorId,
     });
+    return response.status(200).json({ success: true, result });
+  }
 
-  return response.status(200).json({ recommendations });
+  // Full café sweep
+  const sweepReport = await ReplenishmentRecommendationService.sweepCafe({
+    organisationId: cleanOrg,
+    cafeId: cleanCafe,
+    actorId,
+  });
+
+  return response.status(200).json({ success: true, sweepReport });
+});
+
+const getReplenishmentExplanation = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const { id } = request.params;
+
+  const recommendation = await ReplenishmentRecommendation.findOne({
+    organisationId: organisationId.trim().toUpperCase(),
+    $or: [{ recommendationId: id }, { _id: id }],
+  }).lean();
+
+  if (!recommendation) {
+    throw new ApiError(404, 'RECOMMENDATION_NOT_FOUND', `Recommendation ${id} was not found.`);
+  }
+
+  assertCafeAccess(request, recommendation.cafeId);
+
+  return response.status(200).json({
+    recommendationId: recommendation.recommendationId,
+    status: recommendation.status,
+    isActiveNeed: recommendation.isActiveNeed,
+    explanation: recommendation.explanation,
+    stockSnapshot: recommendation.stockSnapshot,
+    policySnapshot: recommendation.policySnapshot,
+    calculation: recommendation.calculation,
+    supplierCandidate: recommendation.supplierCandidate,
+    actionableExceptions: recommendation.actionableExceptions,
+    revisionHistory: recommendation.revisionHistory,
+    lastEvaluatedAt: recommendation.lastEvaluatedAt,
+  });
 });
 
 // 10. Cycle Counts & Physical Inventory
@@ -1588,6 +1737,8 @@ module.exports = {
   traceForward,
   traceBackward,
   getReplenishmentRecommendations,
+  triggerReplenishmentEvaluation,
+  getReplenishmentExplanation,
   listCycleCounts,
   submitCycleCount,
   approveCycleCount,
@@ -1599,4 +1750,6 @@ module.exports = {
   recordInternalLocationTransfer,
   getConsumptionRecipeVariance,
   getInventoryValuationReport,
+  getDataQualityReport,
+  evaluateItemQuality,
 };

@@ -202,7 +202,10 @@ const supplierItemCatalogueSchema = new mongoose.Schema(
     currentPricePaisa: { type: Number, required: true, min: 0 },
     taxPercent: { type: Number, min: 0, max: 100, default: 5 },
     moq: { type: Number, min: 1, default: 1 },
+    orderMultiple: { type: Number, min: 1, default: 1 },
     leadTimeDays: { type: Number, min: 0, default: 2 },
+    deliveryDays: [{ type: String, trim: true, uppercase: true }],
+    approvedCafeIds: [{ type: String, trim: true, uppercase: true }],
     sourcePriority: {
       type: String,
       enum: SOURCE_PRIORITIES,
@@ -651,6 +654,11 @@ vendorSchema.index(
 vendorSchema.index(
   { organisationId: 1, status: 1, category: 1 },
   { name: 'org_status_category' }
+);
+
+vendorSchema.index(
+  { organisationId: 1, 'supplierItemCatalogue.itemId': 1 },
+  { name: 'org_supplier_item' }
 );
 
 vendorSchema.index(

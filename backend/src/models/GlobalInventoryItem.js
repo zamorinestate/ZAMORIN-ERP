@@ -44,6 +44,18 @@ const ITEM_CATEGORIES = [
 
 const unitConversionSchema = new mongoose.Schema(
   {
+    fromUnit: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      default: '',
+    },
+    toUnit: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      default: '',
+    },
     displayUnit: {
       type: String,
       required: true,
@@ -55,6 +67,19 @@ const unitConversionSchema = new mongoose.Schema(
       type: Number,
       required: true,
       min: 0.000001,
+    },
+    version: {
+      type: Number,
+      default: 1,
+      min: 1,
+    },
+    effectiveFrom: {
+      type: Date,
+      default: Date.now,
+    },
+    effectiveTo: {
+      type: Date,
+      default: null,
     },
     isDefaultDisplay: {
       type: Boolean,
@@ -198,6 +223,28 @@ const globalInventoryItemSchema = new mongoose.Schema(
       type: [unitConversionSchema],
       default: [],
     },
+    storageConstraints: {
+      temperatureZone: {
+        type: String,
+        enum: ['AMBIENT', 'CHILLED', 'FROZEN', 'COOL_DRY', 'GENERAL'],
+        default: 'AMBIENT',
+      },
+      minTemperatureCelsius: { type: Number, default: null },
+      maxTemperatureCelsius: { type: Number, default: null },
+      maxHumidityPercent: { type: Number, default: null },
+      handlingNotes: { type: String, trim: true, default: '' },
+    },
+    primaryVendorId: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: null,
+      index: true,
+    },
+    approvedVendorIds: {
+      type: [String],
+      default: [],
+    },
     createdByUserId: {
       type: String,
       required: true,
@@ -231,6 +278,14 @@ globalInventoryItemSchema.index(
 globalInventoryItemSchema.index(
   { organisationId: 1, sku: 1 },
   { unique: true }
+);
+
+globalInventoryItemSchema.index(
+  { organisationId: 1, category: 1, status: 1 }
+);
+
+globalInventoryItemSchema.index(
+  { organisationId: 1, primaryVendorId: 1 }
 );
 
 const GlobalInventoryItem =

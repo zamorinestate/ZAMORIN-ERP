@@ -284,9 +284,6 @@ const DEFAULT_PERMISSION_RULES = [
   { role: 'CAFE_ADMIN', permissionCode: 'PROCUREMENT_WRITE', module: 'PROCUREMENT', resource: 'PURCHASE_ORDER', action: 'WRITE', effect: 'ALLOW', scope: 'RECORD', requiresMfa: true, requiresAuditEvent: true },
   { role: 'CAFE_ADMIN', permissionCode: 'PROCUREMENT_APPROVE', module: 'PROCUREMENT', resource: 'PURCHASE_ORDER', action: 'APPROVE', effect: 'ALLOW', scope: 'RECORD', requiresMfa: true, requiresAuditEvent: true },
   { role: 'CAFE_ADMIN', permissionCode: 'PROCUREMENT_RECEIVE', module: 'PROCUREMENT', resource: 'PURCHASE_ORDER', action: 'RECEIVE', effect: 'ALLOW', scope: 'RECORD', requiresMfa: true, requiresAuditEvent: true },
-  { role: 'STAFF', permissionCode: 'PROCUREMENT_READ', module: 'PROCUREMENT', resource: 'PURCHASE_ORDER', action: 'READ', effect: 'ALLOW', scope: 'RECORD', requiresMfa: false, requiresAuditEvent: false, description: 'Staff may read purchase orders for their assigned café.' },
-  { role: 'STAFF', permissionCode: 'PROCUREMENT_WRITE', module: 'PROCUREMENT', resource: 'PURCHASE_ORDER', action: 'WRITE', effect: 'ALLOW', scope: 'RECORD', requiresMfa: false, requiresAuditEvent: true, description: 'Staff/Cashier may create and edit order requests for their assigned café.' },
-  { role: 'STAFF', permissionCode: 'PROCUREMENT_RECEIVE', module: 'PROCUREMENT', resource: 'PURCHASE_ORDER', action: 'RECEIVE', effect: 'ALLOW', scope: 'RECORD', requiresMfa: false, requiresAuditEvent: true, description: 'Staff/Cashier may verify delivery and submit GRN with vendor bill.' },
   {
     role: 'STAFF',
     permissionCode: 'USER:READ_SELF',
