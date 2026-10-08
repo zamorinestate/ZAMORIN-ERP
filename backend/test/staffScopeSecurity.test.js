@@ -49,4 +49,28 @@ test('Staff Scope Security — STAFF is strictly restricted to self-service', as
       assert.equal(line.includes("'STAFF'"), false, `Staff must not be authorized on: ${line.trim()}`);
     }
   });
+
+  await t.test('STAFF and legacy CASHIER are excluded from Statutory GST & Till Reconciliation in financeRoutes.js', () => {
+    const financeLines = authorizationLines('backend/src/routes/financeRoutes.js');
+    assert.ok(financeLines.length > 0, 'Expected Finance authorization routes');
+    for (const line of financeLines) {
+      assert.equal(line.includes("'STAFF'"), false, `Staff must not be authorized on: ${line.trim()}`);
+      assert.equal(line.includes("'CASHIER'"), false, `Legacy Cashier must not be authorized on: ${line.trim()}`);
+    }
+  });
+
+  await t.test('STAFF is excluded from Owner Governance routes (complaints, loyalty, utilities)', () => {
+    const complaintsLines = authorizationLines('backend/src/routes/ownerComplaintsRoutes.js');
+    for (const line of complaintsLines) {
+      assert.equal(line.includes("'STAFF'"), false, `Staff must not be authorized on: ${line.trim()}`);
+    }
+    const loyaltyLines = authorizationLines('backend/src/routes/ownerCustomerLoyaltyRoutes.js');
+    for (const line of loyaltyLines) {
+      assert.equal(line.includes("'STAFF'"), false, `Staff must not be authorized on: ${line.trim()}`);
+    }
+    const utilitiesLines = authorizationLines('backend/src/routes/ownerUtilitiesWasteRoutes.js');
+    for (const line of utilitiesLines) {
+      assert.equal(line.includes("'STAFF'"), false, `Staff must not be authorized on: ${line.trim()}`);
+    }
+  });
 });
