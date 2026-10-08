@@ -456,6 +456,40 @@ test('OWNER Persona Authorization Matrix — Security Gate Verification', async 
     assert.equal(res.body.error.code, 'ROLE_NOT_ALLOWED');
   });
 
+  await t.test('5.5 Negative: Owner cannot generate statutory GST invoices (POST /api/v1/finance/invoices/gst)', async () => {
+    const middleware = authorize('FINANCE:WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] });
+    const req = {
+      auth: { ...ownerAuth },
+      body: { cafeId: 'ZC-0001', lineItems: [] },
+      method: 'POST',
+    };
+    const res = createMockResponse();
+
+    let nextCalled = false;
+    await middleware(req, res, () => { nextCalled = true; });
+
+    assert.equal(nextCalled, false, 'Owner MUST be denied from generating GST tax invoices');
+    assert.equal(res.statusCode, 403);
+    assert.equal(res.body.error.code, 'ROLE_NOT_ALLOWED');
+  });
+
+  await t.test('5.6 Negative: Owner cannot commit daily till Z-Reports (POST /api/v1/finance/reconciliation/z-report)', async () => {
+    const middleware = authorize('FINANCE:WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] });
+    const req = {
+      auth: { ...ownerAuth },
+      body: { cafeId: 'ZC-0001', registerSessionId: 'REG-01' },
+      method: 'POST',
+    };
+    const res = createMockResponse();
+
+    let nextCalled = false;
+    await middleware(req, res, () => { nextCalled = true; });
+
+    assert.equal(nextCalled, false, 'Owner MUST be denied from committing daily till reconciliation');
+    assert.equal(res.statusCode, 403);
+    assert.equal(res.body.error.code, 'ROLE_NOT_ALLOWED');
+  });
+
   // ─── 6. POSITIVE VERIFICATION: PERMITTED OWNER OPERATIONS ─────────────────
 
   const { RolePermission } = require('../src/models/RolePermission');
@@ -537,6 +571,44 @@ test('OWNER Persona Authorization Matrix — Security Gate Verification', async 
     await middleware(req, res, () => { nextCalled = true; });
 
     assert.equal(nextCalled, true, 'Owner MUST have access to Personal Ledger');
+    assert.equal(res.statusCode, 200);
+  });
+
+  await t.test('6.4 Positive: Owner can read/download invoice PDF (GET /api/v1/finance/invoices/:id/pdf)', async () => {
+    const middleware = authorize('FINANCE:READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] });
+    const req = {
+      auth: { ...ownerAuth },
+      method: 'GET',
+      get: () => null,
+      params: { id: 'INV-001' },
+      body: {},
+      query: {},
+    };
+    const res = createMockResponse();
+
+    let nextCalled = false;
+    await middleware(req, res, () => { nextCalled = true; });
+
+    assert.equal(nextCalled, true, 'Owner MUST be allowed to read invoice PDF where scope permits');
+    assert.equal(res.statusCode, 200);
+  });
+
+  await t.test('6.5 Positive: Owner can read GSTR-1 outward tax summary (GET /api/v1/finance/reports/gstr1/:cafeId)', async () => {
+    const middleware = authorize('FINANCE:READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] });
+    const req = {
+      auth: { ...ownerAuth },
+      method: 'GET',
+      get: () => null,
+      params: { cafeId: 'ZC-0001' },
+      body: {},
+      query: {},
+    };
+    const res = createMockResponse();
+
+    let nextCalled = false;
+    await middleware(req, res, () => { nextCalled = true; });
+
+    assert.equal(nextCalled, true, 'Owner MUST be allowed to read GSTR-1 tax return summary');
     assert.equal(res.statusCode, 200);
   });
 });

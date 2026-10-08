@@ -32,7 +32,7 @@ const RELEASE_SUITE = [
   'p1RemediationSuite.test.js',
   'p0BC_posAtomicityFefoConcurrency.test.js',
   'p0D_p1A_grnIdempotencyDiscrepancy.test.js',
-  'fivePersonaAccessMatrix.test.js',
+  'canonicalAccessMatrix.test.js',
   'ownerAuthorizationMatrix.test.js',
   'staffScopeSecurity.test.js',
 ];

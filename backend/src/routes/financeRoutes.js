@@ -282,7 +282,7 @@ router.get(
 // 15. Statutory GST Invoicing & GSTR Returns (Stage 08)
 router.post(
   '/invoices/gst',
-  authorize('FINANCE:WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  authorize('FINANCE:WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
   generateGstTaxInvoice
 );
 
@@ -301,7 +301,7 @@ router.get(
 // 16. Daily Till Reconciliation & Z-Report Settlement (Stage 08)
 router.post(
   '/reconciliation/z-report',
-  authorize('FINANCE:WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  authorize('FINANCE:WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
   commitZReport
 );
 
