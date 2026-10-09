@@ -42,8 +42,15 @@ const institutionalAccountSchema = new mongoose.Schema(
 
     institutionName: {
       type: String,
-      required: true,
       trim: true,
+      default: '',
+      index: true,
+    },
+
+    accountName: {
+      type: String,
+      trim: true,
+      default: '',
       index: true,
     },
 
@@ -65,6 +72,42 @@ const institutionalAccountSchema = new mongoose.Schema(
       type: Number,
       min: 0,
       default: 0,
+    },
+
+    reservedExposurePaisa: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+
+    paymentTermsDays: {
+      type: Number,
+      default: 30,
+      min: 0,
+    },
+
+    billingAddress: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+
+    gstin: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: '',
+    },
+
+    billingContact: {
+      name: { type: String, trim: true, default: '' },
+      email: { type: String, trim: true, lowercase: true, default: '' },
+      phone: { type: String, trim: true, default: '' },
+    },
+
+    permittedCafeIds: {
+      type: [String],
+      default: [],
     },
 
     creditStatus: {
@@ -96,6 +139,9 @@ const institutionalAccountSchema = new mongoose.Schema(
     collection: 'institutional_accounts',
   }
 );
+
+institutionalAccountSchema.index({ organisationId: 1, accountId: 1 }, { unique: true });
+institutionalAccountSchema.index({ organisationId: 1, creditStatus: 1 });
 
 const InstitutionalAccount =
   mongoose.models.InstitutionalAccount ||

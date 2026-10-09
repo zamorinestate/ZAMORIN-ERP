@@ -1038,7 +1038,7 @@ class PosOrderService {
         throw new ApiError(403, 'CREDIT_ACCOUNT_SUSPENDED', `Credit account ${institutionalAccountId} is ${account.creditStatus}.`);
       }
 
-      const availableCredit = Math.max(0, (account.creditLimitPaisa || 0) - (account.currentExposurePaisa || 0));
+      const availableCredit = Math.max(0, (account.creditLimitPaisa || 0) - ((account.currentExposurePaisa || 0) + (account.reservedExposurePaisa || 0)));
       if (dueAmountPaisa > availableCredit) {
         throw new ApiError(
           403,
@@ -1296,6 +1296,24 @@ class PosOrderService {
             console.error('[POS] Failed to record Cash Ledger reconciliation job for bill', billId, recErr?.message);
           }
         }
+      }
+
+      // 8. P10 Accounts Receivable & Institutional Credit Exposure Atomic Commit
+      if (dueAmountPaisa > 0 && orderPayload.institutionalAccountId) {
+        const institutionalCreditService = require('./institutionalCreditService');
+        await institutionalCreditService.commitCreditSaleAtomic({
+          organisationId: orgId,
+          cafeId,
+          accountId: orderPayload.institutionalAccountId,
+          billId,
+          invoiceNumber,
+          dueAmountPaisa,
+          customerPoNumber: orderPayload.customerPoNumber || '',
+          departmentName: orderPayload.departmentName || '',
+          costCentre: orderPayload.costCentre || '',
+          authContext,
+          session,
+        });
       }
 
       if (options.simulateCrashMidway) {

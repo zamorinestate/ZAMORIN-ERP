@@ -356,7 +356,7 @@ test('Screen 010: Finance & Accounts Integration Test Suite', async (t) => {
       port,
       method: 'GET',
       path: '/api/v1/finance/sales-audit',
-      headers: { Authorization: 'Bearer token_normal_master' },
+      headers: { Authorization: 'Bearer token_primary_master' },
     });
 
     assert.equal(res.statusCode, 200);

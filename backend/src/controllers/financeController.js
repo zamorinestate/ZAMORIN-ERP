@@ -984,46 +984,125 @@ const decidePaymentRun = asyncHandler(async (request, response) => {
 // 7. Accounts Receivable (AR) & Collections
 const listReceivables = asyncHandler(async (request, response) => {
   const { organisationId } = request.auth;
-  const { cafeId } = request.query;
+  const { cafeId, accountId, status } = request.query;
 
-  if (cafeId) ensureCafeAccess(request, cafeId);
+  if (cafeId && cafeId !== 'ALL') ensureCafeAccess(request, cafeId);
 
-  // Return departmental orders with credit outstanding
-  const filter = { organisationId, status: { $in: ['FULFILLED', 'IN_FULFILMENT', 'CONFIRMED'] } };
-  if (cafeId) filter.cafeId = cafeId.trim().toUpperCase();
+  const { Receivable } = require('../models/Receivable');
+  const filter = { organisationId: String(organisationId).toUpperCase() };
+  if (cafeId && cafeId !== 'ALL') filter.cafeId = cafeId.trim().toUpperCase();
+  if (accountId) filter.accountId = accountId.trim().toUpperCase();
+  if (status) filter.status = status;
 
-  const orders = await DepartmentOrder.find(filter).lean();
-  const receivables = orders.map((o) => ({
-    receivableId: `AR-${o.orderId}`,
-    customerName: o.accountName,
-    invoiceDate: o.businessDate,
-    amountPaisa: o.totalAmountPaisa,
-    status: o.creditSettlementStatus || 'PENDING',
-    cafeId: o.cafeId,
-  }));
-
-  return response.status(200).json({ receivables });
+  const receivables = await Receivable.find(filter).sort({ dueDate: 1 }).lean();
+  return response.status(200).json({ success: true, count: receivables.length, receivables });
 });
 
 const recordCustomerReceipt = asyncHandler(async (request, response) => {
   const { organisationId } = request.auth;
-  const { receivableId, amount, paymentMethod = 'BANK_TRANSFER', referenceNumber } = request.body;
+  const {
+    receivableId,
+    amount,
+    amountPaisa: rawAmountPaisa,
+    paymentMethod = 'CASH',
+    provider,
+    referenceNumber,
+    paymentReference,
+    registerSessionId,
+    notes,
+    idempotencyKey,
+    cafeId,
+  } = request.body;
 
-  if (!receivableId || !amount) {
-    throw new ApiError(400, 'VALIDATION_FAILED', 'Receivable ID and amount are required.');
+  const effectiveAmountPaisa = rawAmountPaisa
+    ? Number(rawAmountPaisa)
+    : amount !== undefined
+    ? Math.round(Number(amount) * 100)
+    : 0;
+
+  if (!receivableId || effectiveAmountPaisa <= 0) {
+    throw new ApiError(400, 'VALIDATION_FAILED', 'Receivable ID and positive collection amount are required.');
   }
 
-  return response.status(200).json({
-    message: 'Customer collection receipt applied to receivable.',
-    receipt: {
-      receiptId: `REC-2026-${Math.floor(1000 + Math.random() * 9000)}`,
-      receivableId,
-      amountPaisa: Math.round(Number(amount) * 100),
-      paymentMethod,
-      referenceNumber,
-      appliedAt: new Date(),
-    },
+  const institutionalCreditService = require('../services/institutionalCreditService');
+  const result = await institutionalCreditService.collectReceivableAtomic({
+    organisationId,
+    cafeId: cafeId || request.auth.primaryCafeId || request.auth.assignedCafeIds?.[0] || 'ZC-0001',
+    receivableId,
+    amountPaisa: effectiveAmountPaisa,
+    paymentMethod,
+    provider: provider || '',
+    paymentReference: paymentReference || referenceNumber || '',
+    registerSessionId: registerSessionId || null,
+    idempotencyKey: idempotencyKey || null,
+    notes: notes || '',
+    authContext: request.auth,
   });
+
+  return response.status(200).json({
+    success: true,
+    message: result.idempotentReplay
+      ? 'Idempotent replay: previous customer collection returned.'
+      : 'Customer collection receipt applied to receivable.',
+    data: result,
+  });
+});
+
+const getReceivableAgeing = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const { cafeId, asOfDate } = request.query;
+
+  if (cafeId && cafeId !== 'ALL') ensureCafeAccess(request, cafeId);
+
+  const institutionalCreditService = require('../services/institutionalCreditService');
+  const ageing = await institutionalCreditService.getReceivableAgeingReport({
+    organisationId,
+    cafeId: cafeId || null,
+    asOfDate: asOfDate || null,
+  });
+
+  return response.status(200).json({ success: true, data: ageing });
+});
+
+const getInstitutionalAccountStatement = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const { accountId } = request.params;
+  const { startDate, endDate } = request.query;
+
+  if (!accountId) {
+    throw new ApiError(400, 'ACCOUNT_ID_REQUIRED', 'accountId is required.');
+  }
+
+  const institutionalCreditService = require('../services/institutionalCreditService');
+  const statement = await institutionalCreditService.getAccountStatement({
+    organisationId,
+    accountId,
+    startDate,
+    endDate,
+  });
+
+  return response.status(200).json({ success: true, data: statement });
+});
+
+const updateInstitutionalCreditLimit = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const { accountId } = request.params;
+  const { newCreditLimitPaisa, reason } = request.body;
+
+  if (request.auth.role !== 'MASTER') {
+    throw new ApiError(403, 'PRIMARY_MASTER_REQUIRED', 'Only Primary Master may alter institutional credit limits.');
+  }
+
+  const institutionalCreditService = require('../services/institutionalCreditService');
+  const updated = await institutionalCreditService.updateCreditLimit({
+    organisationId,
+    accountId,
+    newCreditLimitPaisa,
+    reason,
+    authContext: request.auth,
+  });
+
+  return response.status(200).json({ success: true, message: 'Credit limit updated.', data: updated });
 });
 
 // 8. Marketplace Settlements
@@ -1448,6 +1527,175 @@ const commitZReport = asyncHandler(async (request, response) => {
   });
 });
 
+/**
+ * 17. Advance Deposits & Event Bookings (P10 CBIC GST Statutory Receipts & Refunds)
+ */
+const createAdvanceDeposit = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const {
+    cafeId,
+    customerId,
+    customerName,
+    customerPhone,
+    customerGstin,
+    eventReference,
+    eventDate,
+    amountPaisa,
+    amount,
+    paymentMethod = 'CASH',
+    provider,
+    paymentReference,
+    registerSessionId,
+    notes,
+    idempotencyKey,
+  } = request.body;
+
+  const effectivePaisa = amountPaisa ? Number(amountPaisa) : amount ? Math.round(Number(amount) * 100) : 0;
+  const effectiveCafe = cafeId || request.auth.primaryCafeId || request.auth.assignedCafeIds?.[0] || 'ZC-0001';
+  ensureCafeAccess(request, effectiveCafe);
+
+  const advanceDepositService = require('../services/advanceDepositService');
+  const result = await advanceDepositService.recordAdvanceDeposit({
+    organisationId,
+    cafeId: effectiveCafe,
+    customerId,
+    customerName,
+    customerPhone,
+    customerGstin,
+    eventReference,
+    eventDate,
+    amountPaisa: effectivePaisa,
+    paymentMethod,
+    provider,
+    paymentReference,
+    registerSessionId,
+    notes,
+    idempotencyKey,
+    authContext: request.auth,
+  });
+
+  return response.status(201).json({
+    success: true,
+    message: result.idempotentReplay ? 'Idempotent replay: advance deposit returned.' : 'Advance deposit recorded.',
+    data: result,
+  });
+});
+
+const listAdvanceDeposits = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const { cafeId, customerId, status } = request.query;
+
+  if (cafeId && cafeId !== 'ALL') ensureCafeAccess(request, cafeId);
+
+  const advanceDepositService = require('../services/advanceDepositService');
+  const deposits = await advanceDepositService.listAdvanceDeposits({
+    organisationId,
+    cafeId: cafeId || null,
+    customerId: customerId || null,
+    status: status || null,
+  });
+
+  return response.status(200).json({ success: true, count: deposits.length, deposits });
+});
+
+const applyAdvanceDeposit = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const { depositId } = request.params;
+  const { billId, invoiceNumber, amountToApplyPaisa, amountToApply } = request.body;
+
+  const effectivePaisa = amountToApplyPaisa
+    ? Number(amountToApplyPaisa)
+    : amountToApply
+    ? Math.round(Number(amountToApply) * 100)
+    : 0;
+
+  const advanceDepositService = require('../services/advanceDepositService');
+  const result = await advanceDepositService.applyAdvanceToBillAtomic({
+    organisationId,
+    depositId,
+    billId,
+    invoiceNumber,
+    amountToApplyPaisa: effectivePaisa,
+    authContext: request.auth,
+  });
+
+  return response.status(200).json({ success: true, message: 'Advance deposit applied to bill.', data: result });
+});
+
+const refundAdvanceDeposit = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const { depositId } = request.params;
+  const { amountToRefundPaisa, amountToRefund, reason, paymentMethod = 'CASH', paymentReference, registerSessionId } = request.body;
+
+  const effectivePaisa = amountToRefundPaisa
+    ? Number(amountToRefundPaisa)
+    : amountToRefund
+    ? Math.round(Number(amountToRefund) * 100)
+    : null;
+
+  const advanceDepositService = require('../services/advanceDepositService');
+  const result = await advanceDepositService.refundAdvanceAtomic({
+    organisationId,
+    depositId,
+    amountToRefundPaisa: effectivePaisa,
+    reason,
+    paymentMethod,
+    paymentReference,
+    registerSessionId,
+    authContext: request.auth,
+  });
+
+  return response.status(200).json({ success: true, message: 'Advance deposit refunded.', data: result });
+});
+
+/**
+ * 18. Cash Custody: Safe Drops & Bank Deposits (P10)
+ */
+const recordCashDrop = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const { cafeId, registerSessionId, amountPaisa, amount, reason, idempotencyKey } = request.body;
+
+  const effectivePaisa = amountPaisa ? Number(amountPaisa) : amount ? Math.round(Number(amount) * 100) : 0;
+  const effectiveCafe = cafeId || request.auth.primaryCafeId || request.auth.assignedCafeIds?.[0] || 'ZC-0001';
+  ensureCafeAccess(request, effectiveCafe);
+
+  const cashManagementService = require('../services/cashManagementService');
+  const result = await cashManagementService.recordCashDrop({
+    organisationId,
+    cafeId: effectiveCafe,
+    registerSessionId,
+    amountPaisa: effectivePaisa,
+    reason,
+    idempotencyKey,
+    authContext: request.auth,
+  });
+
+  return response.status(200).json({ success: true, message: 'Safe drop recorded.', data: result });
+});
+
+const recordBankDeposit = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const { cafeId, bankAccountId, amountPaisa, amount, source, referenceNumber, supportingDocumentUrl } = request.body;
+
+  const effectivePaisa = amountPaisa ? Number(amountPaisa) : amount ? Math.round(Number(amount) * 100) : 0;
+  const effectiveCafe = cafeId || request.auth.primaryCafeId || request.auth.assignedCafeIds?.[0] || 'ZC-0001';
+  ensureCafeAccess(request, effectiveCafe);
+
+  const cashManagementService = require('../services/cashManagementService');
+  const result = await cashManagementService.recordBankDeposit({
+    organisationId,
+    cafeId: effectiveCafe,
+    bankAccountId,
+    amountPaisa: effectivePaisa,
+    source,
+    referenceNumber,
+    supportingDocumentUrl,
+    authContext: request.auth,
+  });
+
+  return response.status(201).json({ success: true, message: 'Bank deposit recorded.', data: result });
+});
+
 module.exports = {
   getFinanceOverview,
   getSalesAudit,
@@ -1466,6 +1714,9 @@ module.exports = {
   decidePaymentRun,
   listReceivables,
   recordCustomerReceipt,
+  getReceivableAgeing,
+  getInstitutionalAccountStatement,
+  updateInstitutionalCreditLimit,
   listMarketplaceSettlements,
   reconcileMarketplaceSettlement,
   listBankAccounts,
@@ -1480,4 +1731,10 @@ module.exports = {
   downloadGstInvoicePdf,
   getGstr1Report,
   commitZReport,
+  createAdvanceDeposit,
+  listAdvanceDeposits,
+  applyAdvanceDeposit,
+  refundAdvanceDeposit,
+  recordCashDrop,
+  recordBankDeposit,
 };

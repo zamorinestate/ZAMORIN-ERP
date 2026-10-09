@@ -23,6 +23,9 @@ const {
   decidePaymentRun,
   listReceivables,
   recordCustomerReceipt,
+  getReceivableAgeing,
+  getInstitutionalAccountStatement,
+  updateInstitutionalCreditLimit,
   listMarketplaceSettlements,
   reconcileMarketplaceSettlement,
   listBankAccounts,
@@ -37,6 +40,12 @@ const {
   downloadGstInvoicePdf,
   getGstr1Report,
   commitZReport,
+  createAdvanceDeposit,
+  listAdvanceDeposits,
+  applyAdvanceDeposit,
+  refundAdvanceDeposit,
+  recordCashDrop,
+  recordBankDeposit,
 } = require('../controllers/financeController');
 
 const router = express.Router();
@@ -162,6 +171,30 @@ router.post(
   '/ar/receivables/receipts',
   authorize('FINANCE:WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
   recordCustomerReceipt
+);
+
+router.get(
+  '/receivables/ageing',
+  authorize('FINANCE:READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  getReceivableAgeing
+);
+
+router.get(
+  '/ar/ageing',
+  authorize('FINANCE:READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  getReceivableAgeing
+);
+
+router.get(
+  '/institutional-accounts/:accountId/statement',
+  authorize('FINANCE:READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  getInstitutionalAccountStatement
+);
+
+router.put(
+  '/institutional-accounts/:accountId/credit-limit',
+  authorize('FINANCE:ADMIN', { allowedRoles: ['MASTER'] }),
+  updateInstitutionalCreditLimit
 );
 
 // 8. Marketplace Settlements
@@ -308,5 +341,43 @@ router.post(
 // 17. REC-17 Vendor Accounts Payable Ledger & Subledger
 const vendorLedgerRoutes = require('./vendorLedgerRoutes');
 router.use('/vendor-ledger', vendorLedgerRoutes);
+
+// 18. P10 Advance Deposits & Event Bookings (CBIC Statutory Rules)
+router.get(
+  '/advance-deposits',
+  authorize('FINANCE:READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  listAdvanceDeposits
+);
+
+router.post(
+  '/advance-deposits',
+  authorize('FINANCE:WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  createAdvanceDeposit
+);
+
+router.post(
+  '/advance-deposits/:depositId/apply',
+  authorize('FINANCE:WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  applyAdvanceDeposit
+);
+
+router.post(
+  '/advance-deposits/:depositId/refund',
+  authorize('FINANCE:WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  refundAdvanceDeposit
+);
+
+// 19. P10 Physical Cash Custody: Safe Drops & Bank Deposits
+router.post(
+  '/cash/safe-drop',
+  authorize('FINANCE:WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  recordCashDrop
+);
+
+router.post(
+  '/cash/bank-deposit',
+  authorize('FINANCE:WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  recordBankDeposit
+);
 
 module.exports = router;

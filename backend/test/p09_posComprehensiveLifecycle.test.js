@@ -222,6 +222,27 @@ test('P09 Comprehensive POS, Menu, Payments & Customer Receipts Test Suite', asy
     ) || null;
   });
 
+  t.mock.method(InstitutionalAccount, 'findOneAndUpdate', async (filter = {}, update = {}) => {
+    const acc = institutionalAccountsDb.find((a) => {
+      if (filter.accountId && a.accountId !== filter.accountId) return false;
+      if (filter._id && String(a._id) !== String(filter._id)) return false;
+      return true;
+    });
+    if (!acc) return null;
+    if (update.$inc) {
+      if (update.$inc.currentExposurePaisa) acc.currentExposurePaisa = (acc.currentExposurePaisa || 0) + update.$inc.currentExposurePaisa;
+    }
+    return acc;
+  });
+
+  t.mock.method(InstitutionalAccount, 'findById', async (id) => {
+    return institutionalAccountsDb.find((a) => String(a._id) === String(id)) || null;
+  });
+
+  const { Receivable } = require('../src/models/Receivable');
+  Receivable.prototype.save = async function () { return this; };
+  t.mock.method(Receivable, 'findOne', async () => null);
+
   t.mock.method(SequenceCounter, 'generateId', async ({ prefix }) => {
     seqCount++;
     return `${prefix}-${seqCount}`;

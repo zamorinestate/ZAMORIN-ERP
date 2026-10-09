@@ -973,6 +973,19 @@ const voidBill = asyncHandler(async (request, response) => {
     }
   }
 
+  // If bill had an outstanding credit receivable, reverse receivable and release credit exposure
+  try {
+    const institutionalCreditService = require('../services/institutionalCreditService');
+    await institutionalCreditService.reverseCreditSaleAtomic({
+      organisationId: bill.organisationId,
+      billId: bill.billId,
+      reason: reasonText,
+      authContext: request.auth,
+    });
+  } catch (revCreditErr) {
+    console.warn('[POS] Credit sale reversal error on void:', revCreditErr.message);
+  }
+
   await recordRequestAudit({
     request,
     module: 'BILLS_RECEIPTS',
@@ -1736,43 +1749,21 @@ const closeRegisterSession = asyncHandler(async (request, response) => {
 
   assertCafeAccess(request, session.cafeId);
 
-  const counted = Number(countedCashPaisa) || 0;
-  // Calculate expected cash = opening float + cash sales + cash in - cash out - safe drops - cash refunds
-  let derivedCash = session.openingFloatPaisa;
-  for (const ev of session.cashEvents) {
-    if (ev.eventType === 'CASH_SALE' || ev.eventType === 'CASH_IN') {
-      derivedCash += ev.amountPaisa;
-    } else if (ev.eventType === 'CASH_OUT' || ev.eventType === 'SAFE_DROP' || ev.eventType === 'CASH_REFUND') {
-      derivedCash -= ev.amountPaisa;
-    }
-  }
-
-  session.expectedCashPaisa = derivedCash;
-  session.countedCashPaisa = counted;
-  session.cashVariancePaisa = counted - derivedCash;
-  session.closedAt = new Date();
-  session.status = 'CLOSED';
-  session.closingDeclarationNote = typeof closingDeclarationNote === 'string' ? closingDeclarationNote.trim() : '';
-
-  await session.save();
-
-  await AuditEvent.create({
-    organisationId: session.organisationId,
-    action: 'REGISTER_SESSION_CLOSED',
-    actor: { userId: request.auth.userId, role: request.auth.role },
-    target: { entityType: 'REGISTER_SESSION', entityId: session.registerSessionId },
-    details: {
-      cafeId: session.cafeId,
-      countedCashPaisa: counted,
-      expectedCashPaisa: derivedCash,
-      variancePaisa: session.cashVariancePaisa,
-    },
-  }).catch(() => {});
+  const cashManagementService = require('../services/cashManagementService');
+  const closeResult = await cashManagementService.closeRegisterSessionAtomic({
+    organisationId: request.auth.organisationId,
+    cafeId: session.cafeId,
+    registerSessionId: session.registerSessionId,
+    countedCashPaisa,
+    closingDeclarationNote,
+    varianceReason: request.body.varianceReason || '',
+    authContext: request.auth,
+  });
 
   return response.status(200).json({
     success: true,
-    message: `Register session ${registerSessionId} closed. Variance: ₹${(session.cashVariancePaisa / 100).toFixed(2)}`,
-    data: session,
+    message: `Register session ${registerSessionId} closed. Variance: ₹${(closeResult.variancePaisa / 100).toFixed(2)}`,
+    data: closeResult.session,
     correlationId: request.correlationId || null,
   });
 });

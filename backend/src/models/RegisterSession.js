@@ -10,6 +10,10 @@ const CASH_EVENT_TYPES = [
   'CASH_OUT',
   'SAFE_DROP',
   'NO_SALE_OPEN',
+  'RECEIVABLE_COLLECTION',
+  'ADVANCE_DEPOSIT',
+  'ADVANCE_REFUND',
+  'BANK_DEPOSIT',
 ];
 
 const cashEventSchema = new mongoose.Schema(
