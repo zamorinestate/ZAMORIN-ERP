@@ -18,6 +18,8 @@
 
 const mongoose = require('mongoose');
 const { RegisterSession } = require('../models/RegisterSession');
+const { SafeCustody } = require('../models/SafeCustody');
+const { BankDeposit } = require('../models/BankDeposit');
 const { CashTransaction } = require('../models/CashTransaction');
 const { BankAccount } = require('../models/BankAccount');
 const { SequenceCounter } = require('../models/SequenceCounter');
@@ -201,10 +203,26 @@ async function recordCashDrop({
       reason: reason.trim(),
       actorId: authContext.userId || 'SYSTEM',
       reference: idempotencyKey || `DROP-${Date.now()}`,
+      sourceCustody: 'REGISTER',
       timestamp: new Date(),
     });
 
     await regSession.save(session ? { session } : {});
+
+    // Atomically increment physical Safe Custody balance (Case A: Register -> Safe)
+    const effectiveCafe = cleanCafe || regSession.cafeId;
+    const safeCustody = await SafeCustody.findOneAndUpdate(
+      { organisationId: orgId, cafeId: effectiveCafe },
+      {
+        $inc: { currentBalancePaisa: amount },
+        $set: { lastUpdated: new Date() },
+      },
+      {
+        upsert: true,
+        returnDocument: 'after',
+        session: session || undefined,
+      }
+    );
 
     // Record internal custody transfer transaction
     try {
@@ -212,7 +230,7 @@ async function recordCashDrop({
       const cashTx = new CashTransaction({
         cashTransactionId: ctSeqId,
         organisationId: orgId,
-        cafeId: cleanCafe || regSession.cafeId,
+        cafeId: effectiveCafe,
         businessDate: regSession.businessDate,
         transactionType: 'CASH_OUT',
         direction: 'OUT',
@@ -234,7 +252,7 @@ async function recordCashDrop({
     if (authContext && authContext.userId) {
       await auditService.recordAuditEvent({
         organisationId: orgId,
-        cafeId: cleanCafe || regSession.cafeId,
+        cafeId: effectiveCafe,
         userId: authContext.userId,
         eventCategory: 'FINANCE',
         eventType: 'CASH_SAFE_DROP_RECORDED',
@@ -243,6 +261,7 @@ async function recordCashDrop({
         details: {
           amountPaisa: amount,
           remainingExpectedPaisa: regSession.expectedCashPaisa,
+          safeBalancePaisa: safeCustody ? safeCustody.currentBalancePaisa : amount,
           reason,
         },
       }).catch(() => {});
@@ -253,6 +272,7 @@ async function recordCashDrop({
       registerSessionId,
       dropAmountPaisa: amount,
       remainingExpectedPaisa: regSession.expectedCashPaisa,
+      safeBalancePaisa: safeCustody ? safeCustody.currentBalancePaisa : amount,
       session: regSession,
     };
   });
@@ -260,8 +280,22 @@ async function recordCashDrop({
 
 /**
  * Record a Bank Deposit
- * Custody transfer from physical cash (safe/till) into official bank account.
- * Core Invariant: Bank Deposit DOES NOT increase sales or customer receipts!
+ * Custody transfer from physical cash (safe or register) into official bank account.
+ *
+ * Distinct Custody Rules:
+ *  - Case B: Safe -> Bank (default: sourceCustody = 'SAFE')
+ *    Decreases safe custody cash atomically (fails if safe balance < amount).
+ *    Increases deposit-in-transit / bank destination.
+ *    Does NOT touch register till cash or expected till cash!
+ *    Does NOT change sales, income, or customer receipts.
+ *
+ *  - Case C: Direct Register -> Bank (sourceCustody = 'REGISTER')
+ *    Decreases register till cash.
+ *    Increases deposit-in-transit / bank destination.
+ *    Does NOT touch safe custody.
+ *    Does NOT change sales, income, or customer receipts.
+ *
+ * Enforces idempotency via BankDeposit unique key.
  */
 async function recordBankDeposit({
   organisationId,
@@ -269,20 +303,31 @@ async function recordBankDeposit({
   bankAccountId,
   amountPaisa,
   source = 'SAFE',
+  sourceCustody = null,
+  registerSessionId = null,
   referenceNumber = '',
   supportingDocumentUrl = '',
+  idempotencyKey = null,
   authContext = {},
 }) {
   const orgId = normalizeId(organisationId);
   const cleanCafe = normalizeId(cafeId);
   const cleanBankId = normalizeId(bankAccountId);
   const amount = Math.max(0, Math.round(Number(amountPaisa) || 0));
+  const effectiveCustody = (sourceCustody || source || 'SAFE').toUpperCase().trim();
 
   if (!orgId || !cleanBankId) {
     throw new ApiError(400, 'VALIDATION_FAILED', 'organisationId and bankAccountId are required.');
   }
   if (amount <= 0) {
     throw new ApiError(400, 'INVALID_AMOUNT', 'Deposit amount must be greater than zero.');
+  }
+  if (!['SAFE', 'REGISTER'].includes(effectiveCustody)) {
+    throw new ApiError(
+      400,
+      'INVALID_SOURCE_CUSTODY',
+      `sourceCustody must be 'SAFE' or 'REGISTER', received '${effectiveCustody}'.`
+    );
   }
 
   // Verify Bank Account
@@ -295,57 +340,234 @@ async function recordBankDeposit({
     throw new ApiError(404, 'BANK_ACCOUNT_NOT_FOUND', `Bank account ${cleanBankId} not found.`);
   }
 
-  const depositId = `BDEP-${getIstBusinessDate().replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
-
-  // Record treasury custody cash movement
-  const ctSeqId = `CT-${getIstBusinessDate().replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
-  const cashTx = new CashTransaction({
-    cashTransactionId: ctSeqId,
-    organisationId: orgId,
-    cafeId: cleanCafe,
-    businessDate: getIstBusinessDate(),
-    transactionType: 'BANK_DEPOSIT',
-    direction: 'OUT',
-    category: 'BANK_DEPOSIT',
-    amount: amount / 100,
-    paymentMethod: 'CASH',
-    status: 'POSTED',
-    description: `Bank Cash Deposit to ${bankAccount.bankName} (${bankAccount.accountNumberMasked || 'AC'}): Ref ${referenceNumber}`,
-    referenceType: 'BANK_DEPOSIT',
-    referenceId: depositId,
-    recordedBy: authContext.userId || 'SYSTEM',
-    createdBy: authContext.userId || 'SYSTEM',
-  });
-  await cashTx.save();
-
-  if (authContext && authContext.userId) {
-    await auditService.recordAuditEvent({
-      organisationId: orgId,
-      cafeId: cleanCafe,
-      userId: authContext.userId,
-      eventCategory: 'TREASURY',
-      eventType: 'BANK_DEPOSIT_RECORDED',
-      resourceType: 'BankAccount',
-      resourceId: cleanBankId,
-      details: {
-        depositId,
-        amountPaisa: amount,
-        bankName: bankAccount.bankName,
-        source,
-        referenceNumber,
-      },
-    }).catch(() => {});
+  // Idempotency fast-path check
+  if (idempotencyKey) {
+    const existing = await BankDeposit.findOne({ organisationId: orgId, idempotencyKey });
+    if (existing) {
+      return {
+        idempotentReplay: true,
+        depositId: existing.depositId,
+        bankAccountId: existing.bankAccountId,
+        bankName: existing.bankName,
+        amountPaisa: existing.amountPaisa,
+        sourceCustody: existing.sourceCustody,
+        source: existing.sourceCustody,
+        depositedAt: existing.depositedAt,
+        status: existing.status,
+        success: true,
+      };
+    }
   }
 
-  return {
-    success: true,
-    depositId,
-    bankAccountId: cleanBankId,
-    bankName: bankAccount.bankName,
-    amountPaisa: amount,
-    depositedAt: new Date(),
-    status: 'SUBMITTED',
-  };
+  const businessDate = getIstBusinessDate();
+  const dateCompact = businessDate.replace(/-/g, '');
+  let depositSeq;
+  try {
+    depositSeq = await SequenceCounter.generateId({
+      organisationId: orgId,
+      sequenceKey: `BDEP_${dateCompact}`,
+      prefix: `BDEP-${dateCompact}`,
+      minimumDigits: 4,
+    });
+  } catch {
+    depositSeq = `BDEP-${dateCompact}-${Date.now().toString(36).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
+  }
+
+  return await executeTransactionWithRetry(async (session) => {
+    // Re-check idempotency under transaction/concurrency lock
+    if (idempotencyKey) {
+      const existing = await BankDeposit.findOne({ organisationId: orgId, idempotencyKey }).session(session || null);
+      if (existing) {
+        return {
+          idempotentReplay: true,
+          depositId: existing.depositId,
+          bankAccountId: existing.bankAccountId,
+          bankName: existing.bankName,
+          amountPaisa: existing.amountPaisa,
+          sourceCustody: existing.sourceCustody,
+          source: existing.sourceCustody,
+          depositedAt: existing.depositedAt,
+          status: existing.status,
+          success: true,
+        };
+      }
+    }
+
+    let remainingSafeBalancePaisa = null;
+    let remainingTillBalancePaisa = null;
+
+    if (effectiveCustody === 'SAFE') {
+      // Case B: Safe -> Bank
+      // Atomic conditional decrement: currentBalancePaisa >= amount
+      const updatedSafe = await SafeCustody.findOneAndUpdate(
+        {
+          organisationId: orgId,
+          cafeId: cleanCafe,
+          currentBalancePaisa: { $gte: amount },
+        },
+        {
+          $inc: { currentBalancePaisa: -amount },
+          $set: { lastUpdated: new Date() },
+        },
+        {
+          returnDocument: 'after',
+          session: session || undefined,
+        }
+      );
+
+      if (!updatedSafe) {
+        const currentSafe = await SafeCustody.findOne({ organisationId: orgId, cafeId: cleanCafe }).session(session || null);
+        const available = currentSafe ? (currentSafe.currentBalancePaisa || 0) : 0;
+        throw new ApiError(
+          400,
+          'INSUFFICIENT_SAFE_CUSTODY',
+          `Cannot deposit ₹${(amount / 100).toFixed(2)} from safe: available safe balance is only ₹${(available / 100).toFixed(2)}.`
+        );
+      }
+      remainingSafeBalancePaisa = updatedSafe.currentBalancePaisa;
+    } else if (effectiveCustody === 'REGISTER') {
+      // Case C: Direct Register -> Bank
+      let regSession = null;
+      if (registerSessionId) {
+        regSession = await (session
+          ? RegisterSession.findOne({ organisationId: orgId, registerSessionId, status: 'OPEN' }).session(session)
+          : RegisterSession.findOne({ organisationId: orgId, registerSessionId, status: 'OPEN' }));
+      } else {
+        regSession = await (session
+          ? RegisterSession.findOne({ organisationId: orgId, cafeId: cleanCafe, status: 'OPEN' }).session(session)
+          : RegisterSession.findOne({ organisationId: orgId, cafeId: cleanCafe, status: 'OPEN' }));
+      }
+
+      if (!regSession) {
+        throw new ApiError(404, 'ACTIVE_SESSION_NOT_FOUND', `Active register session not found for direct bank deposit.`);
+      }
+
+      if ((regSession.expectedCashPaisa || 0) < amount) {
+        throw new ApiError(
+          400,
+          'INSUFFICIENT_TILL_CASH',
+          `Cannot deposit ₹${(amount / 100).toFixed(2)} directly from till: till balance is only ₹${(
+            (regSession.expectedCashPaisa || 0) / 100
+          ).toFixed(2)}.`
+        );
+      }
+
+      regSession.expectedCashPaisa -= amount;
+      regSession.cashEvents.push({
+        eventType: 'BANK_DEPOSIT',
+        amountPaisa: amount,
+        reason: `Direct Register Cash Deposit to ${bankAccount.bankName}: Ref ${referenceNumber || depositSeq}`,
+        actorId: authContext.userId || 'SYSTEM',
+        reference: depositSeq,
+        sourceCustody: 'REGISTER',
+        timestamp: new Date(),
+      });
+
+      await regSession.save(session ? { session } : {});
+      remainingTillBalancePaisa = regSession.expectedCashPaisa;
+    }
+
+    // Persist BankDeposit record (unique index on idempotencyKey protects against duplicate concurrent inserts)
+    let depositRecord;
+    try {
+      depositRecord = new BankDeposit({
+        depositId: depositSeq,
+        organisationId: orgId,
+        cafeId: cleanCafe,
+        bankAccountId: cleanBankId,
+        bankName: bankAccount.bankName,
+        sourceCustody: effectiveCustody,
+        registerSessionId: effectiveCustody === 'REGISTER' ? (registerSessionId || null) : null,
+        amountPaisa: amount,
+        referenceNumber: referenceNumber || '',
+        supportingDocumentUrl: supportingDocumentUrl || '',
+        idempotencyKey: idempotencyKey || null,
+        status: 'SUBMITTED',
+        depositedAt: new Date(),
+        depositedByUserId: authContext.userId || 'SYSTEM',
+      });
+      await depositRecord.save(session ? { session } : {});
+    } catch (insertErr) {
+      if (insertErr.code === 11000 && idempotencyKey) {
+        const replay = await BankDeposit.findOne({ organisationId: orgId, idempotencyKey });
+        if (replay) {
+          return {
+            idempotentReplay: true,
+            depositId: replay.depositId,
+            bankAccountId: replay.bankAccountId,
+            bankName: replay.bankName,
+            amountPaisa: replay.amountPaisa,
+            sourceCustody: replay.sourceCustody,
+            source: replay.sourceCustody,
+            depositedAt: replay.depositedAt,
+            status: replay.status,
+            success: true,
+          };
+        }
+      }
+      throw insertErr;
+    }
+
+    // Record treasury custody cash movement
+    try {
+      const ctSeqId = `CT-${businessDate.replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
+      const cashTx = new CashTransaction({
+        cashTransactionId: ctSeqId,
+        organisationId: orgId,
+        cafeId: cleanCafe,
+        businessDate,
+        transactionType: 'BANK_DEPOSIT',
+        direction: 'OUT',
+        category: 'BANK_DEPOSIT',
+        amount: amount / 100,
+        paymentMethod: 'CASH',
+        status: 'POSTED',
+        description: `Bank Cash Deposit (${effectiveCustody}) to ${bankAccount.bankName} (${bankAccount.accountNumberMasked || 'AC'}): Ref ${referenceNumber}`,
+        referenceType: 'BANK_DEPOSIT',
+        referenceId: depositSeq,
+        recordedBy: authContext.userId || 'SYSTEM',
+        createdBy: authContext.userId || 'SYSTEM',
+      });
+      await cashTx.save(session ? { session } : {});
+    } catch (ctErr) {
+      console.warn('[BANK_DEPOSIT] Could not record CashTransaction:', ctErr?.message);
+    }
+
+    if (authContext && authContext.userId) {
+      await auditService.recordAuditEvent({
+        organisationId: orgId,
+        cafeId: cleanCafe,
+        userId: authContext.userId,
+        eventCategory: 'TREASURY',
+        eventType: 'BANK_DEPOSIT_RECORDED',
+        resourceType: 'BankAccount',
+        resourceId: cleanBankId,
+        details: {
+          depositId: depositSeq,
+          amountPaisa: amount,
+          bankName: bankAccount.bankName,
+          sourceCustody: effectiveCustody,
+          referenceNumber,
+          remainingSafeBalancePaisa,
+          remainingTillBalancePaisa,
+        },
+      }).catch(() => {});
+    }
+
+    return {
+      success: true,
+      depositId: depositSeq,
+      bankAccountId: cleanBankId,
+      bankName: bankAccount.bankName,
+      amountPaisa: amount,
+      sourceCustody: effectiveCustody,
+      source: effectiveCustody,
+      depositedAt: depositRecord.depositedAt,
+      status: 'SUBMITTED',
+      remainingSafeBalancePaisa,
+      remainingTillBalancePaisa,
+    };
+  });
 }
 
 /**
@@ -387,12 +609,17 @@ async function closeRegisterSessionAtomic({
     // 2. Authoritative derivation of expected cash
     // expected = openingFloat + CASH_SALE + CASH_IN + RECEIVABLE_COLLECTION + ADVANCE_DEPOSIT
     //            - SAFE_DROP - CASH_OUT - CASH_REFUND - ADVANCE_REFUND
+    //            - BANK_DEPOSIT (ONLY if sourced directly from REGISTER till)
     let derivedExpected = regSession.openingFloatPaisa || 0;
     for (const ev of regSession.cashEvents || []) {
       if (['CASH_SALE', 'CASH_IN', 'RECEIVABLE_COLLECTION', 'ADVANCE_DEPOSIT'].includes(ev.eventType)) {
         derivedExpected += ev.amountPaisa;
-      } else if (['SAFE_DROP', 'CASH_OUT', 'CASH_REFUND', 'ADVANCE_REFUND', 'BANK_DEPOSIT'].includes(ev.eventType)) {
+      } else if (['SAFE_DROP', 'CASH_OUT', 'CASH_REFUND', 'ADVANCE_REFUND'].includes(ev.eventType)) {
         derivedExpected -= ev.amountPaisa;
+      } else if (ev.eventType === 'BANK_DEPOSIT') {
+        if (ev.sourceCustody === 'REGISTER' || ev.source === 'REGISTER') {
+          derivedExpected -= ev.amountPaisa;
+        }
       }
     }
     derivedExpected = Math.max(0, derivedExpected);
@@ -427,7 +654,7 @@ async function closeRegisterSessionAtomic({
         },
       },
       {
-        new: true,
+        returnDocument: 'after',
         session: session || undefined,
       }
     );
@@ -468,9 +695,74 @@ async function closeRegisterSessionAtomic({
   });
 }
 
+/**
+ * Query safe custody balance
+ */
+async function getSafeCustodyBalance({ organisationId, cafeId }) {
+  const orgId = normalizeId(organisationId);
+  const cleanCafe = normalizeId(cafeId);
+  const safe = await SafeCustody.findOne({ organisationId: orgId, cafeId: cleanCafe }).lean();
+  return {
+    organisationId: orgId,
+    cafeId: cleanCafe,
+    currentBalancePaisa: safe ? (safe.currentBalancePaisa || 0) : 0,
+    lastUpdated: safe ? safe.lastUpdated : null,
+  };
+}
+
+/**
+ * Query full physical custody balances
+ */
+async function getCustodyBalances({ organisationId, cafeId, registerSessionId = null }) {
+  const orgId = normalizeId(organisationId);
+  const cleanCafe = normalizeId(cafeId);
+
+  // 1. Till cash (from active open register session or specified session)
+  let tillPaisa = 0;
+  const regQuery = { organisationId: orgId, cafeId: cleanCafe, status: 'OPEN' };
+  if (registerSessionId) regQuery.registerSessionId = registerSessionId;
+  const openSession = await RegisterSession.findOne(regQuery).lean();
+  if (openSession) {
+    tillPaisa = openSession.expectedCashPaisa || 0;
+  }
+
+  // 2. Safe custody cash
+  const safe = await SafeCustody.findOne({ organisationId: orgId, cafeId: cleanCafe }).lean();
+  const safePaisa = safe ? (safe.currentBalancePaisa || 0) : 0;
+
+  // 3. Bank in-transit cash (submitted deposits not yet reconciled)
+  const inTransitAgg = await BankDeposit.aggregate([
+    {
+      $match: {
+        organisationId: orgId,
+        cafeId: cleanCafe,
+        status: { $in: ['SUBMITTED', 'IN_TRANSIT'] },
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        totalInTransitPaisa: { $sum: '$amountPaisa' },
+      },
+    },
+  ]);
+  const bankInTransitPaisa = inTransitAgg[0]?.totalInTransitPaisa || 0;
+
+  return {
+    organisationId: orgId,
+    cafeId: cleanCafe,
+    tillPaisa,
+    safePaisa,
+    bankInTransitPaisa,
+    totalCashInCustodyPaisa: tillPaisa + safePaisa + bankInTransitPaisa,
+  };
+}
+
 module.exports = {
   openRegisterSession,
   recordCashDrop,
   recordBankDeposit,
   closeRegisterSessionAtomic,
+  getSafeCustodyBalance,
+  getCustodyBalances,
 };

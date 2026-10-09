@@ -29,6 +29,8 @@ const { AdvanceDeposit } = require('../src/models/AdvanceDeposit');
 const { RegisterSession } = require('../src/models/RegisterSession');
 const { CashTransaction } = require('../src/models/CashTransaction');
 const { BankAccount } = require('../src/models/BankAccount');
+const { SafeCustody } = require('../src/models/SafeCustody');
+const { BankDeposit } = require('../src/models/BankDeposit');
 const { Bill } = require('../src/models/Bill');
 
 const institutionalCreditService = require('../src/services/institutionalCreditService');
@@ -426,6 +428,10 @@ test('P10 Invariant 7: Cash Custody Lifecycle (Float, Sales, Drop, Bank Deposit,
   assert.equal(dropRes.success, true);
   assert.equal(dropRes.remainingExpectedPaisa, 400000, 'Remaining till expected cash is ₹4,000 (Float ₹2,000 + Sale ₹10,000 - Drop ₹8,000)');
 
+  // Verify Safe Custody balance after drop: ₹8,000
+  const safeAfterDrop = await cashManagementService.getSafeCustodyBalance({ organisationId: ORG_ID, cafeId: CAFE_ID });
+  assert.equal(safeAfterDrop.currentBalancePaisa, 800000, 'Physical safe custody cash is ₹8,000');
+
   // 4. Record bank deposit from safe of ₹8,000
   await BankAccount.create({
     organisationId: ORG_ID,
@@ -450,8 +456,23 @@ test('P10 Invariant 7: Cash Custody Lifecycle (Float, Sales, Drop, Bank Deposit,
 
   assert.equal(bdepRes.success, true);
   assert.equal(bdepRes.amountPaisa, 800000);
+  assert.equal(bdepRes.remainingSafeBalancePaisa, 0, 'Safe balance reduced to ₹0 after deposit');
 
-  // 5. Close Register Session: Counted cash = ₹4,000 (Exact match)
+  // Verify Safe Custody balance after deposit to bank: ₹0
+  const safeAfterDeposit = await cashManagementService.getSafeCustodyBalance({ organisationId: ORG_ID, cafeId: CAFE_ID });
+  assert.equal(safeAfterDeposit.currentBalancePaisa, 0, 'Physical safe custody cash is ₹0');
+
+  // Query comprehensive custody balances
+  const custodySnap = await cashManagementService.getCustodyBalances({
+    organisationId: ORG_ID,
+    cafeId: CAFE_ID,
+    registerSessionId: session.registerSessionId,
+  });
+  assert.equal(custodySnap.tillPaisa, 400000, 'Till expected cash is unchanged at ₹4,000');
+  assert.equal(custodySnap.safePaisa, 0, 'Safe cash is ₹0');
+  assert.equal(custodySnap.bankInTransitPaisa, 800000, 'Bank in transit cash is ₹8,000');
+
+  // 5. Close Register Session: Counted cash = ₹4,000 (Exact match, NO double deduction!)
   const closeRes = await cashManagementService.closeRegisterSessionAtomic({
     organisationId: ORG_ID,
     cafeId: CAFE_ID,
@@ -671,4 +692,294 @@ test('P10 Invariant 11: Advance Deposit and Receivable Interaction on Final Larg
   const account = await InstitutionalAccount.findOne({ accountId: 'INST-EVENT-01' });
   assert.equal(account.currentExposurePaisa, 5000000, 'Exposure increases ONLY by the unpaid ₹50,000, not the full ₹100,000 bill');
 });
+
+test('P10 Invariant 12: Direct Register to Bank Deposit (Case C)', async () => {
+  // Register with ₹2,000 float + ₹8,000 cash sale = ₹10,000 till expected cash
+  const session = await cashManagementService.openRegisterSession({
+    organisationId: ORG_ID,
+    cafeId: CAFE_ID,
+    registerId: 'REG-DIRECT-01',
+    openingFloatPaisa: 200000, // ₹2,000
+    authContext: { userId: 'CASHIER-DIRECT' },
+  });
+
+  session.cashEvents.push({
+    eventType: 'CASH_SALE',
+    amountPaisa: 800000, // ₹8,000
+    reason: 'POS Sales',
+    actorId: 'CASHIER-DIRECT',
+    timestamp: new Date(),
+  });
+  session.expectedCashPaisa += 800000;
+  await session.save();
+
+  await BankAccount.create({
+    organisationId: ORG_ID,
+    bankAccountId: 'BANK-DIRECT-01',
+    accountAlias: 'Direct Operating A/C',
+    bankName: 'Axis Bank',
+    maskedAccountNumber: 'XXXX-XXXX-9999',
+    ifscCode: 'UTIB0001234',
+    glAccountCode: '1010-02',
+    accountType: 'CURRENT',
+  });
+
+  // Direct deposit ₹6,000 directly from REGISTER till to bank (Case C)
+  const directDep = await cashManagementService.recordBankDeposit({
+    organisationId: ORG_ID,
+    cafeId: CAFE_ID,
+    bankAccountId: 'BANK-DIRECT-01',
+    amountPaisa: 600000, // ₹6,000
+    source: 'REGISTER',
+    sourceCustody: 'REGISTER',
+    registerSessionId: session.registerSessionId,
+    referenceNumber: 'AXIS-DIRECT-001',
+    authContext: { userId: 'MANAGER-DIRECT' },
+  });
+
+  assert.equal(directDep.success, true);
+  assert.equal(directDep.sourceCustody, 'REGISTER');
+  assert.equal(directDep.remainingTillBalancePaisa, 400000, 'Till expected cash decreases from ₹10,000 to ₹4,000');
+
+  // Physical safe custody was untouched (0)
+  const safeBal = await cashManagementService.getSafeCustodyBalance({ organisationId: ORG_ID, cafeId: CAFE_ID });
+  assert.equal(safeBal.currentBalancePaisa, 0, 'Safe balance is untouched');
+
+  // Close Register Session with ₹4,000 counted cash -> exactly 0 variance!
+  const closeRes = await cashManagementService.closeRegisterSessionAtomic({
+    organisationId: ORG_ID,
+    cafeId: CAFE_ID,
+    registerSessionId: session.registerSessionId,
+    countedCashPaisa: 400000, // ₹4,000
+    closingDeclarationNote: 'Shift closed after direct bank deposit',
+    authContext: { userId: 'CASHIER-DIRECT' },
+  });
+
+  assert.equal(closeRes.success, true);
+  assert.equal(closeRes.variancePaisa, 0, 'Variance is 0 after direct register bank deposit');
+  assert.equal(closeRes.expectedCashPaisa, 400000);
+});
+
+test('P10 Invariant 13: Insufficient Safe Custody Fails Deterministically (Case D)', async () => {
+  // Seed safe with ₹5,000 (500,000 Paisa)
+  await SafeCustody.findOneAndUpdate(
+    { organisationId: ORG_ID, cafeId: CAFE_ID },
+    { $set: { currentBalancePaisa: 500000, lastUpdated: new Date() } },
+    { upsert: true }
+  );
+
+  await BankAccount.create({
+    organisationId: ORG_ID,
+    bankAccountId: 'BANK-SAFE-01',
+    accountAlias: 'Safe Dep A/C',
+    bankName: 'SBI',
+    maskedAccountNumber: 'XXXX-XXXX-1111',
+    ifscCode: 'SBIN0001234',
+    glAccountCode: '1010-03',
+    accountType: 'CURRENT',
+  });
+
+  // Attempt to deposit ₹8,000 from safe (only ₹5,000 available)
+  await assert.rejects(
+    async () => {
+      await cashManagementService.recordBankDeposit({
+        organisationId: ORG_ID,
+        cafeId: CAFE_ID,
+        bankAccountId: 'BANK-SAFE-01',
+        amountPaisa: 800000, // ₹8,000
+        source: 'SAFE',
+        referenceNumber: 'DEP-OVERDRAW-FAIL',
+        authContext: { userId: 'MANAGER-01' },
+      });
+    },
+    (err) => err.code === 'INSUFFICIENT_SAFE_CUSTODY' || /available safe balance is only ₹5000/i.test(err.message)
+  );
+
+  // Safe balance must remain untouched at ₹5,000
+  const safeBal = await cashManagementService.getSafeCustodyBalance({ organisationId: ORG_ID, cafeId: CAFE_ID });
+  assert.equal(safeBal.currentBalancePaisa, 500000, 'Safe balance is preserved at ₹5,000');
+});
+
+test('P10 Invariant 14: 50 Concurrent Duplicate Bank Deposits With Same Idempotency Key Transfer Exactly Once (Case E & F)', async () => {
+  // Seed safe with ₹10,000 (1,000,000 Paisa)
+  await SafeCustody.findOneAndUpdate(
+    { organisationId: ORG_ID, cafeId: CAFE_ID },
+    { $set: { currentBalancePaisa: 1000000, lastUpdated: new Date() } },
+    { upsert: true }
+  );
+
+  await BankAccount.create({
+    organisationId: ORG_ID,
+    bankAccountId: 'BANK-IDEMP-01',
+    accountAlias: 'Idemp Test A/C',
+    bankName: 'ICICI Bank',
+    maskedAccountNumber: 'XXXX-XXXX-4444',
+    ifscCode: 'ICIC0001234',
+    glAccountCode: '1010-04',
+    accountType: 'CURRENT',
+  });
+
+  // Fire 50 concurrent duplicate deposit requests for ₹8,000 with the SAME idempotency key
+  const sharedKey = `IDEMP-CORRECT-KEY-${Date.now()}`;
+  const burstCount = 50;
+
+  const results = await Promise.allSettled(
+    Array.from({ length: burstCount }, () =>
+      cashManagementService.recordBankDeposit({
+        organisationId: ORG_ID,
+        cafeId: CAFE_ID,
+        bankAccountId: 'BANK-IDEMP-01',
+        amountPaisa: 800000, // ₹8,000
+        source: 'SAFE',
+        referenceNumber: 'BURST-REF-50',
+        idempotencyKey: sharedKey,
+        authContext: { userId: 'MANAGER-IDEMP' },
+      })
+    )
+  );
+
+  const successful = results.filter((r) => r.status === 'fulfilled');
+  const rejected = results.filter((r) => r.status === 'rejected');
+
+  assert.equal(successful.length, burstCount, 'All 50 duplicate requests must resolve successfully (primary or replay)');
+  assert.equal(rejected.length, 0, 'No requests should crash');
+
+  // Verify that safe balance was decremented EXACTLY ONCE: ₹10,000 - ₹8,000 = ₹2,000
+  const safeBal = await cashManagementService.getSafeCustodyBalance({ organisationId: ORG_ID, cafeId: CAFE_ID });
+  assert.equal(safeBal.currentBalancePaisa, 200000, 'Safe balance decremented exactly once to ₹2,000');
+
+  // Exactly one BankDeposit record exists
+  const depositDocs = await BankDeposit.find({ organisationId: ORG_ID, idempotencyKey: sharedKey });
+  assert.equal(depositDocs.length, 1, 'Exactly one BankDeposit persisted in database');
+});
+
+test('P10 Invariant 15: Competing Concurrent Non-Duplicate Deposits Cannot Overdraw Safe Balance (Case G)', async () => {
+  // Safe has ₹10,000 (1,000,000 Paisa)
+  await SafeCustody.findOneAndUpdate(
+    { organisationId: ORG_ID, cafeId: CAFE_ID },
+    { $set: { currentBalancePaisa: 1000000, lastUpdated: new Date() } },
+    { upsert: true }
+  );
+
+  await BankAccount.create({
+    organisationId: ORG_ID,
+    bankAccountId: 'BANK-COMPETE-01',
+    accountAlias: 'Compete Test A/C',
+    bankName: 'Kotak Bank',
+    maskedAccountNumber: 'XXXX-XXXX-7777',
+    ifscCode: 'KKBK0001234',
+    glAccountCode: '1010-05',
+    accountType: 'CURRENT',
+  });
+
+  // Two concurrent distinct requests for ₹8,000 each (total attempted ₹16,000 > ₹10,000 available)
+  const results = await Promise.allSettled([
+    cashManagementService.recordBankDeposit({
+      organisationId: ORG_ID,
+      cafeId: CAFE_ID,
+      bankAccountId: 'BANK-COMPETE-01',
+      amountPaisa: 800000, // ₹8,000
+      source: 'SAFE',
+      referenceNumber: 'COMPETE-01',
+      idempotencyKey: `KEY-COMPETE-A-${Date.now()}`,
+      authContext: { userId: 'MANAGER-01' },
+    }),
+    cashManagementService.recordBankDeposit({
+      organisationId: ORG_ID,
+      cafeId: CAFE_ID,
+      bankAccountId: 'BANK-COMPETE-01',
+      amountPaisa: 800000, // ₹8,000
+      source: 'SAFE',
+      referenceNumber: 'COMPETE-02',
+      idempotencyKey: `KEY-COMPETE-B-${Date.now()}`,
+      authContext: { userId: 'MANAGER-02' },
+    }),
+  ]);
+
+  const successful = results.filter((r) => r.status === 'fulfilled');
+  const rejected = results.filter((r) => r.status === 'rejected');
+
+  assert.equal(successful.length, 1, 'Exactly 1 competing deposit can succeed');
+  assert.equal(rejected.length, 1, 'The competing deposit must fail due to insufficient safe balance');
+  assert.equal(rejected[0].reason.code, 'INSUFFICIENT_SAFE_CUSTODY');
+
+  // Safe balance ends at ₹2,000 (never negative!)
+  const safeBal = await cashManagementService.getSafeCustodyBalance({ organisationId: ORG_ID, cafeId: CAFE_ID });
+  assert.equal(safeBal.currentBalancePaisa, 200000, 'Safe balance is exactly ₹2,000 (never negative)');
+});
+
+test('P10 Invariant 16: Concurrency Race on Register Session Close', async () => {
+  const session = await cashManagementService.openRegisterSession({
+    organisationId: ORG_ID,
+    cafeId: CAFE_ID,
+    registerId: 'REG-RACE-01',
+    openingFloatPaisa: 100000, // ₹1,000
+    authContext: { userId: 'CASHIER-RACE' },
+  });
+
+  // 10 concurrent close requests on the exact same session
+  const closeBurst = 10;
+  const results = await Promise.allSettled(
+    Array.from({ length: closeBurst }, () =>
+      cashManagementService.closeRegisterSessionAtomic({
+        organisationId: ORG_ID,
+        cafeId: CAFE_ID,
+        registerSessionId: session.registerSessionId,
+        countedCashPaisa: 100000,
+        closingDeclarationNote: 'Shift close race test',
+        authContext: { userId: 'CASHIER-RACE' },
+      })
+    )
+  );
+
+  const successful = results.filter((r) => r.status === 'fulfilled');
+  const rejected = results.filter((r) => r.status === 'rejected');
+
+  assert.equal(successful.length, 1, 'Exactly 1 close request must succeed');
+  assert.equal(rejected.length, closeBurst - 1, 'All other concurrent close requests must be rejected');
+  assert.ok(rejected.every((r) => r.reason.code === 'SESSION_ALREADY_CLOSED'));
+});
+
+test('P10 Invariant 17: Statutory CBIC GST Advance Deposit Configuration (GOODS vs SERVICES)', async () => {
+  // Case 1: Advance deposit for GOODS (Exempt from GST at advance receipt per CBIC Notification 66/2017-CT)
+  const goodsDeposit = await advanceDepositService.recordAdvanceDeposit({
+    organisationId: ORG_ID,
+    cafeId: CAFE_ID,
+    customerName: 'Speciality Coffee Pack Wholesaler',
+    amountPaisa: 500000, // ₹5,000
+    supplyType: 'GOODS',
+    paymentMethod: 'UPI',
+    paymentReference: 'UPI-GOODS-ADV-01',
+    authContext: { userId: 'CASHIER-01' },
+  });
+
+  assert.equal(goodsDeposit.deposit.supplyType, 'GOODS');
+  assert.equal(goodsDeposit.deposit.taxRatePercent, 0, 'Statutory tax rate at advance receipt for goods is 0%');
+  assert.equal(goodsDeposit.deposit.cgstPaisa, 0, 'CGST is 0 for goods advance');
+  assert.equal(goodsDeposit.deposit.sgstPaisa, 0, 'SGST is 0 for goods advance');
+  assert.equal(goodsDeposit.deposit.igstPaisa, 0, 'IGST is 0 for goods advance');
+  assert.equal(goodsDeposit.deposit.taxableAmountPaisa, 500000, 'Taxable value is full deposit amount ₹5,000');
+
+  // Case 2: Advance deposit for SERVICES (e.g. banquet/catering event, attracting GST at receipt)
+  const servicesDeposit = await advanceDepositService.recordAdvanceDeposit({
+    organisationId: ORG_ID,
+    cafeId: CAFE_ID,
+    customerName: 'Zamorin Banquet Corporate Party',
+    amountPaisa: 1050000, // ₹10,500 gross (inclusive of 5% GST = ₹10,000 taxable + ₹250 CGST + ₹250 SGST)
+    supplyType: 'SERVICES',
+    taxRatePercent: 5,
+    paymentMethod: 'BANK_TRANSFER',
+    paymentReference: 'NEFT-SERV-ADV-01',
+    authContext: { userId: 'MANAGER-01' },
+  });
+
+  assert.equal(servicesDeposit.deposit.supplyType, 'SERVICES');
+  assert.equal(servicesDeposit.deposit.taxRatePercent, 5);
+  assert.equal(servicesDeposit.deposit.taxableAmountPaisa, 1000000, 'Taxable value is ₹10,000');
+  assert.equal(servicesDeposit.deposit.cgstPaisa, 25000, 'CGST is ₹250');
+  assert.equal(servicesDeposit.deposit.sgstPaisa, 25000, 'SGST is ₹250');
+  assert.equal(servicesDeposit.deposit.igstPaisa, 0);
+  assert.equal(servicesDeposit.deposit.taxRuleVersion, 'GST_ROUNDING_V1_2026');
+});
+
 

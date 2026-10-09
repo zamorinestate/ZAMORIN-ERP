@@ -1548,6 +1548,9 @@ const createAdvanceDeposit = asyncHandler(async (request, response) => {
     registerSessionId,
     notes,
     idempotencyKey,
+    supplyType,
+    taxRatePercent,
+    isInterState,
   } = request.body;
 
   const effectivePaisa = amountPaisa ? Number(amountPaisa) : amount ? Math.round(Number(amount) * 100) : 0;
@@ -1565,6 +1568,9 @@ const createAdvanceDeposit = asyncHandler(async (request, response) => {
     eventReference,
     eventDate,
     amountPaisa: effectivePaisa,
+    supplyType,
+    taxRatePercent,
+    isInterState,
     paymentMethod,
     provider,
     paymentReference,
@@ -1675,7 +1681,18 @@ const recordCashDrop = asyncHandler(async (request, response) => {
 
 const recordBankDeposit = asyncHandler(async (request, response) => {
   const { organisationId } = request.auth;
-  const { cafeId, bankAccountId, amountPaisa, amount, source, referenceNumber, supportingDocumentUrl } = request.body;
+  const {
+    cafeId,
+    bankAccountId,
+    amountPaisa,
+    amount,
+    source,
+    sourceCustody,
+    registerSessionId,
+    referenceNumber,
+    supportingDocumentUrl,
+    idempotencyKey,
+  } = request.body;
 
   const effectivePaisa = amountPaisa ? Number(amountPaisa) : amount ? Math.round(Number(amount) * 100) : 0;
   const effectiveCafe = cafeId || request.auth.primaryCafeId || request.auth.assignedCafeIds?.[0] || 'ZC-0001';
@@ -1688,12 +1705,31 @@ const recordBankDeposit = asyncHandler(async (request, response) => {
     bankAccountId,
     amountPaisa: effectivePaisa,
     source,
+    sourceCustody,
+    registerSessionId,
     referenceNumber,
     supportingDocumentUrl,
+    idempotencyKey,
     authContext: request.auth,
   });
 
   return response.status(201).json({ success: true, message: 'Bank deposit recorded.', data: result });
+});
+
+const getCustodyBalances = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const cafeId = request.query.cafeId || request.auth.primaryCafeId || request.auth.assignedCafeIds?.[0] || 'ZC-0001';
+  const registerSessionId = request.query.registerSessionId || null;
+  ensureCafeAccess(request, cafeId);
+
+  const cashManagementService = require('../services/cashManagementService');
+  const result = await cashManagementService.getCustodyBalances({
+    organisationId,
+    cafeId,
+    registerSessionId,
+  });
+
+  return response.status(200).json({ success: true, data: result });
 });
 
 module.exports = {
@@ -1737,4 +1773,5 @@ module.exports = {
   refundAdvanceDeposit,
   recordCashDrop,
   recordBankDeposit,
+  getCustodyBalances,
 };

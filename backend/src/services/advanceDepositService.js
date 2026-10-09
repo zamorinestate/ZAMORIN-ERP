@@ -22,6 +22,7 @@ const { CashTransaction } = require('../models/CashTransaction');
 const { SequenceCounter } = require('../models/SequenceCounter');
 const { executeTransactionWithRetry } = require('../utils/transactionHelper');
 const { ApiError } = require('../utils/ApiError');
+const { roundToPaisa, TAX_RULE_VERSION } = require('./gstTaxService');
 const auditService = require('./auditService');
 
 function getIstBusinessDate(date = new Date()) {
@@ -51,6 +52,9 @@ async function recordAdvanceDeposit({
   eventReference = '',
   eventDate = null,
   amountPaisa,
+  supplyType = 'SERVICES',
+  taxRatePercent: requestedTaxRate = null,
+  isInterState = false,
   paymentMethod = 'CASH',
   provider = '',
   paymentReference = '',
@@ -109,13 +113,36 @@ async function recordAdvanceDeposit({
     receiptVoucherSeq = `RV-${dateCompact}-${rand}`;
   }
 
-  // Calculate 5% statutory tax component snapshot (2.5% CGST + 2.5% SGST)
-  // Per CBIC rules, receipt voucher displays rate and tax amount
-  const taxRatePercent = 5;
-  const taxablePaisa = Math.round((amount * 100) / 105);
-  const totalTaxPaisa = amount - taxablePaisa;
-  const cgstPaisa = Math.round(totalTaxPaisa / 2);
-  const sgstPaisa = totalTaxPaisa - cgstPaisa;
+  // CBIC Statutory Treatment of Advances:
+  // Under Notification No. 66/2017-Central Tax, advances received for supply of GOODS
+  // are exempt from GST at the time of advance receipt (tax liability arises upon invoice issuance).
+  // Advances for SERVICES (e.g. catering, banquet, event hosting) attract GST at the time of receipt.
+  const normSupplyType = String(supplyType || 'SERVICES').toUpperCase().trim() === 'GOODS' ? 'GOODS' : 'SERVICES';
+
+  let taxRatePercent = 0;
+  let taxablePaisa = amount;
+  let cgstPaisa = 0;
+  let sgstPaisa = 0;
+  let igstPaisa = 0;
+
+  if (normSupplyType === 'SERVICES') {
+    taxRatePercent = requestedTaxRate !== null && requestedTaxRate !== undefined ? Number(requestedTaxRate) : 5;
+    if (taxRatePercent > 0) {
+      taxablePaisa = roundToPaisa((amount * 100) / (100 + taxRatePercent));
+      const totalTaxPaisa = amount - taxablePaisa;
+      if (isInterState) {
+        igstPaisa = totalTaxPaisa;
+        cgstPaisa = 0;
+        sgstPaisa = 0;
+      } else {
+        cgstPaisa = roundToPaisa(totalTaxPaisa / 2);
+        sgstPaisa = totalTaxPaisa - cgstPaisa;
+        igstPaisa = 0;
+      }
+    } else {
+      taxablePaisa = amount;
+    }
+  }
 
   return await executeTransactionWithRetry(async (session) => {
     const deposit = new AdvanceDeposit({
@@ -137,10 +164,13 @@ async function recordAdvanceDeposit({
       provider: provider || '',
       paymentReference: paymentReference || '',
       registerSessionId: registerSessionId || null,
+      supplyType: normSupplyType,
+      taxableAmountPaisa: taxablePaisa,
       taxRatePercent,
+      taxRuleVersion: TAX_RULE_VERSION,
       cgstPaisa,
       sgstPaisa,
-      igstPaisa: 0,
+      igstPaisa,
       status: 'HELD_UNAPPLIED',
       applications: [],
       refunds: [],

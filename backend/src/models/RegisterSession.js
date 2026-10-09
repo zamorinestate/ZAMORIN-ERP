@@ -47,6 +47,11 @@ const cashEventSchema = new mongoose.Schema(
       trim: true,
       default: '',
     },
+    sourceCustody: {
+      type: String,
+      enum: ['REGISTER', 'SAFE'],
+      default: 'REGISTER',
+    },
   },
   { _id: true }
 );

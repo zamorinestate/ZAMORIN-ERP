@@ -242,9 +242,25 @@ const advanceDepositSchema = new mongoose.Schema(
       default: null,
     },
 
+    supplyType: {
+      type: String,
+      enum: ['SERVICES', 'GOODS'],
+      default: 'SERVICES',
+    },
+
+    taxableAmountPaisa: {
+      type: Number,
+      default: 0,
+    },
+
     taxRatePercent: {
       type: Number,
       default: 5,
+    },
+
+    taxRuleVersion: {
+      type: String,
+      default: 'GST_ROUNDING_V1_2026',
     },
 
     cgstPaisa: {

@@ -46,6 +46,7 @@ const {
   refundAdvanceDeposit,
   recordCashDrop,
   recordBankDeposit,
+  getCustodyBalances,
 } = require('../controllers/financeController');
 
 const router = express.Router();
@@ -378,6 +379,12 @@ router.post(
   '/cash/bank-deposit',
   authorize('FINANCE:WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
   recordBankDeposit
+);
+
+router.get(
+  '/cash/custody-balances',
+  authorize('FINANCE:READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  getCustodyBalances
 );
 
 module.exports = router;
