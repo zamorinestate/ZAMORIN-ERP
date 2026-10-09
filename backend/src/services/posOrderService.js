@@ -25,6 +25,11 @@ const { CashTransaction } = require('../models/CashTransaction');
 const { SequenceCounter } = require('../models/SequenceCounter');
 const { IdempotencyRecord } = require('../models/IdempotencyRecord');
 const { PrintJob } = require('../models/PrintJob');
+const { User } = require('../models/User');
+const { OutletOffering } = require('../models/OutletOffering');
+const { ModifierGroup } = require('../models/ModifierGroup');
+const { ComboDefinition } = require('../models/ComboDefinition');
+const { PaymentProviderService } = require('./paymentProviderService');
 const { BomDepletionService } = require('./bomDepletionService');
 const {
   allocateInvoiceNumber,
@@ -198,6 +203,10 @@ class PosOrderService {
         unitPricePaisa: effectiveUnitPrice,
         modifiers: item.modifiers || {},
         itemNotes: String(item.itemNotes || item.notes || '').trim(),
+        hsnSacCode: item.hsnSacCode || '996331',
+        variantSnapshot: item.variantSnapshot || null,
+        modifierSnapshot: item.modifierSnapshot || [],
+        comboSnapshot: item.comboSnapshot || null,
         taxRatePercent,
         taxClassification: item.taxClassification || 'GST_5',
         discountPaisa: itemDiscount,
@@ -647,9 +656,46 @@ class PosOrderService {
       );
     }
 
-    // 2. Resolve line item prices if not supplied in payload
+    // Live Operator Authority Re-evaluation: Ensure operator is still active and authorized
+    if (authContext.userId) {
+      try {
+        const liveUser = await User.findOne({
+          organisationId: orgId,
+          userId: normalizeId(authContext.userId),
+        });
+        if (liveUser) {
+          if (liveUser.status && liveUser.status !== 'ACTIVE') {
+            throw new ApiError(
+              403,
+              'OPERATOR_ACCOUNT_INACTIVE',
+              `Operator account ${authContext.userId} is ${liveUser.status}. Sale commit rejected.`
+            );
+          }
+          if (authContext.role !== 'MASTER' && authContext.role !== 'OWNER') {
+            const currentCafes = Array.isArray(liveUser.assignedCafeIds)
+              ? liveUser.assignedCafeIds.map(normalizeId)
+              : liveUser.primaryCafeId ? [normalizeId(liveUser.primaryCafeId)] : [];
+            if (!currentCafes.includes(cafeId)) {
+              throw new ApiError(
+                403,
+                'CAFE_ACCESS_REVOKED',
+                `Operator access to café ${cafeId} has been revoked.`
+              );
+            }
+          }
+        }
+      } catch (userErr) {
+        if (userErr.statusCode === 403) throw userErr;
+      }
+    }
+
+    // 2. Authoritative Catalogue, Offering, Variant, Modifier & Combo Resolution
     const itemIds = (orderPayload.lineItems || []).map((li) => normalizeId(li.menuItemId)).filter(Boolean);
     let itemMap = {};
+    let offeringMap = {};
+    let modifierGroupMap = {};
+    let comboDefMap = {};
+
     if (itemIds.length > 0) {
       try {
         const foundItems = await MenuItem.find({
@@ -662,23 +708,182 @@ class PosOrderService {
             itemMap[it.menuItemId] = it;
           }
         }
-      } catch {
-        // Fallback to payload prices
+
+        const foundOfferings = await OutletOffering.find({
+          organisationId: orgId,
+          outletId: cafeId,
+          menuItemId: { $in: itemIds },
+        });
+        const offeringsList = foundOfferings && typeof foundOfferings.lean === 'function' ? await foundOfferings.lean() : foundOfferings;
+        if (Array.isArray(offeringsList)) {
+          for (const off of offeringsList) {
+            offeringMap[off.menuItemId] = off;
+          }
+        }
+
+        // Collect all modifier group IDs and combo IDs
+        const modGroupIds = [];
+        const comboIds = [];
+        for (const it of Object.values(itemMap)) {
+          if (Array.isArray(it.modifierGroupIds)) modGroupIds.push(...it.modifierGroupIds);
+          if (it.comboDefinitionId) comboIds.push(it.comboDefinitionId);
+        }
+
+        if (modGroupIds.length > 0) {
+          const foundModGroups = await ModifierGroup.find({
+            organisationId: orgId,
+            modifierGroupId: { $in: modGroupIds },
+          });
+          const mgList = foundModGroups && typeof foundModGroups.lean === 'function' ? await foundModGroups.lean() : foundModGroups;
+          if (Array.isArray(mgList)) {
+            for (const mg of mgList) modifierGroupMap[mg.modifierGroupId] = mg;
+          }
+        }
+
+        if (comboIds.length > 0) {
+          const foundCombos = await ComboDefinition.find({
+            organisationId: orgId,
+            comboDefinitionId: { $in: comboIds },
+          });
+          const cbList = foundCombos && typeof foundCombos.lean === 'function' ? await foundCombos.lean() : foundCombos;
+          if (Array.isArray(cbList)) {
+            for (const cb of cbList) comboDefMap[cb.comboDefinitionId] = cb;
+          }
+        }
+      } catch (err) {
+        console.warn('[POS] Master lookup error:', err.message);
       }
     }
 
-    // Enrich line items with catalog metadata if available
-    // REC-13: Server Catalog Pricing Authority — client IndexedDB prices cannot override catalog
-    const enrichedItems = orderPayload.lineItems.map((li) => {
-      const catalogItem = itemMap[normalizeId(li.menuItemId)];
-      const authoritativeUnitPrice = (catalogItem && catalogItem.currentPricePaisa != null)
-        ? catalogItem.currentPricePaisa
-        : (li.unitPricePaisa ?? li.pricePaisa ?? (li.price != null ? li.price * 100 : 0));
+    const effectiveServiceMode = String(orderPayload.serviceMode || orderPayload.orderType || 'QUICK_SALE').trim().toUpperCase();
+
+    // Enrich and strictly validate line items with server authority
+    const enrichedItems = orderPayload.lineItems.map((li, idx) => {
+      const normItemId = normalizeId(li.menuItemId);
+      const catalogItem = itemMap[normItemId];
+      const offering = offeringMap[normItemId];
+
+      if (catalogItem) {
+        if (catalogItem.status !== 'ACTIVE') {
+          throw new ApiError(
+            400,
+            'ITEM_INACTIVE',
+            `Menu item ${catalogItem.name} (${normItemId}) is ${catalogItem.status} and cannot be sold.`
+          );
+        }
+
+        // Cross-café offering validation
+        if (Array.isArray(catalogItem.availableCafeIds) && catalogItem.availableCafeIds.length > 0) {
+          const allowedCafes = catalogItem.availableCafeIds.map(normalizeId);
+          if (!allowedCafes.includes(cafeId)) {
+            throw new ApiError(
+              400,
+              'ITEM_NOT_OFFERED_AT_CAFE',
+              `Menu item ${catalogItem.name} is not offered at café ${cafeId}.`
+            );
+          }
+        }
+
+        // Outlet offering check (sold out / enabled / channel)
+        if (offering) {
+          if (offering.isEnabled === false) {
+            throw new ApiError(
+              400,
+              'ITEM_DISABLED_AT_OUTLET',
+              `Menu item ${catalogItem.name} is currently disabled at this outlet.`
+            );
+          }
+          if (offering.isAvailable === false) {
+            throw new ApiError(
+              400,
+              'ITEM_TEMPORARILY_SOLD_OUT',
+              `Menu item ${catalogItem.name} is temporarily sold out: ${offering.soldOutReason || 'Unavailable'}.`
+            );
+          }
+          if (offering.channels) {
+            if (effectiveServiceMode === 'DELIVERY' && offering.channels.delivery === false) {
+              throw new ApiError(400, 'ITEM_CHANNEL_UNAVAILABLE', `Item ${catalogItem.name} is not available for delivery.`);
+            }
+            if (effectiveServiceMode === 'TAKEAWAY' && offering.channels.takeaway === false) {
+              throw new ApiError(400, 'ITEM_CHANNEL_UNAVAILABLE', `Item ${catalogItem.name} is not available for takeaway.`);
+            }
+          }
+        }
+      }
+
+      // 2.1 Pricing resolution: Local override -> Variant price -> Base price
+      let resolvedBasePrice = catalogItem?.currentPricePaisa ?? (li.unitPricePaisa ?? li.pricePaisa ?? (li.price != null ? li.price * 100 : 0));
+      if (offering && offering.localPricePaisaOverride != null) {
+        resolvedBasePrice = offering.localPricePaisaOverride;
+      }
+
+      // Variant validation & resolution
+      let variantSnapshot = null;
+      if (li.variantId || li.variant) {
+        const vId = normalizeId(li.variantId || li.variant?.variantId);
+        const matchingVariant = (catalogItem?.variants || []).find((v) => normalizeId(v.variantId) === vId);
+        if (matchingVariant) {
+          if (matchingVariant.isAvailable === false) {
+            throw new ApiError(400, 'VARIANT_UNAVAILABLE', `Variant ${matchingVariant.name} is currently unavailable.`);
+          }
+          resolvedBasePrice = matchingVariant.pricePaisa;
+          variantSnapshot = {
+            variantId: matchingVariant.variantId,
+            name: matchingVariant.name,
+            pricePaisa: matchingVariant.pricePaisa,
+            recipeMultiplier: matchingVariant.recipeQuantityMultiplier || 1,
+          };
+        } else if (catalogItem?.variants?.length > 0) {
+          throw new ApiError(400, 'INVALID_VARIANT', `Variant ${vId} is invalid for ${catalogItem.name}.`);
+        }
+      }
+
+      // Modifiers validation & resolution
+      let modifierDeltaSum = 0;
+      let modifierSnapshots = [];
+      if (Array.isArray(li.modifiers) && li.modifiers.length > 0) {
+        for (const mod of li.modifiers) {
+          const mgId = normalizeId(mod.modifierGroupId);
+          const mgDoc = modifierGroupMap[mgId];
+          const mOptId = normalizeId(mod.modifierId);
+          let mOpt = null;
+          if (mgDoc) {
+            mOpt = (mgDoc.options || []).find((o) => normalizeId(o.modifierId) === mOptId);
+          }
+          const priceDelta = mOpt ? mOpt.pricePaisaDelta : (Number(mod.pricePaisaDelta) || 0);
+          modifierDeltaSum += priceDelta;
+          modifierSnapshots.push({
+            modifierGroupId: mgId,
+            modifierId: mOptId,
+            name: mOpt?.name || mod.name || 'Modifier',
+            pricePaisaDelta: priceDelta,
+            recipeDeltas: mOpt?.recipeDeltas || mod.recipeDeltas || [],
+          });
+        }
+      }
+
+      // Combo validation & resolution
+      let comboSnapshot = null;
+      if (catalogItem?.comboDefinitionId && comboDefMap[catalogItem.comboDefinitionId]) {
+        const comboDef = comboDefMap[catalogItem.comboDefinitionId];
+        comboSnapshot = {
+          comboDefinitionId: comboDef.comboDefinitionId,
+          name: comboDef.name,
+          basePricePaisa: comboDef.basePricePaisa,
+          selections: li.comboSelections || [],
+        };
+      }
+
+      const authoritativeUnitPrice = resolvedBasePrice + modifierDeltaSum;
 
       return {
         ...li,
-        itemNameSnapshot: li.itemNameSnapshot || li.name || catalogItem?.name || 'Item',
+        itemNameSnapshot: li.itemNameSnapshot || li.name || catalogItem?.name || `Item ${idx + 1}`,
         unitPricePaisa: authoritativeUnitPrice,
+        hsnSacCode: li.hsnSacCode || catalogItem?.hsnSacCode || '996331',
+        variantSnapshot: variantSnapshot || li.variantSnapshot || null,
+        modifierSnapshot: modifierSnapshots.length > 0 ? modifierSnapshots : (li.modifierSnapshot || []),
+        comboSnapshot: comboSnapshot || li.comboSnapshot || null,
         taxRatePercent: li.taxRatePercent ?? catalogItem?.taxRatePercent ?? 5,
         taxClassification: li.taxClassification || catalogItem?.taxClassification || 'GST_5',
       };
@@ -691,13 +896,20 @@ class PosOrderService {
       isInterState: Boolean(orderPayload.isInterState),
     });
 
+    // Stale Cart Protection: Material price change check
+    const clientExpectedTotal = orderPayload.expectedTotalPaisa ?? orderPayload.clientReviewedTotalPaisa;
+    if (clientExpectedTotal != null) {
+      const expTotal = Math.round(Number(clientExpectedTotal));
+      if (expTotal !== totals.totalPaisa) {
+        throw new ApiError(
+          409,
+          'STALE_CART_REPRICE_REQUIRED',
+          `Cart price has changed from expected ₹${(expTotal / 100).toFixed(2)} to ₹${(totals.totalPaisa / 100).toFixed(2)}. Review updated total before settlement.`
+        );
+      }
+    }
+
     // 4. Generate Official Receipt and Statutory GST Invoice Number (Rule 46(b) <= 16 chars)
-    // IMPORTANT: billId and invoiceNumber are allocated OUTSIDE the transaction using the
-    // block-pool path (no session) for high throughput. This avoids the lock-contention hotspot
-    // where 20+ concurrent transactions all lock the same sequence_counter document, causing
-    // nearly all of them to get WriteConflict → TransientTransactionError → exhausted retries.
-    // Correctness is enforced by the unique index on Bill.billId — not by the counter.
-    // Gaps in sequence (from aborted transactions) are acceptable per business rules.
     let billId = null;
     let invoiceNumber = null;
 
@@ -707,7 +919,6 @@ class PosOrderService {
         sequenceKey: `BILL_${datePart}`,
         prefix: `BILL-${datePart}`,
         minimumDigits: 4,
-        // NO session: use the fast block-pool path
       });
     } catch {
       const randSuffix = Math.floor(1000 + Math.random() * 9000);
@@ -729,47 +940,131 @@ class PosOrderService {
       invoiceNumber = `P/${compactBranch}/2627/${seqTail}`.slice(0, 16);
     }
 
-    // 5. Build Tenders & Payment Status
+    // 5. Build Tenders & Payment Status with Split Support & Card Data Security
     const paymentMethod = normalizeId(orderPayload.paymentMethod || 'CASH') || 'CASH';
     const isImmediateCompletion = orderPayload.isImmediateCompletion !== false;
-    const initialStatus = isImmediateCompletion ? 'COMPLETED' : 'OPEN';
-    const paymentStatus = isImmediateCompletion ? 'PAID' : 'UNPAID';
 
-    const tenders = Array.isArray(orderPayload.tenders) && orderPayload.tenders.length > 0
-      ? orderPayload.tenders.map((t) => ({
-          paymentMethod: normalizeId(t.paymentMethod || paymentMethod),
-          amountPaisa: Math.max(0, Math.round(Number(t.amountPaisa || 0))),
-          status: 'COMPLETED',
-          provider: t.provider || '',
+    let processedTenders = [];
+    let cashTenderTotalPaisa = 0;
+    let upiTenderTotalPaisa = 0;
+    let cardTenderTotalPaisa = 0;
+    let totalTenderPaidPaisa = 0;
+
+    if (Array.isArray(orderPayload.tenders) && orderPayload.tenders.length > 0) {
+      processedTenders = orderPayload.tenders.map((t) => {
+        PaymentProviderService.sanitizeAndValidateCardData(t);
+        const tMethod = normalizeId(t.paymentMethod || paymentMethod);
+        const tAmount = Math.max(0, Math.round(Number(t.amountPaisa || (t.amount ? t.amount * 100 : 0))));
+        const tStatus = t.status ? String(t.status).trim().toUpperCase() : 'COMPLETED';
+        if (tStatus === 'COMPLETED') {
+          if (tMethod === 'CASH') cashTenderTotalPaisa += tAmount;
+          else if (tMethod === 'UPI') upiTenderTotalPaisa += tAmount;
+          else if (tMethod === 'CARD') cardTenderTotalPaisa += tAmount;
+          totalTenderPaidPaisa += tAmount;
+        }
+
+        return {
+          paymentMethod: tMethod,
+          amountPaisa: tAmount,
+          currency: 'INR',
+          status: tStatus,
+          provider: t.provider || (tMethod === 'UPI' ? 'BHIM_UPI' : tMethod === 'CARD' ? 'POS_TERMINAL' : 'CASH_REGISTER'),
           paymentReference: t.paymentReference || '',
           upiReference: t.upiReference || '',
-          maskedCard: t.maskedCard || '',
+          maskedCard: t.maskedCard || (t.cardNumber ? `XXXX-XXXX-XXXX-${String(t.cardNumber).slice(-4)}` : ''),
+          operatorUserId: authContext.userId || 'CASHIER',
           transactionTimestamp: new Date(),
-        }))
-      : isImmediateCompletion
-        ? [
-            {
-              paymentMethod,
-              amountPaisa: totals.totalPaisa,
-              status: 'COMPLETED',
-              provider: orderPayload.provider || '',
-              paymentReference: orderPayload.paymentReference || '',
-              upiReference: orderPayload.upiReference || '',
-              transactionTimestamp: new Date(),
-            },
-          ]
-        : [];
+        };
+      });
+    } else if (isImmediateCompletion) {
+      PaymentProviderService.sanitizeAndValidateCardData(orderPayload);
+      const tAmount = totals.totalPaisa;
+      if (paymentMethod === 'CASH') cashTenderTotalPaisa += tAmount;
+      else if (paymentMethod === 'UPI') upiTenderTotalPaisa += tAmount;
+      else if (paymentMethod === 'CARD') cardTenderTotalPaisa += tAmount;
+      totalTenderPaidPaisa += tAmount;
 
-    // Pre-allocate cash transaction ID (outside transaction for the same hotspot reason as billId)
+      processedTenders = [
+        {
+          paymentMethod,
+          amountPaisa: tAmount,
+          currency: 'INR',
+          status: 'COMPLETED',
+          provider: orderPayload.provider || (paymentMethod === 'UPI' ? 'BHIM_UPI' : paymentMethod === 'CARD' ? 'POS_TERMINAL' : 'CASH_REGISTER'),
+          paymentReference: orderPayload.paymentReference || '',
+          upiReference: orderPayload.upiReference || '',
+          maskedCard: orderPayload.maskedCard || (orderPayload.cardNumber ? `XXXX-XXXX-XXXX-${String(orderPayload.cardNumber).slice(-4)}` : ''),
+          operatorUserId: authContext.userId || 'CASHIER',
+          transactionTimestamp: new Date(),
+        },
+      ];
+    }
+
+    const isSplit = processedTenders.length > 1;
+    const finalPaymentMethod = isSplit ? 'SPLIT' : (processedTenders[0]?.paymentMethod || paymentMethod);
+    let paymentStatus = 'UNPAID';
+    let paidAmountPaisa = totalTenderPaidPaisa;
+    let dueAmountPaisa = Math.max(0, totals.totalPaisa - paidAmountPaisa);
+    let changeGivenPaisa = Math.max(0, paidAmountPaisa - totals.totalPaisa);
+
+    if (totalTenderPaidPaisa >= totals.totalPaisa && isImmediateCompletion) {
+      paymentStatus = 'PAID';
+      dueAmountPaisa = 0;
+    } else if (isImmediateCompletion && dueAmountPaisa > 0) {
+      // Partial / Due Bill Governance:
+      // P09 prohibits uncontrolled anonymous debt. Walk-in sales attempting partial payment
+      // without an authorized credit identity (e.g. InstitutionalAccount) must be rejected.
+      const institutionalAccountId = normalizeId(orderPayload.institutionalAccountId || orderPayload.creditAccountId || '');
+      if (!institutionalAccountId) {
+        throw new ApiError(
+          400,
+          'ANONYMOUS_CREDIT_PROHIBITED',
+          `Underpayment leaves ₹${(dueAmountPaisa / 100).toFixed(2)} due. Anonymous customer credit is prohibited. Full settlement or an authorized credit account is required.`
+        );
+      }
+
+      // Check Institutional Account validity and credit exposure
+      const { InstitutionalAccount } = require('../models/InstitutionalAccount');
+      const account = await InstitutionalAccount.findOne({
+        organisationId: orgId,
+        accountId: institutionalAccountId,
+      });
+
+      if (!account) {
+        throw new ApiError(404, 'CREDIT_ACCOUNT_NOT_FOUND', `Institutional credit account ${institutionalAccountId} not found.`);
+      }
+
+      if (['ON_HOLD', 'SUSPENDED'].includes(account.creditStatus)) {
+        throw new ApiError(403, 'CREDIT_ACCOUNT_SUSPENDED', `Credit account ${institutionalAccountId} is ${account.creditStatus}.`);
+      }
+
+      const availableCredit = Math.max(0, (account.creditLimitPaisa || 0) - (account.currentExposurePaisa || 0));
+      if (dueAmountPaisa > availableCredit) {
+        throw new ApiError(
+          403,
+          'CREDIT_LIMIT_EXCEEDED',
+          `Due balance of ₹${(dueAmountPaisa / 100).toFixed(2)} exceeds available credit of ₹${(availableCredit / 100).toFixed(2)} on account ${institutionalAccountId}.`
+        );
+      }
+
+      paymentStatus = paidAmountPaisa > 0 ? 'PARTIALLY_PAID' : 'UNPAID';
+    } else if (totalTenderPaidPaisa > 0) {
+      paymentStatus = 'PARTIALLY_PAID';
+    } else {
+      paymentStatus = 'UNPAID';
+    }
+
+    const initialStatus = isImmediateCompletion && paymentStatus === 'PAID' ? 'COMPLETED' : 'OPEN';
+
+    // Pre-allocate cash transaction ID strictly if cash tender > 0
     let preallocatedCashTxId = null;
-    if (isImmediateCompletion && paymentMethod === 'CASH') {
+    if (isImmediateCompletion && cashTenderTotalPaisa > 0) {
       try {
         preallocatedCashTxId = await SequenceCounter.generateId({
           organisationId: orgId,
           sequenceKey: `CASH_TX_${datePart}`,
           prefix: `CT-${datePart}`,
           minimumDigits: 4,
-          // NO session: use the fast block-pool path
         });
       } catch {
         preallocatedCashTxId = `CT-${datePart}-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -791,8 +1086,8 @@ class PosOrderService {
         invoiceNumber,
         organisationId: orgId,
         cafeId,
-        orderType: orderPayload.orderType || 'QUICK_SALE',
-        serviceMode: orderPayload.serviceMode || orderPayload.orderType || 'QUICK_SALE',
+        orderType: effectiveServiceMode,
+        serviceMode: effectiveServiceMode,
         guestCovers: Math.max(1, Number(orderPayload.guestCovers || 1)),
         tableNumber: String(orderPayload.tableNumber || '').trim(),
         tableToken: String(orderPayload.tableToken || '').trim(),
@@ -815,10 +1110,14 @@ class PosOrderService {
         totalPaisa: totals.totalPaisa,
         taxRuleVersion: totals.taxRuleVersion || TAX_RULE_VERSION,
         roundingPolicyVersion: totals.roundingPolicyVersion || ROUNDING_POLICY_VERSION,
-        paymentMethod,
+        paymentMethod: finalPaymentMethod,
         paymentStatus,
+        paidAmountPaisa,
+        dueAmountPaisa,
+        changeGivenPaisa,
         status: initialStatus,
-        tenders,
+        tenders: processedTenders,
+        tenderCorrections: [],
         reprints: [],
         refunds: [],
         isTraining: Boolean(orderPayload.isTraining || options.isTraining),
@@ -874,6 +1173,7 @@ class PosOrderService {
             userId: authContext.userId || 'CASHIER-01',
             businessDate,
             session,
+            serviceMode: effectiveServiceMode,
           });
           const deplStatus = bomResult?.alreadyDepleted ? 'ALREADY_DEPLETED' : 'DEPLETED';
           billDoc.bomDepletionStatus = deplStatus;
@@ -895,19 +1195,16 @@ class PosOrderService {
           }
 
           // Non-transient BOM failure: allow the transaction to commit with FAILED status.
-          // Set the status on the in-memory doc and save it within the still-live session.
           console.warn('[POS] BOM depletion non-transient failure for bill', billId, invErr?.message);
           billDoc.bomDepletionStatus = 'FAILED';
           billDoc.bomDepletionError = String(invErr?.message || 'UNKNOWN').slice(0, 250);
           try {
             await billDoc.save(session ? { session } : {});
           } catch (statusSaveErr) {
-            // If this save also fails transiently, escalate so the retry loop handles it
             const isStatusSaveTransient =
               (typeof statusSaveErr.hasErrorLabel === 'function' && statusSaveErr.hasErrorLabel('TransientTransactionError')) ||
               statusSaveErr.code === 112 || statusSaveErr.code === 251;
             if (isStatusSaveTransient) throw statusSaveErr;
-            // Otherwise accept the status won't be set in this commit; reconciliation handles it
           }
         }
       } else {
@@ -926,29 +1223,31 @@ class PosOrderService {
         if (regSession) {
           regSession.orderCount = (regSession.orderCount || 0) + 1;
           regSession.totalSalesPaisa = (regSession.totalSalesPaisa || 0) + totals.totalPaisa;
-          if (paymentMethod === 'CASH') {
-            regSession.totalCashSalesPaisa = (regSession.totalCashSalesPaisa || 0) + totals.totalPaisa;
+          if (cashTenderTotalPaisa > 0) {
+            regSession.totalCashSalesPaisa = (regSession.totalCashSalesPaisa || 0) + cashTenderTotalPaisa;
             regSession.cashEvents = regSession.cashEvents || [];
             regSession.cashEvents.push({
               eventType: 'CASH_SALE',
-              amountPaisa: totals.totalPaisa,
+              amountPaisa: cashTenderTotalPaisa,
               reason: `Bill ${billId}`,
               actorId: authContext.userId,
               reference: billId,
               timestamp: new Date(),
             });
-          } else if (paymentMethod === 'UPI') {
-            regSession.totalUpiSalesPaisa = (regSession.totalUpiSalesPaisa || 0) + totals.totalPaisa;
-          } else if (paymentMethod === 'CARD') {
-            regSession.totalCardSalesPaisa = (regSession.totalCardSalesPaisa || 0) + totals.totalPaisa;
+          }
+          if (upiTenderTotalPaisa > 0) {
+            regSession.totalUpiSalesPaisa = (regSession.totalUpiSalesPaisa || 0) + upiTenderTotalPaisa;
+          }
+          if (cardTenderTotalPaisa > 0) {
+            regSession.totalCardSalesPaisa = (regSession.totalCardSalesPaisa || 0) + cardTenderTotalPaisa;
           }
           await regSession.save(session ? { session } : {});
         }
       }
 
-      if (isImmediateCompletion && paymentMethod === 'CASH') {
+      // Auto-post CashTransaction strictly for cashTenderTotalPaisa > 0
+      if (isImmediateCompletion && cashTenderTotalPaisa > 0) {
         try {
-          // Use the pre-allocated cash transaction ID (no-session block-pool, hotspot-free)
           const ctSeqId = preallocatedCashTxId;
 
           const cashTx = new CashTransaction({
@@ -959,7 +1258,7 @@ class PosOrderService {
             transactionType: 'CASH_IN',
             direction: 'IN',
             category: 'POS_SALE',
-            amount: Math.max(0.01, totals.totalPaisa / 100),
+            amount: Math.max(0.01, cashTenderTotalPaisa / 100),
             paymentMethod: 'CASH',
             status: 'POSTED',
             description: `POS Sale Receipt #${invoiceNumber}`,
@@ -971,7 +1270,6 @@ class PosOrderService {
 
           await cashTx.save(session ? { session } : {});
         } catch (err) {
-          // Re-throw transient errors so the retry loop handles them cleanly
           const isCashTransient =
             (typeof err.hasErrorLabel === 'function' && err.hasErrorLabel('TransientTransactionError')) ||
             err.code === 112 || err.code === 251;

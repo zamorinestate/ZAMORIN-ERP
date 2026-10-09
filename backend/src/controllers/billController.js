@@ -881,7 +881,7 @@ const voidBill = asyncHandler(async (request, response) => {
   }
 
   const billId = normalizeId(request.params.billId);
-  const { reason } = request.body;
+  const { reason, inventoryDisposition = 'NONE', wastageReason = 'PREPARATION_LOSS' } = request.body;
 
   const reasonText = typeof reason === 'string' ? reason.trim() : '';
   if (reasonText.length < 5) {
@@ -923,6 +923,55 @@ const voidBill = asyncHandler(async (request, response) => {
   bill.voidedAt = new Date();
 
   await bill.save();
+
+  // Physical Inventory Governance:
+  // Separate pre-fulfilment cancellation, post-fulfilment void, physical return, and wastage.
+  // Never restore prepared/served ingredients to usable stock without verified restock evidence.
+  const normDisposition = String(inventoryDisposition || 'NONE').trim().toUpperCase();
+
+  if (bill.bomDepletionStatus === 'DEPLETED') {
+    if (normDisposition === 'RESTOCK' || normDisposition === 'PRE_FULFILMENT_CANCEL') {
+      try {
+        const { BomDepletionService } = require('../services/bomDepletionService');
+        await BomDepletionService.reverseOrderBOM({
+          organisationId: bill.organisationId,
+          cafeId: bill.cafeId,
+          billId: bill.billId,
+          userId: request.auth.userId,
+          reason: reasonText,
+        });
+        bill.bomDepletionStatus = 'REVERSED';
+        await bill.save();
+      } catch (revErr) {
+        console.warn('[POS] Inventory reversal error on void:', revErr.message);
+      }
+    } else if (normDisposition === 'WASTAGE' || normDisposition === 'DISCARD') {
+      // Prepared but discarded: Do not restore inventory lots; route to WastageRecord
+      try {
+        const { WastageRecord } = require('../models/WastageRecord');
+        const wastageId = `WST-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+        const wastageEntry = new WastageRecord({
+          organisationId: bill.organisationId,
+          wastageId,
+          cafeId: bill.cafeId,
+          itemId: bill.lineItems[0]?.menuItemId || 'UNKNOWN_ITEM',
+          quantityBase: bill.lineItems.reduce((acc, li) => acc + (li.quantity || 1), 0),
+          reasonCode: ['SPILLED', 'PREPARATION_LOSS', 'QUALITY_REJECTION'].includes(wastageReason) ? wastageReason : 'PREPARATION_LOSS',
+          estimatedValuePaisa: bill.totalPaisa || 0,
+          notes: `Voided order ${bill.billId}: ${reasonText}`,
+        });
+        await wastageEntry.save();
+        bill.bomDepletionStatus = 'WASTED_NOT_RETURNED';
+        await bill.save();
+      } catch (wErr) {
+        console.warn('[POS] Wastage recording error on void:', wErr.message);
+      }
+    } else {
+      // Default: Physical goods consumed or unavailable. Stock is NOT restored.
+      bill.bomDepletionStatus = 'VOIDED_NO_RESTOCK';
+      await bill.save();
+    }
+  }
 
   await recordRequestAudit({
     request,

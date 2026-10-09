@@ -153,6 +153,27 @@ const billLineItemSchema = new mongoose.Schema(
       default: 0,
     },
 
+    hsnSacCode: {
+      type: String,
+      trim: true,
+      default: '996331',
+    },
+
+    variantSnapshot: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+
+    modifierSnapshot: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+
+    comboSnapshot: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+
     consumedLots: [
       {
         lotId: {
@@ -197,8 +218,20 @@ const tenderAllocationSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ['PENDING', 'COMPLETED', 'FAILED', 'REVERSED'],
+      enum: ['PENDING', 'COMPLETED', 'FAILED', 'REVERSED', 'EXPIRED', 'CANCELLED', 'UNKNOWN_RECONCILIATION_REQUIRED'],
       default: 'COMPLETED',
+    },
+
+    currency: {
+      type: String,
+      trim: true,
+      default: 'INR',
+    },
+
+    operatorUserId: {
+      type: String,
+      trim: true,
+      default: '',
     },
 
     processor: {
@@ -234,6 +267,53 @@ const tenderAllocationSchema = new mongoose.Schema(
     transactionTimestamp: {
       type: Date,
       default: Date.now,
+    },
+  },
+  { _id: true }
+);
+
+const tenderCorrectionSchema = new mongoose.Schema(
+  {
+    correctionId: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    oldPaymentMethod: {
+      type: String,
+      required: true,
+    },
+    newPaymentMethod: {
+      type: String,
+      required: true,
+    },
+    amountPaisa: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    reason: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    correctedByUserId: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    correctedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    paymentReference: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    financialEffect: {
+      type: String,
+      default: 'RECLASSIFICATION_ONLY',
     },
   },
   { _id: true }
@@ -639,8 +719,26 @@ const billSchema = new mongoose.Schema(
 
     paymentStatus: {
       type: String,
-      enum: ['UNPAID', 'PAID', 'PARTIALLY_REFUNDED', 'REFUNDED'],
+      enum: ['UNPAID', 'PAID', 'PARTIALLY_PAID', 'PARTIALLY_REFUNDED', 'REFUNDED'],
       default: 'UNPAID',
+    },
+
+    paidAmountPaisa: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+
+    dueAmountPaisa: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+
+    changeGivenPaisa: {
+      type: Number,
+      min: 0,
+      default: 0,
     },
 
     paymentMethod: {
@@ -651,6 +749,11 @@ const billSchema = new mongoose.Schema(
 
     tenders: {
       type: [tenderAllocationSchema],
+      default: [],
+    },
+
+    tenderCorrections: {
+      type: [tenderCorrectionSchema],
       default: [],
     },
 
@@ -861,6 +964,11 @@ billSchema.index(
 billSchema.index(
   { organisationId: 1, 'lineItems.consumedLots.lotId': 1 },
   { name: 'org_lineitem_consumed_lot' }
+);
+
+billSchema.index(
+  { organisationId: 1, 'tenders.paymentReference': 1 },
+  { sparse: true, name: 'org_tender_payment_ref' }
 );
 
 billSchema.pre('validate', function normaliseBillFields() {

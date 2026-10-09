@@ -38,7 +38,7 @@ const router = express.Router();
 router.use(authenticate);
 router.use(attachDeviceContext);
 
-// Strict Four-Persona Topology Enforcement: Staff denied POS operational mutations
+// Strict Four-Persona Topology Enforcement: Staff and Owner denied POS operational mutations
 router.use((request, response, next) => {
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) {
     if (request.auth?.role === 'STAFF') {
@@ -47,6 +47,15 @@ router.use((request, response, next) => {
         error: {
           code: 'PERMISSION_DENIED',
           message: 'Staff role is restricted to self-service only and does not have POS & Billing operational authority.',
+        },
+      });
+    }
+    if (request.auth?.role === 'OWNER') {
+      return response.status(403).json({
+        success: false,
+        error: {
+          code: 'PERMISSION_DENIED',
+          message: 'Owner persona is restricted to executive oversight and governance and does not have direct POS terminal operational authority.',
         },
       });
     }
@@ -88,7 +97,7 @@ router.post('/:billId/split', splitBill);
 
 // Post-Sale Adjustments
 router.post('/:billId/reprint', reprintBill);
-router.post('/:billId/void', authorize('POS_VOID', { allowedRoles: ['MASTER', 'OWNER'] }), voidBill);
+router.post('/:billId/void', authorize('POS_VOID', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }), voidBill);
 router.post('/:billId/refund', refundBill);
 
 module.exports = router;

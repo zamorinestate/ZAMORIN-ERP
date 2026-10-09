@@ -21,6 +21,8 @@ const {
   syncOfflineOrders,
   getPendingOfflineReviews,
   reviewOfflineOrder,
+  handlePaymentCallback,
+  correctTender,
 } = require('../controllers/posController');
 
 const router = express.Router();
@@ -59,6 +61,11 @@ router.post('/orders/:billId/print', printOrder);
 router.post('/orders/:billId/reprint', reprintOrder);
 router.get('/orders/active/:cafeId', getActiveOrders);
 router.get('/orders/last/:cafeId', getLastCommittedBill);
+
+// Payment Gateway Callback & Tender Correction
+router.post('/payments/callback', handlePaymentCallback);
+router.post('/payments/callback/:provider', handlePaymentCallback);
+router.post('/orders/:billId/tender-correction', correctTender);
 
 // REC-04B: Transaction status & unknown-outcome recovery
 router.get('/orders/status/:transactionId', getOrderStatusByIdempotency);

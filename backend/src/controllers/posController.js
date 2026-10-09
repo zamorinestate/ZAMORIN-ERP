@@ -418,6 +418,117 @@ const reviewOfflineOrder = asyncHandler(async (request, response) => {
   });
 });
 
+const { PaymentProviderService } = require('../services/paymentProviderService');
+
+/**
+ * POST /api/v1/pos/payments/callback
+ * Handles digital payment gateway webhooks/callbacks idempotently.
+ */
+const handlePaymentCallback = asyncHandler(async (request, response) => {
+  const payload = request.body || {};
+  const signature = request.headers['x-provider-signature'] || request.headers['x-razorpay-signature'] || '';
+  const provider = request.params.provider || payload.provider || 'TEST_GATEWAY';
+
+  const result = await PaymentProviderService.processPaymentCallback({
+    provider,
+    payload,
+    signature,
+    authContext: request.auth,
+  });
+
+  return response.status(200).json(result);
+});
+
+/**
+ * POST /api/v1/pos/orders/:billId/tender-correction
+ * Auditable post-settlement tender correction workflow without altering revenue.
+ */
+const correctTender = asyncHandler(async (request, response) => {
+  const role = (request.auth?.role || '').toUpperCase();
+  if (role === 'STAFF') {
+    throw new ApiError(403, 'PERMISSION_DENIED', 'Staff role does not have tender correction authority.');
+  }
+  if (role === 'OWNER') {
+    throw new ApiError(403, 'PERMISSION_DENIED', 'Owner persona is barred from POS operational mutations.');
+  }
+
+  const billId = normalizeId(request.params.billId);
+  const { oldPaymentMethod, newPaymentMethod, amountPaisa, reason, paymentReference } = request.body || {};
+
+  if (!oldPaymentMethod || !newPaymentMethod) {
+    throw new ApiError(400, 'PAYMENT_METHODS_REQUIRED', 'oldPaymentMethod and newPaymentMethod are required.');
+  }
+
+  const reasonText = String(reason || '').trim();
+  if (reasonText.length < 5) {
+    throw new ApiError(400, 'REASON_REQUIRED', 'A reason of at least 5 characters is required for tender correction.');
+  }
+
+  const bill = await Bill.findOne({
+    $or: [{ billId }, { invoiceNumber: billId }],
+    organisationId: request.auth.organisationId,
+  });
+
+  if (!bill) {
+    throw new ApiError(404, 'NOT_FOUND', 'Bill not found.');
+  }
+
+  assertCafeAccess(request, bill.cafeId);
+
+  if (bill.status === 'VOIDED') {
+    throw new ApiError(400, 'CANNOT_CORRECT_VOIDED', 'Cannot correct tender on a voided bill.');
+  }
+
+  const targetAmountPaisa = Math.round(Number(amountPaisa) || bill.totalPaisa);
+  const correctionId = `TC-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+  // Find matching tender or update tenders array
+  let foundTender = false;
+  if (Array.isArray(bill.tenders)) {
+    for (const t of bill.tenders) {
+      if (normalizeId(t.paymentMethod) === normalizeId(oldPaymentMethod) && t.status === 'COMPLETED') {
+        t.paymentMethod = normalizeId(newPaymentMethod);
+        if (paymentReference) t.paymentReference = paymentReference;
+        foundTender = true;
+        break;
+      }
+    }
+  }
+
+  if (!foundTender) {
+    throw new ApiError(400, 'TENDER_NOT_FOUND', `No completed tender with method ${oldPaymentMethod} found on this bill.`);
+  }
+
+  const correctionEntry = {
+    correctionId,
+    oldPaymentMethod: normalizeId(oldPaymentMethod),
+    newPaymentMethod: normalizeId(newPaymentMethod),
+    amountPaisa: targetAmountPaisa,
+    reason: reasonText,
+    correctedByUserId: request.auth.userId || 'OPERATOR',
+    correctedAt: new Date(),
+    paymentReference: paymentReference || '',
+    financialEffect: `Reclassified ₹${(targetAmountPaisa / 100).toFixed(2)} from ${oldPaymentMethod} to ${newPaymentMethod}`,
+  };
+
+  bill.tenderCorrections = bill.tenderCorrections || [];
+  bill.tenderCorrections.push(correctionEntry);
+  if (bill.tenders.length === 1) {
+    bill.paymentMethod = normalizeId(newPaymentMethod);
+  }
+
+  await bill.save();
+
+  return response.status(200).json({
+    success: true,
+    data: {
+      billId: bill.billId,
+      correction: correctionEntry,
+      bill: bill.toObject ? bill.toObject() : bill,
+    },
+  });
+});
+
 module.exports = {
   commitOrder,
   previewOrder,
@@ -431,6 +542,8 @@ module.exports = {
   syncOfflineOrders,
   getPendingOfflineReviews,
   reviewOfflineOrder,
+  handlePaymentCallback,
+  correctTender,
 };
 
 

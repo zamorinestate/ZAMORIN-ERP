@@ -86,6 +86,7 @@ class BomDepletionService {
     cafeId,
     lineItems = [],
     billId = '',
+    serviceMode = 'QUICK_SALE',
     referenceType = 'POS_SALE',
     userId = 'SYSTEM',
     businessDate = null,
@@ -167,6 +168,55 @@ class BomDepletionService {
         current.totalQuantityRequired += quantity;
         aggregatedRequirements.set(directItemId, current);
       }
+
+      // Check ServiceModeBOM packaging items for applicable service mode
+      if (serviceMode) {
+        try {
+          const ServiceModeBOM = mongoose.models.ServiceModeBOM || require('../models/ServiceModeBOM').ServiceModeBOM;
+          let smQuery = ServiceModeBOM.findOne({
+            organisationId: normOrgId,
+            menuItemId,
+            serviceMode: String(serviceMode).toUpperCase(),
+          });
+          if (session) smQuery = smQuery.session(session);
+          const smDoc = await smQuery.lean();
+          if (smDoc && Array.isArray(smDoc.packagingItems)) {
+            for (const pkg of smDoc.packagingItems) {
+              const pkgItemId = normalizeId(pkg.inventoryItemId);
+              const pkgQty = (Number(pkg.quantity) || 1) * quantity;
+              const current = aggregatedRequirements.get(pkgItemId) || {
+                itemId: pkgItemId,
+                ingredientName: pkg.itemName || 'Packaging',
+                uom: pkg.uom || 'UNIT',
+                totalQuantityRequired: 0,
+              };
+              current.totalQuantityRequired += pkgQty;
+              aggregatedRequirements.set(pkgItemId, current);
+            }
+          }
+        } catch (_) {}
+      }
+
+      // Check modifier recipe deltas
+      if (item.modifiers && typeof item.modifiers === 'object') {
+        const deltas = Array.isArray(item.modifiers.recipeDeltas)
+          ? item.modifiers.recipeDeltas
+          : (Array.isArray(item.modifiers.options) ? item.modifiers.options.flatMap((o) => o.recipeDeltas || []) : []);
+        for (const delta of deltas) {
+          if (delta.inventoryItemId && Number(delta.quantityDelta) > 0) {
+            const modItemId = normalizeId(delta.inventoryItemId);
+            const modQty = Number(delta.quantityDelta) * quantity;
+            const current = aggregatedRequirements.get(modItemId) || {
+              itemId: modItemId,
+              ingredientName: delta.ingredientName || 'Modifier Ingredient',
+              uom: delta.uom || 'UNIT',
+              totalQuantityRequired: 0,
+            };
+            current.totalQuantityRequired += modQty;
+            aggregatedRequirements.set(modItemId, current);
+          }
+        }
+      }
     }
 
     // Execute atomic FEFO lot deductions for each aggregated requirement
@@ -217,6 +267,115 @@ class BomDepletionService {
       allDeductionsSucceeded: executionDeductions.every((d) => d.status === 'SUCCESS'),
       deductions: executionDeductions,
       consumedLots: allConsumedLots,
+    };
+  }
+
+  /**
+   * Reverses inventory depletion for a voided or refunded bill.
+   * Restores lot stock quantities and creates compensating RETURN movements.
+   */
+  static async reverseOrderBOM({
+    organisationId,
+    cafeId,
+    billId,
+    userId = 'SYSTEM',
+    businessDate = null,
+    reason = 'VOID_OR_REFUND',
+    session = null,
+  } = {}) {
+    const normOrgId = normalizeId(organisationId);
+    const normCafeId = normalizeId(cafeId);
+    const normBillId = normalizeId(billId);
+
+    if (!normOrgId || !normBillId) {
+      return { success: true, reversedCount: 0 };
+    }
+
+    // Check if already reversed
+    let checkQuery = StockMovement.findOne({
+      referenceId: normBillId,
+      referenceType: 'POS_SALE',
+      movementType: 'REVERSAL',
+    });
+    if (session) checkQuery = checkQuery.session(session);
+    const alreadyReversed = await checkQuery.lean();
+    if (alreadyReversed) {
+      return { success: true, alreadyReversed: true, reversedCount: 0 };
+    }
+
+    // Find all CONSUMPTION movements for this bill
+    let movementsQuery = StockMovement.find({
+      referenceId: normBillId,
+      referenceType: 'POS_SALE',
+      movementType: 'CONSUMPTION',
+    });
+    if (session) movementsQuery = movementsQuery.session(session);
+    const consumptionMovements = await movementsQuery;
+
+    if (!consumptionMovements || consumptionMovements.length === 0) {
+      return { success: true, reversedCount: 0 };
+    }
+
+    const { InventoryLot } = require('../models/InventoryLot');
+    const { SequenceCounter } = require('../models/SequenceCounter');
+    let reversedCount = 0;
+
+    for (const mov of consumptionMovements) {
+      const returnQty = Math.abs(mov.quantityBase || mov.quantity || 0);
+      if (returnQty <= 0) continue;
+
+      let returnMovId = `MOV-RET-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+      try {
+        returnMovId = await SequenceCounter.generateId({
+          organisationId: normOrgId,
+          sequenceKey: 'STOCK_MOV',
+          prefix: 'MOV',
+          minimumDigits: 6,
+        });
+      } catch (_) {}
+
+      // Restore lot stock quantity if lotId is present
+      if (mov.lotId) {
+        let lotQuery = InventoryLot.findOne({ lotId: mov.lotId });
+        if (session) lotQuery = lotQuery.session(session);
+        const lot = await lotQuery;
+        if (lot) {
+          lot.quantityBase = (lot.quantityBase || 0) + returnQty;
+          lot.remainingQuantity = (lot.remainingQuantity || 0) + returnQty;
+          if (lot.status === 'DEPLETED' && lot.quantityBase > 0) {
+            lot.status = 'AVAILABLE';
+          }
+          await lot.save(session ? { session } : {});
+        }
+      }
+
+      const returnMovement = new StockMovement({
+        movementId: returnMovId,
+        organisationId: normOrgId,
+        cafeId: normCafeId || mov.cafeId,
+        itemId: mov.itemId,
+        lotId: mov.lotId || null,
+        movementType: 'REVERSAL',
+        direction: 'IN',
+        quantityBase: returnQty,
+        balanceBeforeBase: 0,
+        balanceAfterBase: returnQty,
+        uom: mov.uom || 'UNIT',
+        referenceId: normBillId,
+        referenceType: 'POS_SALE',
+        reason: reason || 'POS_VOID_OR_REFUND',
+        actorUserId: userId,
+        businessDate: businessDate || mov.businessDate,
+        createdAt: new Date(),
+      });
+
+      await returnMovement.save(session ? { session } : {});
+      reversedCount++;
+    }
+
+    return {
+      success: true,
+      reversedCount,
     };
   }
 }
