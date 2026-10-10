@@ -289,8 +289,22 @@ async function updateEmployeeReadinessChecklist(userId, updates = {}, actor = {}
 /**
  * Transition employee lifecycle across the 9 states.
  */
-async function transitionEmployeeLifecycle(userId, nextState, reason, actor = {}) {
+async function transitionEmployeeLifecycle(userId, nextState, reasonOrActor, maybeActor = {}) {
+  let reason = '';
+  let actor = {};
+  if (typeof reasonOrActor === 'string') {
+    reason = reasonOrActor;
+    actor = maybeActor || {};
+  } else if (typeof reasonOrActor === 'object' && reasonOrActor !== null) {
+    actor = reasonOrActor;
+    reason = actor.reason || '';
+  }
+
   const { organisationId, userId: actorUserId } = actor;
+  if (!organisationId) {
+    throw new ApiError(400, 'ORGANISATION_REQUIRED', 'organisationId is required in actor context.');
+  }
+
   if (!LIFECYCLE_STATES.includes(nextState)) {
     throw new ApiError(400, 'INVALID_LIFECYCLE_STATE', `Invalid state. Allowed: ${LIFECYCLE_STATES.join(', ')}`);
   }
@@ -315,6 +329,17 @@ async function transitionEmployeeLifecycle(userId, nextState, reason, actor = {}
   employee.lifecycleStatus = nextState;
   employee.statusReason = reason || `Transitioned to ${nextState} by ${actorUserId || 'ADMIN'}`;
   employee.updatedBy = actorUserId || 'SYSTEM';
+
+  if (['SUSPENDED', 'SEPARATED', 'TERMINATED', 'RETIRED'].includes(nextState)) {
+    employee.accountStatus = nextState === 'SUSPENDED' ? 'SUSPENDED' : 'INACTIVE';
+    try {
+      const { Session } = require('../models/Session');
+      await Session.updateMany(
+        { userId: employee.userId, status: 'ACTIVE' },
+        { status: 'REVOKED', revokedAt: new Date(), revokedReason: `EMPLOYEE_LIFECYCLE_${nextState}` }
+      );
+    } catch (_) {}
+  }
 
   await employee.save();
 
@@ -516,6 +541,7 @@ module.exports = {
   getEmployeeReadinessChecklist,
   updateEmployeeReadinessChecklist,
   transitionEmployeeLifecycle,
+  updateEmployeeLifecycle: transitionEmployeeLifecycle,
   generateEmployeeBadgeQr,
   getEmployeeComplianceAlerts,
   viewSensitiveFieldWithAudit,

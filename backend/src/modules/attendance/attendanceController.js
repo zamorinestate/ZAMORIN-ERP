@@ -94,6 +94,12 @@ function getIstBusinessDate(date = new Date()) {
 }
 
 function ensureCafeOperationsAllowed(request) {
+  if (request.auth.role === 'VENDOR') {
+    throw new ApiError(403, 'PERMISSION_DENIED', 'Vendor persona has no access to internal workforce or attendance records.');
+  }
+  if (!['MASTER', 'OWNER', 'CAFE_ADMIN'].includes(request.auth.role)) {
+    throw new ApiError(403, 'PERMISSION_DENIED', 'Unauthorized workforce access.');
+  }
   if (['MASTER', 'OWNER'].includes(request.auth.role)) return;
   if (request.auth.privilegeProfile === 'SELF_ONLY') {
     throw new ApiError(403, 'PERMISSION_DENIED', 'Cafe Operations attendance administration is restricted on personal or untrusted devices.');
@@ -983,11 +989,17 @@ const getStaffToday = asyncHandler(async (request, response) => {
     });
   } catch (_) {}
 
+  let resolvedStartDt = resolvedShift?.startTime ? buildShiftDateTime(businessDate, resolvedShift.startTime) : null;
+  let resolvedEndDt = resolvedShift?.endTime ? buildShiftDateTime(businessDate, resolvedShift.endTime) : null;
+  if (resolvedStartDt && resolvedEndDt && (resolvedShift.endTime < resolvedShift.startTime || resolvedEndDt <= resolvedStartDt)) {
+    resolvedEndDt.setDate(resolvedEndDt.getDate() + 1);
+  }
+
   const defaultShift = resolvedShift ? {
     shiftId: resolvedShift.shiftId || 'SH-MRN-01',
     shiftName: resolvedShift.shiftName || 'Morning Roastery Shift',
-    scheduledStartAt: resolvedShift.startTime ? buildShiftDateTime(businessDate, resolvedShift.startTime).toISOString() : `${businessDate}T09:00:00.000Z`,
-    scheduledEndAt: resolvedShift.endTime ? buildShiftDateTime(businessDate, resolvedShift.endTime).toISOString() : `${businessDate}T17:30:00.000Z`,
+    scheduledStartAt: resolvedStartDt ? resolvedStartDt.toISOString() : `${businessDate}T09:00:00.000Z`,
+    scheduledEndAt: resolvedEndDt ? resolvedEndDt.toISOString() : `${businessDate}T17:30:00.000Z`,
     assignedCafeName: assignedCafeName || 'Assigned Café',
     unpaidBreakMinutes: 30,
   } : {
@@ -1134,9 +1146,16 @@ const staffCheckIn = asyncHandler(async (request, response) => {
   const scheduledStartAt = resolvedShift?.startTime
     ? buildShiftDateTime(businessDate, resolvedShift.startTime)
     : new Date(`${businessDate}T09:00:00.000Z`);
-  const scheduledEndAt = resolvedShift?.endTime
+  let scheduledEndAt = resolvedShift?.endTime
     ? buildShiftDateTime(businessDate, resolvedShift.endTime)
     : new Date(`${businessDate}T17:30:00.000Z`);
+
+  if (resolvedShift?.startTime && resolvedShift?.endTime && resolvedShift.endTime < resolvedShift.startTime) {
+    scheduledEndAt.setDate(scheduledEndAt.getDate() + 1);
+  } else if (scheduledEndAt <= scheduledStartAt) {
+    scheduledEndAt.setDate(scheduledEndAt.getDate() + 1);
+  }
+
   const shiftId = resolvedShift?.shiftId || 'SH-MRN-01';
   const shiftName = resolvedShift?.shiftName || 'Morning Roastery Shift';
 
@@ -1943,7 +1962,11 @@ const reviewStaffCorrection = asyncHandler(async (request, response) => {
   const decision = String(rawDecision || '').toUpperCase().trim();
   const remarks = request.body?.remarks || request.body?.reviewerNote || request.body?.reviewRemarks || '';
 
-  if (!['MASTER', 'OWNER', 'CAFE_ADMIN'].includes(request.auth.role)) {
+  if (request.auth.role === 'OWNER') {
+    throw new ApiError(403, 'PERMISSION_DENIED', 'Owner persona is read-only governance and cannot review attendance corrections.');
+  }
+
+  if (!['MASTER', 'CAFE_ADMIN'].includes(request.auth.role)) {
     throw new ApiError(403, 'PERMISSION_DENIED', 'Insufficient permissions to review correction requests.');
   }
 
@@ -1958,6 +1981,10 @@ const reviewStaffCorrection = asyncHandler(async (request, response) => {
 
   if (!correctionRequest) {
     throw new ApiError(404, 'REQUEST_NOT_FOUND', 'Correction request not found.');
+  }
+
+  if (correctionRequest.userId === request.auth.userId) {
+    throw new ApiError(403, 'SELF_APPROVAL_FORBIDDEN', 'Staff cannot approve their own attendance correction.');
   }
 
   if (request.auth.role === 'CAFE_ADMIN') {
@@ -2368,10 +2395,35 @@ const uploadPunchSelfie = asyncHandler(async (request, response) => {
     throw new ApiError(400, 'EMPTY_IMAGE_PAYLOAD', 'Decoded image payload contains 0 bytes.');
   }
 
+  // OWASP File Content Verification & Magic Bytes Detection (Defense-in-depth against MIME-spoofing)
+  if (buffer.length < 12) {
+    throw new ApiError(400, 'INVALID_IMAGE_CONTENT', 'Selfie photograph payload is invalid or corrupted.');
+  }
+
+  const isJpeg = buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF;
+  const isPng = buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47;
+  const isWebp = buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP';
+
+  if (!isJpeg && !isPng && !isWebp) {
+    throw new ApiError(400, 'INVALID_IMAGE_CONTENT', 'Uploaded image content does not match allowed image formats (MIME spoofing detected).');
+  }
+
+  // Cross-check declared mime with magic bytes
+  const normMime = String(extractedMime).toLowerCase();
+  if ((normMime.includes('jpeg') || normMime.includes('jpg')) && !isJpeg) {
+    throw new ApiError(400, 'INVALID_IMAGE_CONTENT', 'MIME type indicates JPEG but image header does not match JPEG magic bytes.');
+  }
+  if (normMime.includes('png') && !isPng) {
+    throw new ApiError(400, 'INVALID_IMAGE_CONTENT', 'MIME type indicates PNG but image header does not match PNG magic bytes.');
+  }
+  if (normMime.includes('webp') && !isWebp) {
+    throw new ApiError(400, 'INVALID_IMAGE_CONTENT', 'MIME type indicates WebP but image header does not match WebP magic bytes.');
+  }
+
   const fileId = await SequenceCounter.generateId({
     organisationId,
     sequenceKey: 'PRIVATE_FILE',
-    prefix: 'FILE-',
+    prefix: 'FILE',
     minimumDigits: 4,
   });
 
@@ -2457,13 +2509,13 @@ const getEvidenceMedia = asyncHandler(async (request, response) => {
       primaryCafeId,
     ].filter(Boolean).map((c) => String(c).toUpperCase()));
 
-    if (attendance && !allowedCafes.has(attendance.cafeId.toUpperCase())) {
+    if (!attendance || !allowedCafes.has(attendance.cafeId.toUpperCase())) {
       throw new ApiError(403, 'FORBIDDEN_CAFE_EVIDENCE', 'Access denied to attendance photographs outside your assigned café.');
     }
   } else if (role === 'CAFE_OPS') {
     // Cafe Operations can only view for employees belonging to its bound café
     const boundCafe = String(request.auth.boundCafeId || assignedCafeId || primaryCafeId || (assignedCafeIds && assignedCafeIds[0]) || '').toUpperCase();
-    if (attendance && attendance.cafeId.toUpperCase() !== boundCafe) {
+    if (!attendance || attendance.cafeId.toUpperCase() !== boundCafe) {
       throw new ApiError(403, 'FORBIDDEN_CAFE_EVIDENCE', 'Access denied to attendance photographs outside your bound café.');
     }
   } else if (role === 'OWNER') {
@@ -2471,7 +2523,7 @@ const getEvidenceMedia = asyncHandler(async (request, response) => {
     if (!ownerCafes.size) {
       throw new ApiError(403, 'CROSS_CAFE_RESOURCE_DENIED', 'Owner has no assigned cafés.');
     }
-    if (attendance && !ownerCafes.has(attendance.cafeId.toUpperCase())) {
+    if (!attendance || !ownerCafes.has(attendance.cafeId.toUpperCase())) {
       throw new ApiError(403, 'CROSS_CAFE_RESOURCE_DENIED', 'Access denied to attendance photographs outside your assigned café.');
     }
   } else if (role !== 'MASTER') {

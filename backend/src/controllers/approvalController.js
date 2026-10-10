@@ -117,6 +117,22 @@ const decideApproval = asyncHandler(async (request, response) => {
     throw new ApiError(404, 'NOT_FOUND', 'Approval request not found.');
   }
 
+  if (request.auth.role === 'OWNER') {
+    throw new ApiError(
+      403,
+      'PERMISSION_DENIED',
+      'Owner persona is read-only governance and cannot decide operational approvals.'
+    );
+  }
+
+  if (approval.requestedByUserId && approval.requestedByUserId === request.auth.userId) {
+    throw new ApiError(
+      403,
+      'SELF_APPROVAL_FORBIDDEN',
+      'Staff cannot approve their own requests.'
+    );
+  }
+
   const assigned = Array.isArray(request.auth.assignedCafeIds)
     ? request.auth.assignedCafeIds
     : (request.auth.assignedCafeIds ? [request.auth.assignedCafeIds] : []);
@@ -159,6 +175,47 @@ const decideApproval = asyncHandler(async (request, response) => {
 
   if (approval.status !== 'PENDING') {
     throw new ApiError(409, 'ALREADY_DECIDED', `Approval request is already ${approval.status}.`);
+  }
+
+  if (approval.entityType === 'LEAVE' || approval.entityType === 'LEAVE_REQUEST' || approval.entityType === 'LEAVE_CANCELLATION') {
+    const isCancellation = approval.entityType === 'LEAVE_CANCELLATION';
+    const leaveRequest = await LeaveRequest.findOne({
+      organisationId: request.auth.organisationId,
+      $or: [{ leaveId: approval.entityId }, { requestId: approval.entityId }],
+    });
+    if (leaveRequest) {
+      if (leaveRequest.userId === request.auth.userId) {
+        throw new ApiError(
+          403,
+          'SELF_APPROVAL_FORBIDDEN',
+          'Staff cannot approve their own leave request.'
+        );
+      }
+
+      if (targetDecision === 'APPROVED' && !isCancellation) {
+        const currentYear = new Date().getFullYear();
+        const yearStart = `${currentYear}-01-01`;
+        const yearEnd = `${currentYear}-12-31`;
+
+        const approvedLeaves = await LeaveRequest.find({
+          organisationId: request.auth.organisationId,
+          userId: leaveRequest.userId,
+          leaveType: leaveRequest.leaveType,
+          status: 'APPROVED',
+          startDate: { $gte: yearStart, $lte: yearEnd },
+        });
+
+        const usedDays = approvedLeaves.reduce((sum, l) => sum + (l.requestedDays || 0), 0);
+        const entitlement = leaveRequest.leaveType === 'CASUAL' ? 12.0 : (leaveRequest.leaveType === 'SICK' ? 10.0 : 15.0);
+        if (leaveRequest.leaveType !== 'UNPAID' && (usedDays + (leaveRequest.requestedDays || 0)) > entitlement) {
+          throw new ApiError(
+            409,
+            'INSUFFICIENT_LEAVE_BALANCE',
+            `Approving this leave would exceed available annual entitlement (${entitlement} days).`
+          );
+        }
+      }
+    }
   }
 
   approval.status = targetDecision;

@@ -189,6 +189,7 @@ function calculateAttendanceMetrics({
       earlyDepartureMinutes,
       payableMinutes: 0,
       scheduledMinutes,
+      scheduledDurationMinutes: scheduledMinutes,
     };
   }
 
@@ -221,6 +222,7 @@ function calculateAttendanceMetrics({
     earlyDepartureMinutes,
     payableMinutes: totalWorkedMinutes,
     scheduledMinutes,
+    scheduledDurationMinutes: scheduledMinutes,
     hasUnclassifiedBreaks: unclassifiedBreakMinutes > 0,
     workedMinutesQuality: unclassifiedBreakMinutes > 0 ? 'PARTIAL_SOURCE' : 'AVAILABLE',
     status: 'COMPLETED',

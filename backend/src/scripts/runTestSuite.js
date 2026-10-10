@@ -35,6 +35,7 @@ const RELEASE_SUITE = [
   'canonicalAccessMatrix.test.js',
   'ownerAuthorizationMatrix.test.js',
   'staffScopeSecurity.test.js',
+  'p13_workforceAttendancePayroll.test.js',
 ];
 
 function parseArgs(argv) {

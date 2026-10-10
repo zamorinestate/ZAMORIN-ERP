@@ -53,15 +53,21 @@ function normalizeIdentifier(value) {
 function requirePayrollManagementAccess(
   request
 ) {
+  if (request.auth.role === 'OWNER') {
+    throw new ApiError(
+      403,
+      'PERMISSION_DENIED',
+      'Owner persona is read-only governance and cannot calculate payroll runs.'
+    );
+  }
+
   if (
-    !PAYROLL_MANAGEMENT_ROLES.includes(
-      request.auth.role
-    )
+    request.auth.role !== 'MASTER'
   ) {
     throw new ApiError(
       403,
       'PAYROLL_MANAGEMENT_FORBIDDEN',
-      'Only MASTER and OWNER may manage payroll.'
+      'Only MASTER may manage payroll.'
     );
   }
 
