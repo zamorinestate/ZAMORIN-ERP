@@ -64,6 +64,16 @@ const stockTransferSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    rejectedQty: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    rejectionReason: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     reason: {
       type: String,
       trim: true,

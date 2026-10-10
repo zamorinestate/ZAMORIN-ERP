@@ -661,7 +661,7 @@ const listTransfers = asyncHandler(async (request, response) => {
 
 const createTransfer = asyncHandler(async (request, response) => {
   const { organisationId, userId } = request.auth;
-  const { sourceCafeId, destCafeId, itemId, requestedQty, reason } = request.body;
+  const { sourceCafeId, destCafeId, itemId, requestedQty, reason, lotId } = request.body;
 
   if (!sourceCafeId || !destCafeId || !itemId || !requestedQty) {
     throw new ApiError(400, 'VALIDATION_FAILED', 'Source café, destination café, item, and quantity are required.');
@@ -677,9 +677,29 @@ const createTransfer = asyncHandler(async (request, response) => {
     throw new ApiError(400, 'INVALID_TRANSFER', 'Source and destination cafés must be different.');
   }
 
-  const sourceConfig = await CafeInventoryConfig.findOne({ organisationId, cafeId: cleanSource, itemId: cleanItem });
+  // Cross-organisation validation
+  const { Cafe } = require('../models/Cafe');
+  const [sourceCafe, destCafe] = await Promise.all([
+    Cafe.findOne({ cafeId: cleanSource, organisationId }),
+    Cafe.findOne({ cafeId: cleanDest, organisationId }),
+  ]);
+
+  if (!sourceCafe || !destCafe) {
+    throw new ApiError(400, 'CROSS_TENANT_TRANSFER_PROHIBITED', 'Transfers across organisations or to invalid cafés are prohibited.');
+  }
+
+  const sourceConfig = await CafeInventoryConfig.findOne({
+    organisationId,
+    cafeId: cleanSource,
+    itemId: cleanItem,
+  });
+
   if (!sourceConfig || sourceConfig.availableQuantityBase < Number(requestedQty)) {
-    throw new ApiError(400, 'INSUFFICIENT_STOCK', `Source café ${cleanSource} has only ${sourceConfig?.availableQuantityBase || 0} units available.`);
+    throw new ApiError(
+      400,
+      'INSUFFICIENT_STOCK',
+      `Source café ${cleanSource} has only ${sourceConfig?.availableQuantityBase || 0} units available.`
+    );
   }
 
   const count = await StockTransfer.countDocuments({ organisationId });
@@ -691,6 +711,7 @@ const createTransfer = asyncHandler(async (request, response) => {
     sourceCafeId: cleanSource,
     destCafeId: cleanDest,
     itemId: cleanItem,
+    lotId: lotId ? lotId.trim().toUpperCase() : null,
     requestedQty: Number(requestedQty),
     reason: reason || '',
     status: 'REQUESTED',
@@ -711,32 +732,79 @@ const dispatchTransfer = asyncHandler(async (request, response) => {
 
   assertCafeAccess(request, transfer.sourceCafeId);
 
-  // Reduce source stock and mark in transit
-  const sourceConfig = await CafeInventoryConfig.findOne({ organisationId, cafeId: transfer.sourceCafeId, itemId: transfer.itemId });
-  if (!sourceConfig || sourceConfig.currentQuantityBase < transfer.requestedQty) {
-    throw new ApiError(400, 'INSUFFICIENT_STOCK', 'Insufficient physical stock at source café.');
+  // Idempotency check: Cannot dispatch twice
+  if (['IN_TRANSIT', 'COMPLETED'].includes(transfer.status)) {
+    throw new ApiError(409, 'TRANSFER_ALREADY_DISPATCHED', `Transfer ${transferId} is already ${transfer.status}.`);
   }
 
-  const before = sourceConfig.currentQuantityBase;
-  const after = before - transfer.requestedQty;
-  sourceConfig.currentQuantityBase = after;
-  sourceConfig.availableQuantityBase = after;
-  await sourceConfig.save();
+  const reqQty = transfer.requestedQty;
 
-  // Mark in-transit at destination
-  const destConfig = await CafeInventoryConfig.findOne({ organisationId, cafeId: transfer.destCafeId, itemId: transfer.itemId });
-  if (destConfig) {
-    destConfig.inTransitQuantityBase = (destConfig.inTransitQuantityBase || 0) + transfer.requestedQty;
-    await destConfig.save();
+  // Concurrency guard: Atomically decrement source stock if available >= reqQty
+  const sourceConfig = await CafeInventoryConfig.findOneAndUpdate(
+    {
+      organisationId,
+      cafeId: transfer.sourceCafeId,
+      itemId: transfer.itemId,
+      availableQuantityBase: { $gte: reqQty },
+    },
+    {
+      $inc: {
+        currentQuantityBase: -reqQty,
+        availableQuantityBase: -reqQty,
+      },
+    },
+    { returnDocument: 'after' }
+  );
+
+  if (!sourceConfig) {
+    throw new ApiError(400, 'INSUFFICIENT_STOCK', 'Insufficient physical available stock at source café.');
   }
+
+  // If lotId specified, atomically deduct from lot
+  if (transfer.lotId) {
+    const sourceLot = await InventoryLot.findOneAndUpdate(
+      {
+        organisationId,
+        cafeId: transfer.sourceCafeId,
+        lotId: transfer.lotId,
+        quantityBase: { $gte: reqQty },
+      },
+      {
+        $inc: {
+          quantityBase: -reqQty,
+          remainingQuantity: -reqQty,
+        },
+      },
+      { returnDocument: 'after' }
+    );
+    if (!sourceLot) {
+      // Rollback config decrement
+      await CafeInventoryConfig.findOneAndUpdate(
+        { organisationId, cafeId: transfer.sourceCafeId, itemId: transfer.itemId },
+        { $inc: { currentQuantityBase: reqQty, availableQuantityBase: reqQty } }
+      );
+      throw new ApiError(400, 'INSUFFICIENT_LOT_STOCK', `Insufficient quantity in lot ${transfer.lotId}.`);
+    }
+  }
+
+  // Atomically increment in-transit quantity at destination
+  await CafeInventoryConfig.findOneAndUpdate(
+    { organisationId, cafeId: transfer.destCafeId, itemId: transfer.itemId },
+    { $inc: { inTransitQuantityBase: reqQty } },
+    { upsert: true, returnDocument: 'after' }
+  );
+
+  const before = sourceConfig.currentQuantityBase + reqQty;
+  const after = sourceConfig.currentQuantityBase;
 
   await StockMovement.create({
     organisationId,
-    movementId: `MVT-TRF-OUT-${Date.now().toString().slice(-6)}`,
+    movementId: `MVT-TRF-OUT-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`,
     cafeId: transfer.sourceCafeId,
     itemId: transfer.itemId,
+    lotId: transfer.lotId || null,
     movementType: 'CAFE_TRANSFER_OUT',
-    quantityBase: -transfer.requestedQty,
+    quantityBase: -reqQty,
     balanceBeforeBase: before,
     balanceAfterBase: after,
     reason: `Dispatched transfer ${transferId} to ${transfer.destCafeId}`,
@@ -746,7 +814,7 @@ const dispatchTransfer = asyncHandler(async (request, response) => {
   });
 
   transfer.status = 'IN_TRANSIT';
-  transfer.dispatchedQty = transfer.requestedQty;
+  transfer.dispatchedQty = reqQty;
   transfer.dispatchedBy = userId;
   transfer.dispatchedAt = new Date();
   await transfer.save();
@@ -757,7 +825,7 @@ const dispatchTransfer = asyncHandler(async (request, response) => {
 const receiveTransfer = asyncHandler(async (request, response) => {
   const { organisationId, userId } = request.auth;
   const { transferId } = request.params;
-  const { receivedQty } = request.body;
+  const { receivedQty, acceptedQty, rejectedQty = 0, rejectionReason = '' } = request.body;
 
   const transfer = await StockTransfer.findOne({ organisationId, transferId });
   if (!transfer) {
@@ -766,43 +834,97 @@ const receiveTransfer = asyncHandler(async (request, response) => {
 
   assertCafeAccess(request, transfer.destCafeId);
 
-  const numReceived = Number(receivedQty !== undefined ? receivedQty : transfer.dispatchedQty);
-  const variance = numReceived - transfer.dispatchedQty;
-
-  const destConfig = await CafeInventoryConfig.findOne({ organisationId, cafeId: transfer.destCafeId, itemId: transfer.itemId });
-  const before = destConfig ? destConfig.currentQuantityBase : 0;
-  const after = before + numReceived;
-
-  if (destConfig) {
-    destConfig.currentQuantityBase = after;
-    destConfig.availableQuantityBase = after;
-    destConfig.inTransitQuantityBase = Math.max(0, (destConfig.inTransitQuantityBase || 0) - transfer.dispatchedQty);
-    await destConfig.save();
+  // Idempotency check: Cannot receive twice
+  if (transfer.status === 'COMPLETED') {
+    throw new ApiError(409, 'TRANSFER_ALREADY_COMPLETED', `Transfer ${transferId} has already been completed.`);
   }
 
-  await StockMovement.create({
-    organisationId,
-    movementId: `MVT-TRF-IN-${Date.now().toString().slice(-6)}`,
-    cafeId: transfer.destCafeId,
-    itemId: transfer.itemId,
-    movementType: 'CAFE_TRANSFER_IN',
-    quantityBase: numReceived,
-    balanceBeforeBase: before,
-    balanceAfterBase: after,
-    reason: `Received transfer ${transferId} from ${transfer.sourceCafeId}`,
-    referenceType: 'TRANSFER',
-    referenceId: transferId,
-    performedByUserId: userId,
-  });
+  if (transfer.status !== 'IN_TRANSIT') {
+    throw new ApiError(400, 'INVALID_TRANSFER_STATE', `Transfer ${transferId} is not in transit (status: ${transfer.status}).`);
+  }
+
+  const dispatchedQty = transfer.dispatchedQty || transfer.requestedQty;
+  const numAccepted = Number(acceptedQty !== undefined ? acceptedQty : (receivedQty !== undefined ? receivedQty : dispatchedQty));
+  const numRejected = Number(rejectedQty !== undefined ? rejectedQty : Math.max(0, dispatchedQty - numAccepted));
+
+  if (numAccepted < 0 || numAccepted + numRejected > dispatchedQty) {
+    throw new ApiError(400, 'INVALID_RECEIPT_QUANTITY', 'Accepted and rejected quantities exceed dispatched quantity.');
+  }
+
+  const variance = numAccepted - dispatchedQty;
+
+  // Add ONLY accepted quantity to destination available inventory, decrement inTransit by full dispatchedQty
+  const destConfig = await CafeInventoryConfig.findOneAndUpdate(
+    { organisationId, cafeId: transfer.destCafeId, itemId: transfer.itemId },
+    {
+      $inc: {
+        currentQuantityBase: numAccepted,
+        availableQuantityBase: numAccepted,
+        inTransitQuantityBase: -dispatchedQty,
+      },
+    },
+    { upsert: true, returnDocument: 'after' }
+  );
+
+  const before = destConfig ? (destConfig.currentQuantityBase - numAccepted) : 0;
+  const after = destConfig ? destConfig.currentQuantityBase : numAccepted;
+
+  // If lot transferred and accepted > 0, create destination InventoryLot
+  if (transfer.lotId && numAccepted > 0) {
+    const sourceLot = await InventoryLot.findOne({
+      organisationId,
+      cafeId: transfer.sourceCafeId,
+      lotId: transfer.lotId,
+    }).lean();
+
+    await InventoryLot.create({
+      lotId: `LOT-TRF-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`,
+      organisationId,
+      cafeId: transfer.destCafeId,
+      itemId: transfer.itemId,
+      vendorId: sourceLot?.vendorId || null,
+      supplierLot: sourceLot?.supplierLot || '',
+      procurementReference: transfer.transferId,
+      expiryDate: sourceLot?.expiryDate || '2026-12-31',
+      initialQuantity: numAccepted,
+      quantityBase: numAccepted,
+      remainingQuantity: numAccepted,
+      unit: sourceLot?.unit || 'unit',
+      status: 'AVAILABLE',
+    });
+  }
+
+  if (numAccepted > 0) {
+    await StockMovement.create({
+      organisationId,
+      movementId: `MVT-TRF-IN-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`,
+      cafeId: transfer.destCafeId,
+      itemId: transfer.itemId,
+      lotId: transfer.lotId || null,
+      movementType: 'CAFE_TRANSFER_IN',
+      quantityBase: numAccepted,
+      balanceBeforeBase: before,
+      balanceAfterBase: after,
+      reason: `Received transfer ${transferId} from ${transfer.sourceCafeId}${numRejected > 0 ? ` (Rejected: ${numRejected})` : ''}`,
+      referenceType: 'TRANSFER',
+      referenceId: transferId,
+      performedByUserId: userId,
+    });
+  }
 
   transfer.status = 'COMPLETED';
-  transfer.receivedQty = numReceived;
+  transfer.receivedQty = numAccepted;
+  transfer.rejectedQty = numRejected;
+  transfer.rejectionReason = rejectionReason || (numRejected > 0 ? 'Discrepant upon arrival' : '');
   transfer.varianceQty = variance;
   transfer.receivedBy = userId;
   transfer.receivedAt = new Date();
   await transfer.save();
 
-  return response.status(200).json({ message: `Transfer ${transferId} received at ${transfer.destCafeId}.`, transfer });
+  return response.status(200).json({
+    message: `Transfer ${transferId} received at ${transfer.destCafeId}.`,
+    transfer,
+  });
 });
 
 // 7. Lots & FEFO Expiry
@@ -1247,13 +1369,75 @@ const listCycleCounts = asyncHandler(async (request, response) => {
   const filter = { organisationId };
   if (cafeId) filter.cafeId = cafeId.trim().toUpperCase();
 
-  const counts = await InventoryCycleCount.find(filter).sort({ createdAt: -1 }).lean();
+  const rawCounts = await InventoryCycleCount.find(filter).sort({ createdAt: -1 }).lean();
+  const isMaster = request.auth.role === 'MASTER' && Boolean(request.auth.isPrimaryMaster);
+
+  // Redact system expected quantity if blind count and session not yet approved/posted
+  const counts = rawCounts.map((c) => {
+    if (c.isBlindCount && !['POSTED', 'APPROVED'].includes(c.status) && !isMaster) {
+      return {
+        ...c,
+        items: (c.items || []).map((i) => ({
+          itemId: i.itemId,
+          lotId: i.lotId,
+          countedQty: i.countedQty,
+          reason: i.reason,
+          systemQty: null,
+          varianceQty: null,
+        })),
+      };
+    }
+    return c;
+  });
+
   return response.status(200).json({ counts });
+});
+
+const getCycleCount = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const { countId } = request.params;
+
+  const count = await InventoryCycleCount.findOne({
+    organisationId,
+    countId: countId.trim().toUpperCase(),
+  }).lean();
+
+  if (!count) {
+    throw new ApiError(404, 'COUNT_NOT_FOUND', `Cycle count record ${countId} not found.`);
+  }
+
+  assertCafeAccess(request, count.cafeId);
+
+  const isMaster = request.auth.role === 'MASTER' && Boolean(request.auth.isPrimaryMaster);
+  if (count.isBlindCount && !['POSTED', 'APPROVED'].includes(count.status) && !isMaster) {
+    return response.status(200).json({
+      count: {
+        ...count,
+        items: (count.items || []).map((i) => ({
+          itemId: i.itemId,
+          lotId: i.lotId,
+          countedQty: i.countedQty,
+          reason: i.reason,
+          systemQty: null,
+          varianceQty: null,
+        })),
+      },
+    });
+  }
+
+  return response.status(200).json({ count });
 });
 
 const submitCycleCount = asyncHandler(async (request, response) => {
   const { organisationId, userId } = request.auth;
-  const { cafeId, countType = 'CYCLE_COUNT', items = [], storageLocation = 'Main Store' } = request.body;
+  const {
+    cafeId,
+    countType = 'CYCLE_COUNT',
+    items = [],
+    storageLocation = 'Main Store',
+    isBlindCount = false,
+    businessDate = null,
+  } = request.body;
 
   if (!cafeId || !Array.isArray(items) || items.length === 0) {
     throw new ApiError(400, 'VALIDATION_FAILED', 'Café and count items are required.');
@@ -1262,36 +1446,62 @@ const submitCycleCount = asyncHandler(async (request, response) => {
   assertCafeAccess(request, cafeId);
 
   const cleanCafe = cafeId.trim().toUpperCase();
-  const countDocs = await InventoryCycleCount.countDocuments({ organisationId });
-  const countId = `CNT-2026-${String(countDocs + 1).padStart(4, '0')}`;
+  const cutoffAt = new Date();
 
-  const formattedItems = items.map((i) => {
-    const sys = Number(i.systemQty || 0);
+  // Snapshot authoritative system stock at cutoff time
+  const formattedItems = [];
+  const snapshotItems = [];
+
+  for (const i of items) {
+    const cleanItem = i.itemId.trim().toUpperCase();
+    const config = await CafeInventoryConfig.findOne({
+      organisationId,
+      cafeId: cleanCafe,
+      itemId: cleanItem,
+    }).lean();
+
+    const snapshotQty = config ? Number(config.currentQuantityBase || 0) : 0;
+    snapshotItems.push({ itemId: cleanItem, systemQty: snapshotQty });
+
+    // For blind counts or when client omitted expected quantity, derive strictly from cutoff snapshot
+    const sys = (isBlindCount || i.systemQty === undefined || i.systemQty === null)
+      ? snapshotQty
+      : Number(i.systemQty);
     const cnt = Number(i.countedQty || 0);
-    return {
-      itemId: i.itemId.trim().toUpperCase(),
+
+    formattedItems.push({
+      itemId: cleanItem,
+      lotId: i.lotId ? i.lotId.trim().toUpperCase() : null,
       systemQty: sys,
       countedQty: cnt,
       varianceQty: cnt - sys,
       reason: i.reason || '',
-    };
-  });
+    });
+  }
 
   const hasLargeVariance = formattedItems.some((i) => Math.abs(i.varianceQty) > 5);
+  const countDocs = await InventoryCycleCount.countDocuments({ organisationId });
+  const countId = `CNT-2026-${String(countDocs + 1).padStart(4, '0')}`;
 
   const cycleCount = await InventoryCycleCount.create({
     organisationId,
     countId,
     cafeId: cleanCafe,
+    businessDate: businessDate || cutoffAt.toISOString().slice(0, 10),
     countType,
     storageLocation,
     items: formattedItems,
     status: hasLargeVariance ? 'RECOUNT_REQUIRED' : 'SUBMITTED',
+    isBlindCount: Boolean(isBlindCount),
+    cutoffAt,
+    sessionSnapshot: snapshotItems,
     countedByUserId: userId,
   });
 
   return response.status(201).json({
-    message: hasLargeVariance ? `Cycle count ${countId} submitted with large variance. Recount or manager review required.` : `Cycle count ${countId} submitted.`,
+    message: hasLargeVariance
+      ? `Cycle count ${countId} submitted with large variance. Recount or manager review required.`
+      : `Cycle count ${countId} submitted.`,
     cycleCount,
   });
 });
@@ -1300,28 +1510,51 @@ const approveCycleCount = asyncHandler(async (request, response) => {
   const { organisationId, userId } = request.auth;
   const { countId } = request.params;
 
-  const count = await InventoryCycleCount.findOne({ organisationId, countId });
+  const count = await InventoryCycleCount.findOne({
+    organisationId,
+    countId: countId.trim().toUpperCase(),
+  });
+
   if (!count) {
     throw new ApiError(404, 'COUNT_NOT_FOUND', 'Cycle count record not found.');
   }
+
   assertCafeAccess(request, count.cafeId);
 
+  // Idempotency guard: If already POSTED, return without duplicate adjustment posting
+  if (count.status === 'POSTED') {
+    return response.status(200).json({
+      message: `Cycle count ${countId} was already posted.`,
+      count,
+      alreadyPosted: true,
+    });
+  }
+
+  // Deterministic Cutoff Policy Reconciliation:
+  // Apply the verified physical variance (countedQty - systemQtyAtCutoff) to the live ledger.
+  // This preserves any racing movements (POS sales, receipts, wastage) that occurred between cutoff and posting!
   for (const itm of count.items) {
     if (itm.varianceQty !== 0) {
-      const cfg = await CafeInventoryConfig.findOne({ organisationId, cafeId: count.cafeId, itemId: itm.itemId });
+      const cfg = await CafeInventoryConfig.findOne({
+        organisationId,
+        cafeId: count.cafeId,
+        itemId: itm.itemId,
+      });
+
       if (cfg) {
         const before = cfg.currentQuantityBase;
-        const after = itm.countedQty;
+        const after = before + itm.varianceQty;
         cfg.currentQuantityBase = after;
-        cfg.availableQuantityBase = after;
+        cfg.availableQuantityBase = Math.max(0, cfg.availableQuantityBase + itm.varianceQty);
         cfg.lastCountAt = new Date();
         await cfg.save();
 
         await StockMovement.create({
           organisationId,
-          movementId: `MVT-CNT-${Date.now().toString().slice(-6)}`,
+          movementId: `MVT-CNT-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`,
           cafeId: count.cafeId,
           itemId: itm.itemId,
+          lotId: itm.lotId || null,
           movementType: 'COUNT_ADJUSTMENT',
           quantityBase: itm.varianceQty,
           balanceBeforeBase: before,
@@ -1340,7 +1573,10 @@ const approveCycleCount = asyncHandler(async (request, response) => {
   count.postedAt = new Date();
   await count.save();
 
-  return response.status(200).json({ message: `Cycle count ${countId} approved and stock adjustments posted.`, count });
+  return response.status(200).json({
+    message: `Cycle count ${countId} approved and stock adjustments posted.`,
+    count,
+  });
 });
 
 // 11. Wastage & Adjustments
@@ -1740,6 +1976,7 @@ module.exports = {
   triggerReplenishmentEvaluation,
   getReplenishmentExplanation,
   listCycleCounts,
+  getCycleCount,
   submitCycleCount,
   approveCycleCount,
   recordWastage,

@@ -22,6 +22,11 @@ const countItemSchema = new mongoose.Schema(
       type: Number,
       required: true,
     },
+    lotId: {
+      type: String,
+      trim: true,
+      default: null,
+    },
     reason: {
       type: String,
       trim: true,
@@ -55,6 +60,11 @@ const inventoryCycleCountSchema = new mongoose.Schema(
       uppercase: true,
       index: true,
     },
+    businessDate: {
+      type: String,
+      trim: true,
+      default: null,
+    },
     countType: {
       type: String,
       enum: ['CYCLE_COUNT', 'PHYSICAL_INVENTORY', 'PAR_COUNT'],
@@ -86,6 +96,14 @@ const inventoryCycleCountSchema = new mongoose.Schema(
     isBlindCount: {
       type: Boolean,
       default: false,
+    },
+    cutoffAt: {
+      type: Date,
+      default: Date.now,
+    },
+    sessionSnapshot: {
+      type: Array,
+      default: [],
     },
     countedByUserId: {
       type: String,

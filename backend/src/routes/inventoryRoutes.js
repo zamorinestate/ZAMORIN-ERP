@@ -39,6 +39,7 @@ const {
   triggerReplenishmentEvaluation,
   getReplenishmentExplanation,
   listCycleCounts,
+  getCycleCount,
   submitCycleCount,
   approveCycleCount,
   recordWastage,
@@ -283,6 +284,18 @@ router.get(
   '/cycle-counts',
   authorize('INVENTORY_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
   listCycleCounts
+);
+
+router.get(
+  '/counts/:countId',
+  authorize('INVENTORY_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  getCycleCount
+);
+
+router.get(
+  '/cycle-counts/:countId',
+  authorize('INVENTORY_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  getCycleCount
 );
 
 router.post(
