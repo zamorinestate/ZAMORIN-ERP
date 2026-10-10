@@ -53,6 +53,10 @@ const bankAccountSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    reconciledBalancePaisa: {
+      type: Number,
+      default: 0,
+    },
     lastReconciledDate: {
       type: String,
       default: null,

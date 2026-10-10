@@ -1732,6 +1732,26 @@ const getCustodyBalances = asyncHandler(async (request, response) => {
   return response.status(200).json({ success: true, data: result });
 });
 
+const confirmBankDeposit = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const { depositId } = request.params;
+  const { cafeId, reconciliationReference } = request.body || {};
+
+  const effectiveCafe = cafeId || request.query.cafeId || request.auth.primaryCafeId || request.auth.assignedCafeIds?.[0] || 'ZC-0001';
+  ensureCafeAccess(request, effectiveCafe);
+
+  const cashManagementService = require('../services/cashManagementService');
+  const result = await cashManagementService.confirmBankDeposit({
+    organisationId,
+    cafeId: effectiveCafe,
+    depositId,
+    reconciliationReference,
+    authContext: request.auth,
+  });
+
+  return response.status(200).json({ success: true, message: 'Bank deposit confirmed and reconciled.', data: result });
+});
+
 module.exports = {
   getFinanceOverview,
   getSalesAudit,
@@ -1773,5 +1793,6 @@ module.exports = {
   refundAdvanceDeposit,
   recordCashDrop,
   recordBankDeposit,
+  confirmBankDeposit,
   getCustodyBalances,
 };

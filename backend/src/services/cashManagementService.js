@@ -482,7 +482,7 @@ async function recordBankDeposit({
         referenceNumber: referenceNumber || '',
         supportingDocumentUrl: supportingDocumentUrl || '',
         idempotencyKey: idempotencyKey || null,
-        status: 'SUBMITTED',
+        status: 'IN_TRANSIT',
         depositedAt: new Date(),
         depositedByUserId: authContext.userId || 'SYSTEM',
       });
@@ -563,7 +563,7 @@ async function recordBankDeposit({
       sourceCustody: effectiveCustody,
       source: effectiveCustody,
       depositedAt: depositRecord.depositedAt,
-      status: 'SUBMITTED',
+      status: 'IN_TRANSIT',
       remainingSafeBalancePaisa,
       remainingTillBalancePaisa,
     };
@@ -748,20 +748,193 @@ async function getCustodyBalances({ organisationId, cafeId, registerSessionId = 
   ]);
   const bankInTransitPaisa = inTransitAgg[0]?.totalInTransitPaisa || 0;
 
+  // 4. Reconciled bank balance
+  const bankAccounts = await BankAccount.find({
+    organisationId: orgId,
+    status: 'ACTIVE',
+  }).lean();
+  const reconciledBankPaisa = bankAccounts.reduce((sum, b) => sum + (b.reconciledBalancePaisa || 0), 0);
+
   return {
     organisationId: orgId,
     cafeId: cleanCafe,
     tillPaisa,
     safePaisa,
     bankInTransitPaisa,
+    reconciledBankPaisa,
     totalCashInCustodyPaisa: tillPaisa + safePaisa + bankInTransitPaisa,
   };
+}
+
+/**
+ * Concurrency-Safe Bank Deposit Confirmation / Reconciliation
+ * Moves cash from IN_TRANSIT to BankAccount.reconciledBalancePaisa.
+ * Safe custody balance was already reduced during deposit creation.
+ * Confirmation moves in-transit cash to bank reconciled balance exactly once.
+ * Replays are idempotent and never double-credit bank balance or change sales.
+ */
+async function confirmBankDeposit({
+  organisationId,
+  cafeId,
+  depositId,
+  reconciliationReference = '',
+  authContext = {},
+}) {
+  const orgId = normalizeId(organisationId);
+  const cleanCafe = normalizeId(cafeId);
+  const cleanDepositId = normalizeId(depositId);
+
+  if (!orgId || !cleanDepositId) {
+    throw new ApiError(400, 'VALIDATION_FAILED', 'organisationId and depositId are required.');
+  }
+
+  // Find deposit
+  const query = { organisationId: orgId, depositId: cleanDepositId };
+  if (cleanCafe) query.cafeId = cleanCafe;
+
+  const deposit = await BankDeposit.findOne(query);
+  if (!deposit) {
+    throw new ApiError(404, 'BANK_DEPOSIT_NOT_FOUND', `Bank deposit ${cleanDepositId} not found.`);
+  }
+
+  // Idempotency fast-path: if already confirmed or reconciled, return cleanly
+  if (['CONFIRMED', 'RECONCILED'].includes(deposit.status)) {
+    const bankAccount = await BankAccount.findOne({
+      organisationId: orgId,
+      bankAccountId: deposit.bankAccountId,
+    }).lean();
+
+    return {
+      idempotentReplay: true,
+      depositId: deposit.depositId,
+      bankAccountId: deposit.bankAccountId,
+      amountPaisa: deposit.amountPaisa,
+      status: deposit.status,
+      reconciledAt: deposit.reconciledAt,
+      reconciledBankBalancePaisa: bankAccount?.reconciledBalancePaisa || 0,
+      success: true,
+    };
+  }
+
+  if (!['SUBMITTED', 'IN_TRANSIT'].includes(deposit.status)) {
+    throw new ApiError(
+      400,
+      'INVALID_DEPOSIT_STATUS',
+      `Deposit ${cleanDepositId} in status '${deposit.status}' cannot be confirmed.`
+    );
+  }
+
+  return await executeTransactionWithRetry(async (session) => {
+    // Atomically transition status from SUBMITTED/IN_TRANSIT to CONFIRMED
+    const updatedDeposit = await BankDeposit.findOneAndUpdate(
+      {
+        organisationId: orgId,
+        depositId: cleanDepositId,
+        status: { $in: ['SUBMITTED', 'IN_TRANSIT'] },
+      },
+      {
+        $set: {
+          status: 'CONFIRMED',
+          reconciledAt: new Date(),
+          reconciliationReference: String(reconciliationReference || '').trim(),
+          reconciledByUserId: authContext.userId || 'SYSTEM',
+        },
+      },
+      {
+        returnDocument: 'after',
+        session: session || undefined,
+      }
+    );
+
+    if (!updatedDeposit) {
+      // Concurrency check: already confirmed by parallel request
+      const alreadyConfirmed = await BankDeposit.findOne({
+        organisationId: orgId,
+        depositId: cleanDepositId,
+        status: { $in: ['CONFIRMED', 'RECONCILED'] },
+      }).session(session || null);
+
+      if (alreadyConfirmed) {
+        const bankAccount = await BankAccount.findOne({
+          organisationId: orgId,
+          bankAccountId: alreadyConfirmed.bankAccountId,
+        }).session(session || null);
+
+        return {
+          idempotentReplay: true,
+          depositId: alreadyConfirmed.depositId,
+          bankAccountId: alreadyConfirmed.bankAccountId,
+          amountPaisa: alreadyConfirmed.amountPaisa,
+          status: alreadyConfirmed.status,
+          reconciledAt: alreadyConfirmed.reconciledAt,
+          reconciledBankBalancePaisa: bankAccount?.reconciledBalancePaisa || 0,
+          success: true,
+        };
+      }
+
+      throw new ApiError(409, 'DEPOSIT_CONFIRMATION_CONFLICT', 'Deposit was modified concurrently.');
+    }
+
+    // Atomically increment BankAccount.reconciledBalancePaisa
+    const updatedBank = await BankAccount.findOneAndUpdate(
+      {
+        organisationId: orgId,
+        bankAccountId: updatedDeposit.bankAccountId,
+      },
+      {
+        $inc: { reconciledBalancePaisa: updatedDeposit.amountPaisa },
+        $set: { lastReconciledDate: getIstBusinessDate() },
+      },
+      {
+        returnDocument: 'after',
+        session: session || undefined,
+      }
+    );
+
+    if (!updatedBank) {
+      throw new ApiError(
+        404,
+        'BANK_ACCOUNT_NOT_FOUND',
+        `Destination bank account ${updatedDeposit.bankAccountId} not found.`
+      );
+    }
+
+    if (authContext && authContext.userId) {
+      await auditService.recordAuditEvent({
+        organisationId: orgId,
+        cafeId: updatedDeposit.cafeId,
+        userId: authContext.userId,
+        eventCategory: 'TREASURY',
+        eventType: 'BANK_DEPOSIT_CONFIRMED',
+        resourceType: 'BankDeposit',
+        resourceId: cleanDepositId,
+        details: {
+          depositId: cleanDepositId,
+          bankAccountId: updatedDeposit.bankAccountId,
+          amountPaisa: updatedDeposit.amountPaisa,
+          reconciledBalancePaisa: updatedBank.reconciledBalancePaisa,
+          reconciliationReference,
+        },
+      }).catch(() => {});
+    }
+
+    return {
+      success: true,
+      depositId: cleanDepositId,
+      bankAccountId: updatedDeposit.bankAccountId,
+      amountPaisa: updatedDeposit.amountPaisa,
+      reconciledBankBalancePaisa: updatedBank.reconciledBalancePaisa,
+      status: 'CONFIRMED',
+      reconciledAt: updatedDeposit.reconciledAt,
+    };
+  });
 }
 
 module.exports = {
   openRegisterSession,
   recordCashDrop,
   recordBankDeposit,
+  confirmBankDeposit,
   closeRegisterSessionAtomic,
   getSafeCustodyBalance,
   getCustodyBalances,

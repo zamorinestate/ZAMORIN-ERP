@@ -982,4 +982,417 @@ test('P10 Invariant 17: Statutory CBIC GST Advance Deposit Configuration (GOODS 
   assert.equal(servicesDeposit.deposit.taxRuleVersion, 'GST_ROUNDING_V1_2026');
 });
 
+test('P10 Invariant 18: Safe ₹10,000 to ₹8,000 Bank Deposit & Confirmation Lifecycle (Idempotent, Zero Sales Revenue Impact)', async () => {
+  // 1. Initial State: Safe holds ₹10,000 (1,000,000 Paisa), Bank holds ₹0 reconciled balance
+  await SafeCustody.findOneAndUpdate(
+    { organisationId: ORG_ID, cafeId: CAFE_ID },
+    { $set: { currentBalancePaisa: 1000000, lastUpdated: new Date() } },
+    { upsert: true }
+  );
+
+  await BankAccount.create({
+    organisationId: ORG_ID,
+    bankAccountId: 'BANK-HDFC-01',
+    accountAlias: 'Main HDFC Operating A/C',
+    bankName: 'HDFC Bank',
+    maskedAccountNumber: 'XXXX-XXXX-8888',
+    ifscCode: 'HDFC0001234',
+    glAccountCode: '1010-01',
+    accountType: 'CURRENT',
+    reconciledBalancePaisa: 0,
+    status: 'ACTIVE',
+  });
+
+  // Verify initial custody balances
+  const initialBalances = await cashManagementService.getCustodyBalances({
+    organisationId: ORG_ID,
+    cafeId: CAFE_ID,
+  });
+  assert.equal(initialBalances.safePaisa, 1000000, 'Safe initial balance is ₹10,000');
+  assert.equal(initialBalances.bankInTransitPaisa, 0, 'Initial in-transit cash is ₹0');
+  assert.equal(initialBalances.reconciledBankPaisa, 0, 'Initial reconciled bank balance is ₹0');
+
+  // Sales revenue checkpoint: no sales recorded
+  const initialBillsCount = await Bill.countDocuments({ organisationId: ORG_ID });
+  assert.equal(initialBillsCount, 0, 'Zero sales revenue initially');
+
+  // 2. Transfer ₹8,000 from Safe to Bank Deposit
+  const depositKey = `DEP-SAFE-BANK-KEY-${Date.now()}`;
+  const depositRes = await cashManagementService.recordBankDeposit({
+    organisationId: ORG_ID,
+    cafeId: CAFE_ID,
+    bankAccountId: 'BANK-HDFC-01',
+    amountPaisa: 800000, // ₹8,000
+    source: 'SAFE',
+    referenceNumber: 'HDFC-CHQ-1001',
+    idempotencyKey: depositKey,
+    authContext: { userId: 'CAFE_ADMIN_01', role: 'CAFE_ADMIN' },
+  });
+
+  assert.equal(depositRes.success, true);
+  assert.equal(depositRes.amountPaisa, 800000);
+  assert.equal(depositRes.status, 'IN_TRANSIT');
+  assert.equal(depositRes.remainingSafeBalancePaisa, 200000, 'Safe balance reduced to ₹2,000');
+
+  // 3. Before Confirmation: safe custody is ₹2,000, in-transit is ₹8,000, reconciled bank is unchanged (₹0)
+  const preConfirmBalances = await cashManagementService.getCustodyBalances({
+    organisationId: ORG_ID,
+    cafeId: CAFE_ID,
+  });
+  assert.equal(preConfirmBalances.safePaisa, 200000, 'Safe custody is ₹2,000 before confirmation');
+  assert.equal(preConfirmBalances.bankInTransitPaisa, 800000, 'In-transit cash is ₹8,000 before confirmation');
+  assert.equal(preConfirmBalances.reconciledBankPaisa, 0, 'Reconciled bank balance is unchanged (₹0)');
+
+  // Replay of creation request must not duplicate debit or movement
+  const replayDeposit = await cashManagementService.recordBankDeposit({
+    organisationId: ORG_ID,
+    cafeId: CAFE_ID,
+    bankAccountId: 'BANK-HDFC-01',
+    amountPaisa: 800000,
+    source: 'SAFE',
+    referenceNumber: 'HDFC-CHQ-1001',
+    idempotencyKey: depositKey,
+    authContext: { userId: 'CAFE_ADMIN_01', role: 'CAFE_ADMIN' },
+  });
+  assert.equal(replayDeposit.idempotentReplay, true);
+
+  const postReplayBalances = await cashManagementService.getCustodyBalances({
+    organisationId: ORG_ID,
+    cafeId: CAFE_ID,
+  });
+  assert.equal(postReplayBalances.safePaisa, 200000, 'Safe custody remains ₹2,000 after replay');
+  assert.equal(postReplayBalances.bankInTransitPaisa, 800000, 'In-transit cash remains ₹8,000 after replay');
+  assert.equal(postReplayBalances.reconciledBankPaisa, 0, 'Reconciled bank balance remains ₹0 after replay');
+
+  // 4. Confirmation: moves ₹8,000 from transit to bank exactly once
+  const confirmRes = await cashManagementService.confirmBankDeposit({
+    organisationId: ORG_ID,
+    cafeId: CAFE_ID,
+    depositId: depositRes.depositId,
+    reconciliationReference: 'BANK-STMT-MATCH-9988',
+    authContext: { userId: 'CAFE_ADMIN_01', role: 'CAFE_ADMIN' },
+  });
+
+  assert.equal(confirmRes.success, true);
+  assert.equal(confirmRes.status, 'CONFIRMED');
+  assert.equal(confirmRes.reconciledBankBalancePaisa, 800000, 'Reconciled bank balance increased to ₹8,000');
+
+  // Verify balances after confirmation
+  const postConfirmBalances = await cashManagementService.getCustodyBalances({
+    organisationId: ORG_ID,
+    cafeId: CAFE_ID,
+  });
+  assert.equal(postConfirmBalances.safePaisa, 200000, 'Safe custody remains ₹2,000');
+  assert.equal(postConfirmBalances.bankInTransitPaisa, 0, 'In-transit cash is cleared to ₹0');
+  assert.equal(postConfirmBalances.reconciledBankPaisa, 800000, 'Reconciled bank balance is exactly ₹8,000');
+
+  // 5. Repeating confirmation request must NOT duplicate movement or bank balance
+  const replayConfirm = await cashManagementService.confirmBankDeposit({
+    organisationId: ORG_ID,
+    cafeId: CAFE_ID,
+    depositId: depositRes.depositId,
+    reconciliationReference: 'BANK-STMT-MATCH-9988',
+    authContext: { userId: 'CAFE_ADMIN_01', role: 'CAFE_ADMIN' },
+  });
+  assert.equal(replayConfirm.idempotentReplay, true);
+  assert.equal(replayConfirm.reconciledBankBalancePaisa, 800000, 'Bank balance is never doubled to ₹16,000');
+
+  const finalBalances = await cashManagementService.getCustodyBalances({
+    organisationId: ORG_ID,
+    cafeId: CAFE_ID,
+  });
+  assert.equal(finalBalances.safePaisa, 200000, 'Safe remains ₹2,000');
+  assert.equal(finalBalances.bankInTransitPaisa, 0, 'In-transit remains ₹0');
+  assert.equal(finalBalances.reconciledBankPaisa, 800000, 'Reconciled bank remains ₹8,000');
+
+  // 6. Sales revenue check: treasury custody movement creates ZERO sales revenue
+  const finalBillsCount = await Bill.countDocuments({ organisationId: ORG_ID });
+  assert.equal(finalBillsCount, 0, 'Treasury custody mutations create zero sales revenue');
+});
+
+test('P10 Invariant 19: Complete Advance-to-Final-Invoice Flow for Eligible Goods vs Taxable Services (CBIC Advance Tax Adjustment)', async () => {
+  // Case A: Eligible Goods Advance (Packaged Coffee Beans, HSN 0901, statutory GST 5%)
+  // Under Notification No. 66/2017-CT, regular taxpayer advance for goods attracts 0 tax at receipt.
+  // CRITICAL: The 0 tax on advance must NOT overwrite the final invoice's applicable GST rate!
+  const goodsAdvance = await advanceDepositService.recordAdvanceDeposit({
+    organisationId: ORG_ID,
+    cafeId: CAFE_ID,
+    customerName: 'Highland Coffee Roasters',
+    amountPaisa: 500000, // ₹5,000 advance
+    category: 'PACKAGED_COFFEE_BEANS',
+    supplyType: 'GOODS',
+    taxpayerRegime: 'REGULAR',
+    taxRatePercent: 5, // underlying statutory goods rate
+    paymentMethod: 'UPI',
+    paymentReference: 'UPI-BEANS-ADV',
+    authContext: { userId: 'CASHIER-01' },
+  });
+
+  // Advance Receipt timing verification
+  assert.equal(goodsAdvance.deposit.supplyClassification, 'GOODS');
+  assert.equal(goodsAdvance.deposit.applicableSupplyGstRatePercent, 5, 'Applicable goods GST rate is 5%');
+  assert.equal(goodsAdvance.deposit.taxRatePercentAtAdvance, 0, 'Tax rate due at advance timing is 0%');
+  assert.equal(goodsAdvance.deposit.taxDueAtAdvancePaisa, 0, 'Zero tax due at advance receipt');
+  assert.equal(goodsAdvance.deposit.taxAccountedOnAdvancePaisa, 0, 'Zero tax accounted on receipt voucher');
+
+  // Final Tax Invoice: Customer purchases ₹10,000 taxable coffee beans
+  // Final invoice line items must be taxed at 5% (₹250 CGST + ₹250 SGST = ₹500 total tax, ₹10,500 grand total)
+  const goodsFinalInvoiceTaxSummary = {
+    taxableAmountPaisa: 1000000, // ₹10,000
+    totalCgstPaisa: 25000,       // ₹250
+    totalSgstPaisa: 25000,       // ₹250
+    totalIgstPaisa: 0,
+    totalTaxPaisa: 50000,        // ₹500
+    grandTotalPaisa: 1050000,    // ₹10,500
+  };
+
+  const goodsAdjustment = advanceDepositService.calculateAdvanceTaxAdjustmentOnFinalInvoice({
+    invoiceTotalTaxablePaisa: goodsFinalInvoiceTaxSummary.taxableAmountPaisa,
+    invoiceTaxSummary: goodsFinalInvoiceTaxSummary,
+    appliedAdvanceDeposits: [
+      {
+        deposit: goodsAdvance.deposit,
+        amountAppliedPaisa: 500000, // ₹5,000 advance applied
+      },
+    ],
+  });
+
+  assert.equal(goodsAdjustment.grossTaxPaisa, 50000, 'Final invoice gross tax is ₹500 (5% maintained, NOT overwritten to 0%)');
+  assert.equal(goodsAdjustment.advanceTaxAccountedTotalPaisa, 0, 'Advance tax accounted was 0, so 0 tax is deducted');
+  assert.equal(goodsAdjustment.netTaxPayablePaisa, 50000, 'Full ₹500 tax is due on final invoice');
+  assert.equal(goodsAdjustment.netCustomerPayablePaisa, 550000, 'Customer pays remaining ₹5,500 (₹10,500 - ₹5,000)');
+
+  // Case B: Taxable Services Advance (Banquet / Catering / Event Hosting)
+  // Under Section 13(2), tax is due on receipt of service advance.
+  const servicesAdvance = await advanceDepositService.recordAdvanceDeposit({
+    organisationId: ORG_ID,
+    cafeId: CAFE_ID,
+    customerName: 'Kozhikode Heritage Banquet',
+    amountPaisa: 1050000, // ₹10,500 advance (inclusive of 5% GST = ₹10,000 taxable + ₹250 CGST + ₹250 SGST)
+    category: 'EVENT_BANQUET',
+    serviceType: 'CATERING',
+    taxpayerRegime: 'REGULAR',
+    taxRatePercent: 5,
+    paymentMethod: 'BANK_TRANSFER',
+    paymentReference: 'NEFT-BANQUET-ADV',
+    authContext: { userId: 'MANAGER-01' },
+  });
+
+  assert.equal(servicesAdvance.deposit.supplyClassification, 'SERVICES');
+  assert.equal(servicesAdvance.deposit.taxRatePercentAtAdvance, 5);
+  assert.equal(servicesAdvance.deposit.taxDueAtAdvancePaisa, 50000, '₹500 tax due at advance receipt');
+  assert.equal(servicesAdvance.deposit.taxAccountedOnAdvancePaisa, 50000, '₹500 accounted on receipt voucher');
+  assert.equal(servicesAdvance.deposit.cgstPaisa, 25000, '₹250 CGST accounted on receipt voucher');
+  assert.equal(servicesAdvance.deposit.sgstPaisa, 25000, '₹250 SGST accounted on receipt voucher');
+
+  // Final Tax Invoice: Banquet bill total is ₹21,000 gross (₹20,000 taxable + ₹500 CGST + ₹500 SGST = ₹1,000 tax)
+  const serviceFinalInvoiceTaxSummary = {
+    taxableAmountPaisa: 2000000, // ₹20,000
+    totalCgstPaisa: 50000,       // ₹500
+    totalSgstPaisa: 50000,       // ₹500
+    totalIgstPaisa: 0,
+    totalTaxPaisa: 100000,       // ₹1,000
+    grandTotalPaisa: 2100000,    // ₹21,000
+  };
+
+  const serviceAdjustment = advanceDepositService.calculateAdvanceTaxAdjustmentOnFinalInvoice({
+    invoiceTotalTaxablePaisa: serviceFinalInvoiceTaxSummary.taxableAmountPaisa,
+    invoiceTaxSummary: serviceFinalInvoiceTaxSummary,
+    appliedAdvanceDeposits: [
+      {
+        deposit: servicesAdvance.deposit,
+        amountAppliedPaisa: 1050000, // Full ₹10,500 advance applied
+      },
+    ],
+  });
+
+  assert.equal(serviceAdjustment.grossTaxPaisa, 100000, 'Gross tax liability on invoice is ₹1,000');
+  assert.equal(serviceAdjustment.advanceTaxAccountedTotalPaisa, 50000, '₹500 tax credited from advance receipt voucher');
+  assert.equal(serviceAdjustment.advanceCgstAdjustedPaisa, 25000, '₹250 CGST credited');
+  assert.equal(serviceAdjustment.advanceSgstAdjustedPaisa, 25000, '₹250 SGST credited');
+  assert.equal(serviceAdjustment.netCgstPayablePaisa, 25000, 'Net CGST remaining to be collected is ₹250');
+  assert.equal(serviceAdjustment.netSgstPayablePaisa, 25000, 'Net SGST remaining to be collected is ₹250');
+  assert.equal(serviceAdjustment.netTaxPayablePaisa, 50000, 'Net tax payable on final invoice is ₹500');
+  assert.equal(serviceAdjustment.netCustomerPayablePaisa, 1050000, 'Net customer balance payable is ₹10,500');
+
+  // Case C: Statutory Supply Classification Boundary
+  // Food service transactions (Restaurant, Takeaway, Catering) MUST NOT enter the goods branch merely because they involve physical food!
+  const takeawayAdvance = await advanceDepositService.recordAdvanceDeposit({
+    organisationId: ORG_ID,
+    cafeId: CAFE_ID,
+    customerName: 'Takeaway Food Bulk Order',
+    amountPaisa: 210000, // ₹2,100 gross
+    category: 'TAKEAWAY',
+    supplyType: 'GOODS', // Client erroneously requested 'GOODS'
+    serviceType: 'RESTAURANT',
+    taxRatePercent: 5,
+    paymentMethod: 'CASH',
+    authContext: { userId: 'CASHIER-01' },
+  });
+
+  // Server authoritatively derives SERVICES per Schedule II Para 6(b)
+  assert.equal(takeawayAdvance.deposit.supplyClassification, 'SERVICES', 'Food service stays SERVICES even if client passes supplyType GOODS');
+  assert.equal(takeawayAdvance.deposit.taxRatePercentAtAdvance, 5, 'Tax due at advance receipt because it is a food service');
+  assert.equal(takeawayAdvance.deposit.taxDueAtAdvancePaisa, 10000, '₹100 tax due at advance receipt');
+});
+
+test('P10 Invariant 20: Five-Persona Custody Authorization Matrix & Strict Boundaries', async () => {
+  const { authorize } = require('../src/middleware/authorize');
+  const { RolePermission } = require('../src/models/RolePermission');
+
+  function createMockRes() {
+    return {
+      statusCode: 200,
+      body: null,
+      status(code) {
+        this.statusCode = code;
+        return this;
+      },
+      json(data) {
+        this.body = data;
+        return this;
+      },
+    };
+  }
+
+  // Set up mock effective role rules: Primary Master has ORGANISATION scope, operations has ASSIGNED_CAFES
+  const originalFind = RolePermission.findEffectiveRules;
+  RolePermission.findEffectiveRules = async ({ role } = {}) => [
+    {
+      effect: 'ALLOW',
+      scope: role === 'MASTER' ? 'ORGANISATION' : 'ASSIGNED_CAFES',
+      isCurrentlyEffective: () => true,
+      requiresMfa: false,
+      requiresStepUpAuthentication: false,
+    },
+  ];
+
+  try {
+    const custodyWriteMiddleware = authorize('FINANCE:WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] });
+    const custodyReadMiddleware = authorize('FINANCE:READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] });
+
+    // Persona 1: PRIMARY MASTER retains universal custody administration
+    {
+      const req = {
+        auth: { role: 'MASTER', isPrimaryMaster: true },
+        body: { cafeId: 'ZC-0001' },
+        method: 'POST',
+        correlationId: 'c-pm',
+      };
+      const res = createMockRes();
+      let passed = false;
+      await custodyWriteMiddleware(req, res, () => { passed = true; });
+      assert.equal(passed, true, 'Primary Master must have write access to custody mutations');
+    }
+
+    // Persona 2: CAFE OPERATIONS has authorised café-scoped custody capabilities
+    {
+      // In-scope cafe: PASS
+      const reqScope = {
+        auth: { role: 'CAFE_ADMIN', isPrimaryMaster: false, assignedCafeIds: ['ZC-0001'] },
+        body: { cafeId: 'ZC-0001' },
+        method: 'POST',
+        correlationId: 'c-ca-in',
+      };
+      const resScope = createMockRes();
+      let passedScope = false;
+      await custodyWriteMiddleware(reqScope, resScope, () => { passedScope = true; });
+      assert.equal(passedScope, true, 'Café Operations has authorised custody capabilities in assigned café');
+
+      // Cross-cafe attempt: DENIED
+      const reqCross = {
+        auth: { role: 'CAFE_ADMIN', isPrimaryMaster: false, assignedCafeIds: ['ZC-0001'] },
+        body: { cafeId: 'ZC-0002' },
+        method: 'POST',
+        correlationId: 'c-ca-cross',
+      };
+      const resCross = createMockRes();
+      let passedCross = false;
+      await custodyWriteMiddleware(reqCross, resCross, () => { passedCross = true; });
+      assert.equal(passedCross, false, 'Café Operations is denied custody mutation on unassigned café');
+      assert.equal(resCross.statusCode, 403);
+      assert.equal(resCross.body?.error?.code, 'CAFE_ACCESS_DENIED');
+    }
+
+    // Persona 3: OWNER retains permitted oversight (read-only), strictly denied custody mutations
+    {
+      // Read balances: PASS
+      const reqRead = {
+        auth: { role: 'OWNER', isPrimaryMaster: false, assignedCafeIds: ['ZC-0001'] },
+        query: { cafeId: 'ZC-0001' },
+        method: 'GET',
+        correlationId: 'c-ow-read',
+      };
+      const resRead = createMockRes();
+      let passedRead = false;
+      await custodyReadMiddleware(reqRead, resRead, () => { passedRead = true; });
+      assert.equal(passedRead, true, 'Owner retains permitted read oversight on custody balances');
+
+      // Custody mutation: DENIED
+      const reqWrite = {
+        auth: { role: 'OWNER', isPrimaryMaster: false, assignedCafeIds: ['ZC-0001'] },
+        body: { cafeId: 'ZC-0001' },
+        method: 'POST',
+        correlationId: 'c-ow-write',
+      };
+      const resWrite = createMockRes();
+      let passedWrite = false;
+      await custodyWriteMiddleware(reqWrite, resWrite, () => { passedWrite = true; });
+      assert.equal(passedWrite, false, 'Owner is strictly forbidden from executing custody mutations');
+      assert.equal(resWrite.statusCode, 403);
+      assert.equal(resWrite.body?.error?.code, 'ROLE_NOT_ALLOWED');
+    }
+
+    // Persona 4: STAFF cannot execute custody mutations
+    {
+      const reqStaff = {
+        auth: { role: 'STAFF', isPrimaryMaster: false, assignedCafeIds: ['ZC-0001'] },
+        body: { cafeId: 'ZC-0001' },
+        method: 'POST',
+        correlationId: 'c-st-write',
+      };
+      const resStaff = createMockRes();
+      let passedStaff = false;
+      await custodyWriteMiddleware(reqStaff, resStaff, () => { passedStaff = true; });
+      assert.equal(passedStaff, false, 'Staff is strictly denied custody mutations');
+      assert.equal(resStaff.statusCode, 403);
+      assert.equal(resStaff.body?.error?.code, 'ROLE_NOT_ALLOWED');
+    }
+
+    // Persona 5: VENDOR cannot execute custody mutations
+    {
+      const reqVendor = {
+        auth: { role: 'VENDOR', isPrimaryMaster: false },
+        body: { cafeId: 'ZC-0001' },
+        method: 'POST',
+        correlationId: 'c-vn-write',
+      };
+      const resVendor = createMockRes();
+      let passedVendor = false;
+      await custodyWriteMiddleware(reqVendor, resVendor, () => { passedVendor = true; });
+      assert.equal(passedVendor, false, 'Vendor partner is strictly denied custody mutations');
+      assert.equal(resVendor.statusCode, 403);
+      assert.equal(resVendor.body?.error?.code, 'VENDOR_READ_ONLY');
+    }
+
+    // Retired Normal Master: Remains denied (403 ROLE_RETIRED) across all access
+    {
+      const reqRetired = {
+        auth: { role: 'MASTER', isPrimaryMaster: false },
+        body: { cafeId: 'ZC-0001' },
+        method: 'POST',
+        correlationId: 'c-ret-write',
+      };
+      const resRetired = createMockRes();
+      let passedRetired = false;
+      await custodyWriteMiddleware(reqRetired, resRetired, () => { passedRetired = true; });
+      assert.equal(passedRetired, false, 'Retired Normal Master must fail closed');
+      assert.equal(resRetired.statusCode, 403);
+      assert.equal(resRetired.body?.error?.code, 'ROLE_RETIRED');
+    }
+  } finally {
+    RolePermission.findEffectiveRules = originalFind;
+  }
+});
+
 

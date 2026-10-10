@@ -248,6 +248,44 @@ const advanceDepositSchema = new mongoose.Schema(
       default: 'SERVICES',
     },
 
+    supplyClassification: {
+      type: String,
+      enum: ['SERVICES', 'GOODS'],
+      default: 'SERVICES',
+    },
+
+    statutorySupplyCategory: {
+      type: String,
+      trim: true,
+      default: 'EVENT_BANQUET',
+    },
+
+    taxpayerRegime: {
+      type: String,
+      enum: ['REGULAR', 'COMPOSITION'],
+      default: 'REGULAR',
+    },
+
+    applicableSupplyGstRatePercent: {
+      type: Number,
+      default: 5,
+    },
+
+    taxRatePercentAtAdvance: {
+      type: Number,
+      default: 5,
+    },
+
+    taxDueAtAdvancePaisa: {
+      type: Number,
+      default: 0,
+    },
+
+    taxAccountedOnAdvancePaisa: {
+      type: Number,
+      default: 0,
+    },
+
     taxableAmountPaisa: {
       type: Number,
       default: 0,

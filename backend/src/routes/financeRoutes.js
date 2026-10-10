@@ -46,6 +46,7 @@ const {
   refundAdvanceDeposit,
   recordCashDrop,
   recordBankDeposit,
+  confirmBankDeposit,
   getCustodyBalances,
 } = require('../controllers/financeController');
 
@@ -379,6 +380,12 @@ router.post(
   '/cash/bank-deposit',
   authorize('FINANCE:WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
   recordBankDeposit
+);
+
+router.post(
+  '/cash/bank-deposit/:depositId/confirm',
+  authorize('FINANCE:WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  confirmBankDeposit
 );
 
 router.get(

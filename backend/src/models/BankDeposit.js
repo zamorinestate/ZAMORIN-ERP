@@ -97,8 +97,8 @@ const bankDepositSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ['SUBMITTED', 'IN_TRANSIT', 'RECONCILED', 'CANCELLED'],
-      default: 'SUBMITTED',
+      enum: ['SUBMITTED', 'IN_TRANSIT', 'CONFIRMED', 'RECONCILED', 'CANCELLED'],
+      default: 'IN_TRANSIT',
       index: true,
     },
 
@@ -112,12 +112,37 @@ const bankDepositSchema = new mongoose.Schema(
       trim: true,
       default: 'SYSTEM',
     },
+    reconciledAt: {
+      type: Date,
+      default: null,
+    },
+
+    reconciliationReference: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+
+    reconciledByUserId: {
+      type: String,
+      trim: true,
+      default: null,
+    },
   },
   {
     timestamps: true,
     versionKey: 'version',
     collection: 'bank_deposits',
   }
+);
+
+bankDepositSchema.index(
+  { organisationId: 1, depositId: 1 },
+  { unique: true }
+);
+
+bankDepositSchema.index(
+  { organisationId: 1, cafeId: 1, status: 1 }
 );
 
 bankDepositSchema.index(
