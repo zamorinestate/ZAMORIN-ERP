@@ -49,6 +49,17 @@ test.before(async () => {
   await mongoose.connect(replSet.getUri(), {
     dbName: 'zamorin_p10_test',
   });
+  await Promise.all([
+    InstitutionalAccount.init(),
+    Receivable.init(),
+    AdvanceDeposit.init(),
+    RegisterSession.init(),
+    CashTransaction.init(),
+    BankAccount.init(),
+    SafeCustody.init(),
+    BankDeposit.init(),
+    Bill.init(),
+  ]);
 });
 
 test.after(async () => {

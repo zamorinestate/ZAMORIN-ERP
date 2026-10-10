@@ -346,7 +346,7 @@ async function collectReceivableAtomic({
         },
       },
       {
-        new: true,
+        returnDocument: 'after',
         session: session || undefined,
       }
     );
@@ -382,7 +382,7 @@ async function collectReceivableAtomic({
         $inc: { currentExposurePaisa: -amount },
       },
       {
-        new: true,
+        returnDocument: 'after',
         session: session || undefined,
       }
     );
