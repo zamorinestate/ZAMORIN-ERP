@@ -339,18 +339,19 @@ async function getInventoryAlerts(orgId, cafeScopeFilter) {
   if (cafeScopeFilter) match.cafeId = cafeScopeFilter;
 
   const items = await CafeInventoryConfig.find(match)
-    .select('itemId cafeId currentQuantityBase reorderLevelBase minimumStockBase')
+    .select('itemId cafeId currentQuantityBase availableQuantityBase inTransitQuantityBase reorderLevelBase minimumStockBase')
     .lean();
 
   let critical = 0;
   let belowPar = 0;
 
   for (const item of items) {
-    if (item.currentQuantityBase <= 0) {
+    const usableStock = typeof item.availableQuantityBase === 'number' ? item.availableQuantityBase : (item.currentQuantityBase ?? 0);
+    if (usableStock <= 0) {
       critical++;
-    } else if (item.minimumStockBase && item.currentQuantityBase <= item.minimumStockBase) {
+    } else if (item.minimumStockBase && usableStock <= item.minimumStockBase) {
       critical++;
-    } else if (item.currentQuantityBase <= item.reorderLevelBase) {
+    } else if (usableStock <= item.reorderLevelBase) {
       belowPar++;
     }
   }

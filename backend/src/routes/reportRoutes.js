@@ -68,6 +68,12 @@ router.get(
   getReportCatalogue
 );
 
+router.get(
+  '/catalogue',
+  authorize('REPORTS_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  getReportCatalogue
+);
+
 // ── Domain Analytics ───────────────────────────────────────────────────────────
 router.get(
   '/sales',

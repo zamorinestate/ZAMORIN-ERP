@@ -225,8 +225,8 @@ function validateAndParseDateFilters(request) {
 function buildBaseFilter(request, dateFilters) {
   const { role, organisationId } = request.auth;
 
-  if (role === 'STAFF') {
-    throw new ApiError(403, 'ROLE_NOT_ALLOWED', 'Staff users cannot access management analytics.');
+  if (role === 'STAFF' || role === 'VENDOR') {
+    throw new ApiError(403, 'ROLE_NOT_ALLOWED', `${role === 'VENDOR' ? 'Vendor' : 'Staff'} users cannot access management analytics.`);
   }
 
   const rawCafes = [

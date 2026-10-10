@@ -746,7 +746,10 @@ const createJournal = asyncHandler(async (request, response) => {
 });
 
 const postJournal = asyncHandler(async (request, response) => {
-  const { organisationId, userId } = request.auth;
+  const { organisationId, userId, role } = request.auth;
+  if (role !== 'MASTER') {
+    throw new ApiError(403, 'PRIMARY_MASTER_REQUIRED', 'Only Primary Master may post journals to the General Ledger.');
+  }
   const { journalId } = request.params;
 
   const journal = await Journal.findOne({ organisationId, journalId });
@@ -774,7 +777,10 @@ const postJournal = asyncHandler(async (request, response) => {
 });
 
 const reverseJournal = asyncHandler(async (request, response) => {
-  const { organisationId, userId } = request.auth;
+  const { organisationId, userId, role } = request.auth;
+  if (role !== 'MASTER') {
+    throw new ApiError(403, 'PRIMARY_MASTER_REQUIRED', 'Only Primary Master may reverse journals.');
+  }
   const { journalId } = request.params;
   const { reason } = request.body;
 
