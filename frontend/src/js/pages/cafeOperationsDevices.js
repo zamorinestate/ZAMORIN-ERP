@@ -253,6 +253,7 @@ function renderActiveTabContent(root) {
   if (activeTab === "overview") {
     const fleetTiles = [
       { id: "devices", icon: "📱", title: "Registered Devices", subtitle: "Multi-café hardware fleet, health status & enrollment", badge: `${cachedDevices.length} Device${cachedDevices.length === 1 ? '' : 's'}`, badgeType: "accent" },
+      { id: "peripherals", icon: "🖨️", title: "Hardware Peripherals", subtitle: "Receipt printers, cash drawers, scanners, scales & terminals", badge: "P20 Live", badgeType: "accent" },
       { id: "sessions", icon: "📜", title: "Operator Sessions Log", subtitle: "Real-time shifts, register handovers & active staff", badge: "Live Shifts", badgeType: "success" },
       { id: "pins", icon: "🔐", title: "Operator PIN Setup", subtitle: "Operator PIN policy, manager overrides & auth keys", badge: "Secured", badgeType: "success" },
     ];
@@ -295,6 +296,12 @@ function renderActiveTabContent(root) {
       desc: "Multi-café hardware fleet, health status and device certificates.",
       actionsHtml: `<button class="btn btn-sm btn-primary" id="btn-child-enroll-device" type="button">+ Enroll Device</button>`
     },
+    peripherals: {
+      title: "Hardware Peripherals & POS Devices",
+      icon: "🖨️",
+      desc: "Receipt printers, cash drawers, barcode/QR scanners, weighing scales, and payment terminals.",
+      actionsHtml: `<button class="btn btn-sm btn-primary" id="btn-child-add-peripheral" type="button">+ Add Hardware Device</button>`
+    },
     sessions: {
       title: "Operator Sessions & Handover Logs",
       icon: "📜",
@@ -314,6 +321,8 @@ function renderActiveTabContent(root) {
   let bodyHtml = "";
   if (activeTab === "devices") {
     bodyHtml = renderDevicesTable();
+  } else if (activeTab === "peripherals") {
+    bodyHtml = renderPeripheralsView();
   } else if (activeTab === "sessions") {
     bodyHtml = renderSessionsTable();
   } else if (activeTab === "pins") {
@@ -351,6 +360,7 @@ function renderActiveTabContent(root) {
     navigate("devices");
   });
   container.querySelector("#btn-child-enroll-device")?.addEventListener("click", () => openEnrollDeviceModal(root));
+  container.querySelector("#btn-child-add-peripheral")?.addEventListener("click", () => openAddPeripheralModal(root));
   container.querySelector("#btn-child-refresh-sessions")?.addEventListener("click", () => {
     showToast("Operator sessions refreshed.", "info");
     loadFleetData(root);
@@ -362,12 +372,15 @@ function renderActiveTabContent(root) {
 
   if (activeTab === "devices") {
     wireDevicesTable(root);
+  } else if (activeTab === "peripherals") {
+    wirePeripheralsView(root);
   } else if (activeTab === "sessions") {
     wireSessionsTable(root);
   } else if (activeTab === "pins") {
     wirePinSetupView(root);
   }
 }
+
 
 function renderDevicesTable() {
   if (!cachedDevices.length) {
@@ -859,3 +872,303 @@ async function openEnrollDeviceModal(root) {
     }
   });
 }
+
+// ── P20 Hardware Peripherals Management & Diagnostics ────────────────────────
+
+let cachedPeripherals = [];
+let cachedUnassignedAlert = null;
+
+function renderPeripheralsView() {
+  const user = state.auth?.user || state.user || {};
+  const cafeId = state.currentCafeId || user.primaryCafeId || "MAIN-01";
+
+  const alertBanner = cachedUnassignedAlert?.hasAlert
+    ? `
+      <div class="card" style="padding:14px 18px; margin-bottom:16px; background:#fffbeb; border:1px solid #fef3c7; border-left:4px solid #f59e0b; border-radius:var(--radius-md);">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="font-size:18px;">⚠️</span>
+          <div>
+            <div style="font-weight:700; font-size:13px; color:#92400e;">Station Routing Alert (Petpooja Benchmark A023)</div>
+            <div style="font-size:12px; color:#b45309;">${escapeHtml(cachedUnassignedAlert.alertMessage)}</div>
+          </div>
+        </div>
+      </div>
+    `
+    : "";
+
+  if (!cachedPeripherals.length) {
+    return `
+      ${alertBanner}
+      <div class="card" style="padding:40px; text-align:center; color:var(--muted);">
+        <div style="font-size:32px; margin-bottom:12px;">🖨️</div>
+        <div style="font-weight:700; font-size:15px; color:var(--ink); margin-bottom:4px;">No Peripheral Devices Registered</div>
+        <p style="font-size:13px; margin:0 0 16px;">Configure printers, cash drawers, weighing scales, and payment terminals for ${escapeHtml(cafeId)}.</p>
+        <button class="btn btn-primary btn-sm" id="empty-add-peripheral-btn">+ Add First Hardware Device</button>
+      </div>
+    `;
+  }
+
+  const rows = cachedPeripherals.map((dev) => {
+    let typeIcon = "🔌";
+    if (dev.deviceType === "RECEIPT_PRINTER") typeIcon = "🖨️";
+    else if (dev.deviceType === "CASH_DRAWER") typeIcon = "💵";
+    else if (dev.deviceType === "WEIGHING_SCALE") typeIcon = "⚖️";
+    else if (dev.deviceType === "BARCODE_SCANNER") typeIcon = "📷";
+    else if (dev.deviceType === "PAYMENT_TERMINAL") typeIcon = "💳";
+
+    const statusBadge = dev.healthStatus === "ONLINE"
+      ? '<span class="status success">ONLINE</span>'
+      : dev.healthStatus === "SIMULATED"
+      ? '<span class="status info">SIMULATED</span>'
+      : dev.healthStatus === "ERROR"
+      ? '<span class="status danger">ERROR</span>'
+      : '<span class="status warning">UNCONFIGURED</span>';
+
+    let configSummary = dev.connectionMode;
+    if (dev.deviceType === "RECEIPT_PRINTER") {
+      configSummary += ` · ${dev.configuration?.paperWidth || 80}mm ESC/POS`;
+    } else if (dev.deviceType === "CASH_DRAWER") {
+      configSummary += ` · Pin ${dev.configuration?.drawerPin || 2} Kick`;
+    } else if (dev.deviceType === "WEIGHING_SCALE") {
+      configSummary += ` · Protocol: ${dev.configuration?.scaleProtocol || "TOLEDO"}`;
+    }
+
+    let actionButton = "";
+    if (dev.deviceType === "RECEIPT_PRINTER") {
+      actionButton = `<button class="btn btn-sm btn-secondary" data-peripheral-action="test-print" data-id="${escapeHtml(dev.deviceId)}">Test Print</button>`;
+    } else if (dev.deviceType === "CASH_DRAWER") {
+      actionButton = `<button class="btn btn-sm btn-secondary" data-peripheral-action="kick-drawer" data-id="${escapeHtml(dev.deviceId)}">Kick Drawer</button>`;
+    } else if (dev.deviceType === "WEIGHING_SCALE") {
+      actionButton = `<button class="btn btn-sm btn-secondary" data-peripheral-action="test-scale" data-id="${escapeHtml(dev.deviceId)}">Read Scale</button>`;
+    } else if (dev.deviceType === "BARCODE_SCANNER") {
+      actionButton = `<button class="btn btn-sm btn-secondary" data-peripheral-action="test-scan" data-id="${escapeHtml(dev.deviceId)}">Test Scan</button>`;
+    } else if (dev.deviceType === "PAYMENT_TERMINAL") {
+      actionButton = `<button class="btn btn-sm btn-secondary" data-peripheral-action="test-terminal" data-id="${escapeHtml(dev.deviceId)}">Check POS</button>`;
+    }
+
+    return `
+      <tr style="border-bottom:1px solid var(--border-subtle);">
+        <td style="padding:14px 16px; font-weight:700; font-family:var(--font-mono); color:var(--ink);">
+          ${escapeHtml(dev.deviceId)}
+        </td>
+        <td style="padding:14px 16px;">
+          <div style="font-weight:700; color:var(--ink); display:flex; align-items:center; gap:6px;">
+            <span>${typeIcon}</span> <span>${escapeHtml(dev.name)}</span>
+          </div>
+          <div style="font-size:11.5px; color:var(--muted);">${escapeHtml(dev.deviceType)} · ${escapeHtml(configSummary)}</div>
+        </td>
+        <td style="padding:14px 16px; font-weight:600;">
+          🏷️ ${escapeHtml(dev.assignment?.station || "UNASSIGNED")}
+        </td>
+        <td style="padding:14px 16px;">
+          ${statusBadge}
+        </td>
+        <td style="padding:14px 16px; font-size:12px; color:var(--muted);">
+          ${dev.lastSuccessfulCheck ? new Date(dev.lastSuccessfulCheck).toLocaleTimeString() : "Never"}
+        </td>
+        <td style="padding:14px 16px; text-align:right;">
+          <div style="display:inline-flex; gap:6px;">
+            ${actionButton}
+            <button class="btn btn-sm btn-ghost" data-peripheral-action="diagnostic" data-id="${escapeHtml(dev.deviceId)}">Self-Test</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join("");
+
+  return `
+    ${alertBanner}
+    <div class="card" style="padding:0; overflow:hidden;">
+      <table style="width:100%; border-collapse:collapse; text-align:left; font-size:13px;">
+        <thead>
+          <tr style="background:var(--bg-surface-2); border-bottom:1px solid var(--border-subtle); font-size:11.5px; text-transform:uppercase; color:var(--muted); letter-spacing:0.04em;">
+            <th style="padding:12px 16px;">Device ID</th>
+            <th style="padding:12px 16px;">Name / Type / Config</th>
+            <th style="padding:12px 16px;">Station Assignment</th>
+            <th style="padding:12px 16px;">Health</th>
+            <th style="padding:12px 16px;">Last Checked</th>
+            <th style="padding:12px 16px; text-align:right;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function wirePeripheralsView(root) {
+  const user = state.auth?.user || state.user || {};
+  const cafeId = state.currentCafeId || user.primaryCafeId || "MAIN-01";
+
+  async function loadPeripherals() {
+    try {
+      const [devRes, alertRes] = await Promise.all([
+        apiGet(`/hardware/devices/${cafeId}`),
+        apiGet(`/hardware/unassigned-printers/${cafeId}`),
+      ]);
+      cachedPeripherals = devRes?.data?.devices || [];
+      cachedUnassignedAlert = alertRes?.data || null;
+      renderActiveTabContent(root);
+    } catch (err) {
+      console.warn("Failed to load peripherals:", err.message);
+    }
+  }
+
+  // Load if empty
+  if (!cachedPeripherals.length) {
+    loadPeripherals();
+  }
+
+  root.querySelector("#empty-add-peripheral-btn")?.addEventListener("click", () => openAddPeripheralModal(root));
+
+  root.querySelectorAll("[data-peripheral-action]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const action = btn.dataset.peripheralAction;
+      const deviceId = btn.dataset.id;
+      btn.disabled = true;
+
+      try {
+        if (action === "test-print") {
+          showToast(`Sending diagnostic test receipt to ${deviceId}...`, "info");
+          const res = await apiPost(`/hardware/devices/${deviceId}/diagnostic`, {});
+          showToast(`✅ Test receipt compiled (${res?.data?.result?.bytesLength || 0} bytes). Print dispatched.`, "success");
+        } else if (action === "kick-drawer") {
+          const res = await apiPost(`/hardware/devices/${deviceId}/diagnostic`, { reason: "Operator manual test" });
+          showToast(`✅ Cash drawer pulse emitted on Pin ${res?.data?.result?.pin || 2}. Zero financial entries created.`, "success");
+        } else if (action === "test-scale") {
+          const rawPayload = prompt("Simulate serial scale stream (e.g. ST,GS,+00.450kg or W:0.820kg):", "ST,GS,+00.450kg");
+          if (rawPayload) {
+            const res = await apiPost("/hardware/scale/parse", { rawPayload, protocol: "TOLEDO" });
+            showToast(`⚖️ Scale reading: ${res.weight} ${res.unit} (Stable: ${res.isStable})`, "success");
+          }
+        } else if (action === "test-scan") {
+          const code = prompt("Simulate barcode/QR scan (e.g. ZC-ITEM-001 or EAN-13):", "ZC-ITEM-001");
+          if (code) {
+            const res = await apiPost("/hardware/scan/validate", {
+              code,
+              menuItems: [{ sku: "ZC-ITEM-001", name: "Malabar Filter Coffee", price: 60, soldOut: false }],
+            });
+            showToast(`📷 Scanned: ${res.item?.name} @ ₹${res.item?.price} (${res.scanType})`, "success");
+          }
+        } else if (action === "test-terminal" || action === "diagnostic") {
+          const res = await apiPost(`/hardware/devices/${deviceId}/diagnostic`, {});
+          showToast(`✅ Device self-test: ${res?.data?.healthStatus || "ONLINE"} (${res?.data?.durationMs || 0}ms)`, "success");
+        }
+      } catch (err) {
+        showToast(err.message || "Action failed.", "error");
+      } finally {
+        btn.disabled = false;
+        loadPeripherals();
+      }
+    });
+  });
+}
+
+function openAddPeripheralModal(root) {
+  const user = state.auth?.user || state.user || {};
+  const defaultCafeId = state.currentCafeId || user.primaryCafeId || "MAIN-01";
+
+  const content = `
+    <div style="max-width:520px; margin:0 auto; padding:8px 0;">
+      <h3 style="font-size:18px; font-weight:800; margin:0 0 6px; color:var(--ink);">Add Hardware Peripheral Device</h3>
+      <p style="font-size:12.5px; color:var(--muted); margin:0 0 16px;">Configure printers, drawers, scanners, scales, and POS peripherals.</p>
+
+      <div class="form-group" style="margin-bottom:12px;">
+        <label class="label">Device Identifier*</label>
+        <input type="text" id="periph-id" class="input" placeholder="e.g. PRN-COUNTER-01" required />
+      </div>
+
+      <div class="form-group" style="margin-bottom:12px;">
+        <label class="label">Device Name*</label>
+        <input type="text" id="periph-name" class="input" placeholder="e.g. Billing Counter Thermal Printer" required />
+      </div>
+
+      <div class="form-group" style="margin-bottom:12px;">
+        <label class="label">Device Type*</label>
+        <select id="periph-type" class="input">
+          <option value="RECEIPT_PRINTER">Receipt Printer (ESC/POS)</option>
+          <option value="CASH_DRAWER">Cash Drawer (Kick Pulse)</option>
+          <option value="BARCODE_SCANNER">Barcode / QR Scanner</option>
+          <option value="WEIGHING_SCALE">Weighing Scale (Serial Protocol)</option>
+          <option value="PAYMENT_TERMINAL">Payment Terminal / EDC</option>
+          <option value="CUSTOMER_DISPLAY">Customer Pole Display</option>
+        </select>
+      </div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px;">
+        <div class="form-group">
+          <label class="label">Connection Mode</label>
+          <select id="periph-mode" class="input">
+            <option value="LAN_ETHERNET">LAN / Network (TCP)</option>
+            <option value="USB">Direct USB</option>
+            <option value="SERIAL_COM">Serial COM Port</option>
+            <option value="LOCAL_BRIDGE_PROXY">Local Bridge Daemon (:9199)</option>
+            <option value="VIRTUAL_SIMULATION">Virtual Simulation</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="label">Station Assignment</label>
+          <select id="periph-station" class="input">
+            <option value="BILLING">Billing Counter</option>
+            <option value="DISPATCH">Dispatch Counter</option>
+            <option value="BARISTA">Barista Station</option>
+            <option value="HOT_KITCHEN">Hot Kitchen</option>
+            <option value="DESSERT_BAR">Dessert Bar</option>
+            <option value="UNASSIGNED">Unassigned</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; border-top:1px solid var(--border-subtle); padding-top:14px;">
+        <button class="btn btn-ghost" id="periph-btn-cancel" type="button">Cancel</button>
+        <button class="btn btn-primary" id="periph-btn-submit" type="button">Save Device</button>
+      </div>
+    </div>
+  `;
+
+  openModal(content);
+  const modalEl = document.getElementById("zamorin-global-modal");
+
+  modalEl?.querySelector("#periph-btn-cancel")?.addEventListener("click", () => closeModal());
+  modalEl?.querySelector("#periph-btn-submit")?.addEventListener("click", async () => {
+    const deviceId = modalEl.querySelector("#periph-id")?.value?.trim();
+    const name = modalEl.querySelector("#periph-name")?.value?.trim();
+    const deviceType = modalEl.querySelector("#periph-type")?.value;
+    const connectionMode = modalEl.querySelector("#periph-mode")?.value;
+    const station = modalEl.querySelector("#periph-station")?.value;
+
+    if (!deviceId || !name) {
+      showToast("Please provide device identifier and name.", "error");
+      return;
+    }
+
+    try {
+      await apiPost("/hardware/devices", {
+        deviceId,
+        cafeId: defaultCafeId,
+        name,
+        deviceType,
+        connectionMode,
+        configuration: {
+          paperWidth: 80,
+          drawerPin: 2,
+          scaleProtocol: "TOLEDO",
+        },
+        assignment: {
+          station,
+          counterName: "Counter 1",
+          active: true,
+        },
+      });
+
+      showToast(`Device ${deviceId} registered successfully.`, "success");
+      closeModal();
+      wirePeripheralsView(root);
+    } catch (err) {
+      showToast(err.message || "Failed to register hardware device.", "error");
+    }
+  });
+}
+

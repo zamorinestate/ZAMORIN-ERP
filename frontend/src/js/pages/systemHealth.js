@@ -105,21 +105,40 @@ export function renderSystemHealthPage() {
             </div>
           </div>
 
-          <!-- MongoDB Backup & DR Card -->
+          <!-- Own-Server Readiness Diagnostics Card (P20 Benchmark F335-F338) -->
           <div class="card" style="padding: 1.5rem;">
-            <h3 style="margin: 0 0 1rem 0; font-size: 1.125rem; font-weight: 600;">
-              🛡️ MongoDB Atlas Backup & DR Integrity
+            <h3 style="margin: 0 0 1rem 0; font-size: 1.125rem; font-weight: 600; display: flex; justify-content: space-between; align-items: center;">
+              <span>🖥️ Own-Server Readiness Diagnostics</span>
+              <span id="readiness-overall-badge" class="badge" style="background: #10b981; color: white; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem;">CHECKING</span>
             </h3>
-            <div id="backup-details-container" style="font-size: 0.875rem; line-height: 1.8;">
-              <div>Topology: <strong id="db-topology">Atlas 3-Node Replica Set</strong></div>
-              <div>Continuous Backup: <span id="db-continuous-backup" style="color: #10b981; font-weight: 600;">ACTIVE (1-min oplog)</span></div>
-              <div>Target RPO: <strong>5 minutes</strong> | Target RTO: <strong>30 minutes</strong></div>
-              <div style="color: var(--text-muted, #6b7280); font-size: 0.8rem; margin-top: 0.5rem;">
-                Safeguard: Automated destructive restore is blocked in production. Restore drills run non-destructively.
-              </div>
+            <div id="readiness-checks-list" style="display: flex; flex-direction: column; gap: 0.75rem; font-size: 0.875rem;">
+              <div style="color: var(--text-muted, #6b7280);">Loading dependency telemetry...</div>
+            </div>
+            <div id="readiness-remediations-container" style="margin-top: 1rem; display: none; padding: 0.75rem; background: #fffbeb; border-left: 3px solid #f59e0b; border-radius: 4px; font-size: 0.8rem; color: #92400e;">
+              <strong>Actionable Remediation:</strong>
+              <ul id="readiness-remediations-list" style="margin: 0.25rem 0 0 1.25rem; padding: 0;"></ul>
+            </div>
+          </div>
+
+          <!-- Authoritative Backup & Restore Rehearsal Card (P20 Benchmark F339-F340) -->
+          <div class="card" style="padding: 1.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+              <h3 style="margin: 0; font-size: 1.125rem; font-weight: 600;">
+                🛡️ Backup Archives &amp; Restore Rehearsal
+              </h3>
+              <button id="btn-create-backup" class="btn btn-primary btn-sm" style="font-size: 0.75rem;">
+                + Create Manual Backup
+              </button>
+            </div>
+            <div id="backup-archives-container" style="font-size: 0.875rem;">
+              <div style="color: var(--text-muted, #6b7280);">Loading backup ledger...</div>
+            </div>
+            <div style="color: var(--text-muted, #6b7280); font-size: 0.8rem; margin-top: 1rem; border-top: 1px solid #e5e7eb; padding-top: 0.5rem;">
+              Safeguard: Destructive restore against live production is blocked. Rehearsals execute into isolated test databases.
             </div>
           </div>
         </div>
+
 
         <!-- Right Column: Emergency Kill Switches & Maintenance Mode -->
         <div style="display: flex; flex-direction: column; gap: 2rem;">
@@ -346,6 +365,184 @@ export async function initSystemHealthPage() {
     }
   };
 
+  async function loadReadinessAndBackups() {
+    // 1. Load Server Readiness Diagnostics
+    try {
+      const res = await api.get('/system/readiness');
+      if (res && res.data) {
+        updateReadinessUI(res.data);
+      }
+    } catch (err) {
+      console.warn('Failed to load server readiness:', err.message);
+    }
+
+    // 2. Load Backup Ledger
+    try {
+      const res = await api.get('/system/backup/list');
+      if (res && res.data) {
+        updateBackupLedgerUI(res.data.backups || []);
+      }
+    } catch (err) {
+      console.warn('Failed to load backups list:', err.message);
+    }
+  }
+
+  function updateReadinessUI(data) {
+    const overallBadge = document.getElementById('readiness-overall-badge');
+    if (overallBadge) {
+      overallBadge.textContent = data.overallStatus || (data.readyForBusiness ? 'READY' : 'DEGRADED');
+      overallBadge.style.background = data.readyForBusiness ? '#10b981' : '#dc2626';
+    }
+
+    const checksList = document.getElementById('readiness-checks-list');
+    if (checksList && data.checks) {
+      checksList.innerHTML = data.checks
+        .map(
+          (c) => `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:0.5rem 0; border-bottom:1px solid #f3f4f6;">
+            <div>
+              <strong>${c.name}</strong>
+              <div style="font-size:0.75rem; color:#6b7280;">${c.details}</div>
+            </div>
+            <span class="badge" style="background:${c.status === 'HEALTHY' || c.status === 'ONLINE' || c.status === 'IN_MEMORY_HEALTHY' ? '#10b981' : c.status === 'WARNING' || c.status === 'DEGRADED' || c.status === 'READY_NO_LOCAL_PRINTER' ? '#f59e0b' : '#dc2626'}; color:white; padding:0.2rem 0.4rem; border-radius:4px; font-size:0.7rem;">
+              ${c.status}
+            </span>
+          </div>
+        `
+        )
+        .join('');
+    }
+
+    const remediationsContainer = document.getElementById('readiness-remediations-container');
+    const remediationsList = document.getElementById('readiness-remediations-list');
+    if (remediationsContainer && remediationsList) {
+      const rems = data.remediations || [];
+      if (rems.length > 0) {
+        remediationsContainer.style.display = 'block';
+        remediationsList.innerHTML = rems.map((r) => `<li>${r}</li>`).join('');
+      } else {
+        remediationsContainer.style.display = 'none';
+      }
+    }
+  }
+
+  function updateBackupLedgerUI(backups) {
+    const container = document.getElementById('backup-archives-container');
+    if (!container) return;
+
+    if (!backups.length) {
+      container.innerHTML = `<p style="color:#6b7280; font-size:0.875rem;">No persisted backup archives found. Click "+ Create Manual Backup" above to generate a verified snapshot.</p>`;
+      return;
+    }
+
+    let html = `
+      <table class="table" style="width:100%; border-collapse:collapse; font-size:0.8rem;">
+        <thead>
+          <tr style="border-bottom:1px solid #e5e7eb; text-align:left; color:#6b7280;">
+            <th style="padding:0.4rem;">Backup ID</th>
+            <th style="padding:0.4rem;">Scope</th>
+            <th style="padding:0.4rem;">Size</th>
+            <th style="padding:0.4rem;">Checksum</th>
+            <th style="padding:0.4rem;">Status</th>
+            <th style="padding:0.4rem; text-align:right;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+    `;
+
+    for (const b of backups) {
+      const sizeKb = Math.round((b.sizeBytes || 0) / 1024);
+      const shortSha = (b.sha256Checksum || '').slice(0, 10);
+      const isVerified = b.status === 'VERIFIED';
+
+      html += `
+        <tr style="border-bottom:1px solid #f3f4f6;">
+          <td style="padding:0.5rem; font-family:monospace; font-weight:600;">${b.backupId}</td>
+          <td style="padding:0.5rem;">${b.scope}</td>
+          <td style="padding:0.5rem;">${sizeKb} KB</td>
+          <td style="padding:0.5rem; font-family:monospace; color:#6b7280;" title="${b.sha256Checksum}">${shortSha}...</td>
+          <td style="padding:0.5rem;">
+            <span class="badge" style="background:${isVerified ? '#10b981' : '#f59e0b'}; color:white; padding:0.15rem 0.35rem; border-radius:3px; font-size:0.7rem;">
+              ${b.status}
+            </span>
+          </td>
+          <td style="padding:0.5rem; text-align:right;">
+            <button class="btn btn-secondary btn-sm" style="font-size:0.7rem; padding:0.2rem 0.4rem;" onclick="window.verifyBackupChecksum('${b.backupId}')">
+              Verify
+            </button>
+            <button class="btn btn-primary btn-sm" style="font-size:0.7rem; padding:0.2rem 0.4rem; margin-left:4px;" onclick="window.runRestoreRehearsalPrompt('${b.backupId}')">
+              Rehearsal
+            </button>
+          </td>
+        </tr>
+      `;
+    }
+
+    html += `</tbody></table>`;
+    container.innerHTML = html;
+  }
+
+  // Create Manual Backup Handler
+  const btnCreateBackup = document.getElementById('btn-create-backup');
+  if (btnCreateBackup) {
+    btnCreateBackup.addEventListener('click', async () => {
+      btnCreateBackup.disabled = true;
+      btnCreateBackup.textContent = 'Generating...';
+      try {
+        const res = await api.post('/system/backup/create', { scope: 'FULL_ENTERPRISE' });
+        alert(`Backup Created Successfully!\nBackup ID: ${res.data?.backupId}\nCollections: ${res.data?.collectionsCount}\nDocuments: ${res.data?.totalDocuments}\nSHA-256: ${res.data?.sha256Checksum?.slice(0, 16)}...`);
+        loadReadinessAndBackups();
+      } catch (err) {
+        alert(`Failed to create backup: ${err.message}`);
+      } finally {
+        btnCreateBackup.disabled = false;
+        btnCreateBackup.textContent = '+ Create Manual Backup';
+      }
+    });
+  }
+
+  // Verify Backup Checksum Handler
+  window.verifyBackupChecksum = async (backupId) => {
+    try {
+      const res = await api.post(`/system/backup/${backupId}/verify`, {});
+      alert(`✅ Backup Integrity Verified!\nBackup ID: ${res.data?.backupId}\nStatus: VERIFIED\nSHA-256 Hash matches disk archive.\nTotal Documents: ${res.data?.totalDocuments}`);
+      loadReadinessAndBackups();
+    } catch (err) {
+      alert(`Integrity Check Failed: ${err.message}`);
+    }
+  };
+
+  // Run Restore Rehearsal Handler
+  window.runRestoreRehearsalPrompt = async (backupId) => {
+    const targetDbName = prompt(
+      'Enter ISOLATED restore target database name:\n(Safeguard: Production databases are strictly prohibited)',
+      'zamorin_isolated_rehearsal_target'
+    );
+    if (!targetDbName) return;
+
+    const confirmation = prompt(
+      'Type exactly CONFIRM_ISOLATED_RESTORE_TARGET to confirm non-destructive restore rehearsal:'
+    );
+    if (confirmation !== 'CONFIRM_ISOLATED_RESTORE_TARGET') {
+      alert('Confirmation token does not match. Rehearsal cancelled.');
+      return;
+    }
+
+    try {
+      const res = await api.post(`/system/backup/${backupId}/rehearsal`, {
+        targetDbName,
+        targetConfirmation: 'CONFIRM_ISOLATED_RESTORE_TARGET',
+        restoreVerificationMode: true,
+      });
+      alert(`🧪 Restore Rehearsal Completed!\nRehearsal ID: ${res.data?.rehearsalId}\nTarget DB: ${res.data?.targetDbName}\nStatus: ${res.data?.status}\nRestored Documents: ${res.data?.restoredDocuments}\nVerified Collections: ${res.data?.verifiedCollections?.length}\nDuration: ${res.data?.durationMs}ms\nZero production interference confirmed.`);
+      loadReadinessAndBackups();
+    } catch (err) {
+      alert(`Restore Rehearsal Failed: ${err.message}`);
+    }
+  };
+
   // Initial load
   loadData();
+  loadReadinessAndBackups();
 }
+

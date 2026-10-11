@@ -461,6 +461,84 @@ const rollbackRelease = asyncHandler(async (req, res) => {
   });
 });
 
+// ── P20 Controlled Update Planning, Dry Run & State Machine Endpoints ────────
+
+const { appUpdateService } = require('../services/appUpdateService');
+
+/**
+ * POST /api/v1/settings/updates/plan
+ * Evaluates prerequisites and plans update with optional dry-run preview.
+ */
+const planUpdateRun = asyncHandler(async (req, res) => {
+  const actor = {
+    userId: req.user.userId || req.user._id,
+    role: req.user.role,
+    isPrimaryMaster: Boolean(req.user.isPrimaryMaster),
+    organisationId: req.user.organisationId,
+  };
+
+  const plan = await appUpdateService.planUpdate({
+    targetVersion: req.body.targetVersion,
+    releaseId: req.body.releaseId,
+    actor,
+    dryRun: req.body.dryRun !== false,
+  });
+
+  return res.status(200).json({
+    success: true,
+    message: `Update plan created (${plan.dryRun ? 'DRY_RUN' : 'LIVE'}).`,
+    data: plan,
+  });
+});
+
+/**
+ * POST /api/v1/settings/updates/execute
+ * Executes a planned update through the update state machine.
+ */
+const executeControlledUpdate = asyncHandler(async (req, res) => {
+  const actor = {
+    userId: req.user.userId || req.user._id,
+    role: req.user.role,
+    isPrimaryMaster: Boolean(req.user.isPrimaryMaster),
+    organisationId: req.user.organisationId,
+  };
+
+  const result = await appUpdateService.executeUpdate({
+    updateRunId: req.body.updateRunId,
+    actor,
+  });
+
+  return res.status(200).json({
+    success: true,
+    message: `Application update executed successfully to ${result.newVersion}.`,
+    data: result,
+  });
+});
+
+/**
+ * POST /api/v1/settings/updates/runs/:updateRunId/rollback
+ * Reverts active version to prior baseline.
+ */
+const rollbackControlledUpdate = asyncHandler(async (req, res) => {
+  const actor = {
+    userId: req.user.userId || req.user._id,
+    role: req.user.role,
+    isPrimaryMaster: Boolean(req.user.isPrimaryMaster),
+    organisationId: req.user.organisationId,
+  };
+
+  const result = await appUpdateService.rollbackUpdate({
+    updateRunId: req.params.updateRunId,
+    actor,
+  });
+
+  return res.status(200).json({
+    success: true,
+    message: result.message,
+    data: result,
+  });
+});
+
 module.exports = {
   listTargetedUpdates,
   checkForUpdates,
@@ -469,4 +547,8 @@ module.exports = {
   applyRelease,
   verifyRelease,
   rollbackRelease,
+  planUpdateRun,
+  executeControlledUpdate,
+  rollbackControlledUpdate,
 };
+

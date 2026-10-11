@@ -18,6 +18,8 @@ const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
 const { MongoMemoryReplSet } = require('mongodb-memory-server');
 
+process.env.JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'a_very_secure_and_long_jwt_access_secret_32bytes_long!';
+
 const { User } = require('../src/models/User');
 const { Session } = require('../src/models/Session');
 const { Cafe } = require('../src/models/Cafe');

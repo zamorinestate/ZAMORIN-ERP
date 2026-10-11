@@ -1,4 +1,4 @@
-﻿# Dependencies
+# Dependencies
 node_modules/
 npm-debug.log*
 yarn-debug.log*
@@ -19,6 +19,9 @@ yarn-error.log*
 .local-evidence-storage/
 backend/uploads/
 Backend/uploads/
+backups/zamorin_backup_*.json
+backend/backups/zamorin_backup_*.json
+Backend/backups/zamorin_backup_*.json
 logs/
 *.log
 *.tmp

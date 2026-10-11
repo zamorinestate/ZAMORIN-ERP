@@ -219,4 +219,132 @@ router.post('/backup/drill', async (req, res, next) => {
   }
 });
 
+// ── P20 Own-Server Readiness & Authoritative Backup / Restore Rehearsal ──────
+
+const { ServerReadinessService } = require('../services/serverReadinessService');
+const { backupRecoveryService } = require('../services/backupRecoveryService');
+
+/**
+ * GET /api/v1/system/readiness
+ * Returns comprehensive own-server dependency readiness and actionable remediations.
+ */
+router.get('/readiness', async (req, res, next) => {
+  try {
+    const report = await ServerReadinessService.getFullReadinessReport();
+    res.status(report.readyForBusiness ? 200 : 503).json({
+      success: report.readyForBusiness,
+      data: report,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/v1/system/backup/create
+ * Creates a persistent non-destructive database snapshot archive.
+ */
+router.post('/backup/create', async (req, res, next) => {
+  try {
+    if (req.auth.role === 'OWNER') {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'OWNER_READ_ONLY', message: 'Owner role is strictly read-only for operational mutations.' },
+      });
+    }
+
+    const backup = await backupRecoveryService.createBackup({
+      scope: req.body.scope || 'FULL_ENTERPRISE',
+      cafeId: req.body.cafeId || null,
+      actor: {
+        userId: req.auth.userId,
+        role: req.auth.role,
+        isPrimaryMaster: Boolean(req.auth.isPrimaryMaster),
+        organisationId: req.auth.organisationId,
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Backup ${backup.backupId} created successfully.`,
+      data: backup,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/v1/system/backup/list
+ * Lists persisted backup archives.
+ */
+router.get('/backup/list', async (req, res, next) => {
+  try {
+    const list = await backupRecoveryService.listBackups(req.auth.organisationId);
+    res.status(200).json({
+      success: true,
+      data: { backups: list, total: list.length },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/v1/system/backup/:backupId/verify
+ * Cryptographically verifies backup archive SHA-256 integrity on disk.
+ */
+router.post('/backup/:backupId/verify', async (req, res, next) => {
+  try {
+    const result = await backupRecoveryService.verifyBackupIntegrity(req.params.backupId, {
+      userId: req.auth.userId,
+      role: req.auth.role,
+    });
+    res.status(200).json({
+      success: true,
+      message: `Backup ${req.params.backupId} cryptographically verified.`,
+      data: result,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/v1/system/backup/:backupId/rehearsal
+ * Authorizes and executes a non-destructive restore rehearsal into an isolated test target.
+ */
+router.post('/backup/:backupId/rehearsal', async (req, res, next) => {
+  try {
+    if (req.auth.role === 'OWNER') {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'OWNER_READ_ONLY', message: 'Owner role is strictly read-only for operational mutations.' },
+      });
+    }
+
+    const result = await backupRecoveryService.executeRestoreRehearsal({
+      backupId: req.params.backupId,
+      targetDbName: req.body.targetDbName,
+      targetConfirmation: req.body.targetConfirmation,
+      restoreVerificationMode: req.body.restoreVerificationMode,
+      actor: {
+        userId: req.auth.userId,
+        role: req.auth.role,
+        isPrimaryMaster: Boolean(req.auth.isPrimaryMaster),
+        organisationId: req.auth.organisationId,
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Restore rehearsal ${result.rehearsalId} completed successfully into isolated target ${result.targetDbName}.`,
+      data: result,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
+

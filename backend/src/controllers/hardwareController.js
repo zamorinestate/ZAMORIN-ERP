@@ -186,6 +186,122 @@ const renderHtmlReceiptFallback = asyncHandler(async (req, res) => {
   return res.status(200).send(html);
 });
 
+// ── Unified P20 Peripheral Hardware Management Controllers ──────────────────
+
+const { hardwareManagementService } = require('../services/hardwareManagementService');
+const { BarcodeScannerAdapter } = require('../services/hardwareAdapters/BarcodeScannerAdapter');
+const { WeighingScaleAdapter } = require('../services/hardwareAdapters/WeighingScaleAdapter');
+const { ReceiptPrinterAdapter } = require('../services/hardwareAdapters/ReceiptPrinterAdapter');
+
+/**
+ * List all registered hardware devices for a café.
+ */
+const listCafeDevices = asyncHandler(async (req, res) => {
+  const { cafeId } = req.params;
+  const devices = await hardwareManagementService.getDevicesForCafe(cafeId, req.auth.organisationId, req.auth);
+  return res.status(200).json({
+    success: true,
+    data: { devices, total: devices.length },
+  });
+});
+
+/**
+ * Register or update a peripheral hardware device.
+ */
+const registerOrUpdateDevice = asyncHandler(async (req, res) => {
+  const device = await hardwareManagementService.registerOrUpdateDevice(req.body, req.auth);
+  return res.status(200).json({
+    success: true,
+    message: `Hardware device ${device.deviceId} saved successfully.`,
+    data: { device },
+  });
+});
+
+/**
+ * Run diagnostic self-test on a hardware device.
+ */
+const runDeviceDiagnostic = asyncHandler(async (req, res) => {
+  const { deviceId } = req.params;
+  const result = await hardwareManagementService.runDeviceDiagnostic(deviceId, req.auth, req.body);
+  return res.status(200).json({
+    success: true,
+    message: `Diagnostic run completed for ${deviceId}.`,
+    data: result,
+  });
+});
+
+/**
+ * Check unassigned station printers alert (Benchmark A023).
+ */
+const checkUnassignedPrinters = asyncHandler(async (req, res) => {
+  const { cafeId } = req.params;
+  const alertInfo = await hardwareManagementService.checkUnassignedPrinterAlerts(cafeId, req.auth.organisationId);
+  return res.status(200).json({
+    success: true,
+    data: alertInfo,
+  });
+});
+
+/**
+ * Generate Moved-Item Transfer KOT ticket buffer (Benchmark A022).
+ */
+const generateShiftedItemKot = asyncHandler(async (req, res) => {
+  const { shiftedData = {}, paperWidth = 80 } = req.body;
+  const buffer = ReceiptPrinterAdapter.compileShiftedItemTicket(shiftedData, { paperWidth });
+  return res.status(200).json({
+    success: true,
+    bytesLength: buffer.length,
+    base64Payload: buffer.toString('base64'),
+    financialMutation: false,
+  });
+});
+
+/**
+ * Generate Separate Token Slip ticket buffer (Benchmark A027).
+ */
+const generateTokenSlip = asyncHandler(async (req, res) => {
+  const { tokenData = {}, cafeInfo = {}, paperWidth = 80 } = req.body;
+  const buffer = ReceiptPrinterAdapter.compileTokenSlip(tokenData, cafeInfo, { paperWidth });
+  return res.status(200).json({
+    success: true,
+    bytesLength: buffer.length,
+    base64Payload: buffer.toString('base64'),
+    financialMutation: false,
+  });
+});
+
+/**
+ * Generate Food Readiness Slip ticket buffer (Benchmark A025).
+ */
+const generateReadinessSlip = asyncHandler(async (req, res) => {
+  const { readinessData = {}, paperWidth = 80 } = req.body;
+  const buffer = ReceiptPrinterAdapter.compileReadinessSlip(readinessData, { paperWidth });
+  return res.status(200).json({
+    success: true,
+    bytesLength: buffer.length,
+    base64Payload: buffer.toString('base64'),
+    financialMutation: false,
+  });
+});
+
+/**
+ * Parse weighing scale payload according to configured protocol.
+ */
+const parseScaleReading = asyncHandler(async (req, res) => {
+  const { rawPayload, protocol = 'TOLEDO', unit = 'KG', maxWeight = 30 } = req.body;
+  const result = WeighingScaleAdapter.parseScalePayload(rawPayload, { protocol, unit, maxWeight });
+  return res.status(result.success ? 200 : 400).json(result);
+});
+
+/**
+ * Validate barcode or QR scan against menu catalog.
+ */
+const validateBarcodeScan = asyncHandler(async (req, res) => {
+  const { code, menuItems = [] } = req.body;
+  const result = BarcodeScannerAdapter.validateItemScan(code, menuItems, req.auth.cafeId);
+  return res.status(result.success ? 200 : 400).json(result);
+});
+
 module.exports = {
   getCafeTerminals,
   saveTerminalConfig,
@@ -194,4 +310,14 @@ module.exports = {
   routeKotTickets,
   getTerminalHealth,
   renderHtmlReceiptFallback,
+  listCafeDevices,
+  registerOrUpdateDevice,
+  runDeviceDiagnostic,
+  checkUnassignedPrinters,
+  generateShiftedItemKot,
+  generateTokenSlip,
+  generateReadinessSlip,
+  parseScaleReading,
+  validateBarcodeScan,
 };
+

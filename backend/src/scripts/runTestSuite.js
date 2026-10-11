@@ -25,6 +25,10 @@ const BACKEND_ROOT = path.resolve(__dirname, '..', '..');
 const TEST_ROOT = path.join(BACKEND_ROOT, 'test');
 const ARCHIVE_MANIFEST = path.join(TEST_ROOT, 'ARCHIVED_TESTS.json');
 
+try {
+  require('dotenv').config({ path: path.join(BACKEND_ROOT, '.env') });
+} catch (_) {}
+
 const RELEASE_SUITE = [
   'aiInvoiceIntelligence.test.js',
   'aiInvoiceStagingValidation.test.js',
@@ -42,6 +46,7 @@ const RELEASE_SUITE = [
   'p17_forecastsPredictiveInsights.test.js',
   'p18_governancePortfolioFollowThrough.test.js',
   'p19_onboardingTemplatesMigration.test.js',
+  'p20_updatesServerReadinessBackupHardware.test.js',
 ];
 
 function parseArgs(argv) {
