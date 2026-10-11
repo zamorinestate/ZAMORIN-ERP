@@ -65,6 +65,7 @@ const PRIMARY_MASTER_ITEMS = [
 
   // ── INSIGHTS ─────────────────────────────────────────────────────────────────
   { id: 'reports',       label: 'Reports & Analytics',    icon: 'reports',      route: 'reports',           group: 'INSIGHTS' },
+  { id: 'forecasts-insights', label: 'Forecasts & Insights', icon: 'reports', route: 'forecasts-insights', group: 'INSIGHTS' },
 
   // ── ADMINISTRATION ───────────────────────────────────────────────────────────
   { id: 'admin',         label: 'Administration',         icon: 'admin',        route: 'admin',             group: 'ADMINISTRATION' },
@@ -122,6 +123,7 @@ export const NAVIGATION = {
       { id: 'payroll',      label: 'Payroll & Payslips',      icon: 'payslip',      route: 'payroll',         group: 'PEOPLE' },
       { id: 'revenue-share',label: 'Revenue Share & Outlets', icon: 'revenueShare', route: 'revenue-share', group: 'COMMERCIAL' },
       { id: 'reports',      label: 'Reports',                 icon: 'reports',      route: 'reports',         group: 'INSIGHTS' },
+      { id: 'forecasts-insights', label: 'Forecasts & Insights', icon: 'reports', route: 'forecasts-insights', group: 'INSIGHTS' },
       { id: 'system-health',label: 'System Health & Ops',     icon: 'settings',     route: 'system-health',   group: 'SYSTEM' },
       { id: 'settings',     label: 'Settings',                icon: 'settings',     route: 'settings',        group: 'SYSTEM' },
     ],
@@ -148,6 +150,7 @@ export const NAVIGATION = {
       { id: 'menu',         label: 'Menu & Availability',     icon: 'menuItem',     route: 'menu',            group: 'COMMERCIAL' },
       { id: 'vendors',      label: 'Vendors & Catalogue',     icon: 'vendors',      route: 'vendors',         group: 'COMMERCIAL' },
       { id: 'reports',      label: 'Reports (this café)',      icon: 'reports',      route: 'reports',         group: 'INSIGHTS' },
+      { id: 'forecasts-insights', label: 'Forecasts & Insights', icon: 'reports', route: 'forecasts-insights', group: 'INSIGHTS' },
       { id: 'tasks',        label: 'Action Centre',           icon: 'tasks',        route: 'tasks',           group: 'INSIGHTS' },
       { id: 'cafe-ops-devices', label: 'Devices & Sessions',  icon: 'devices',      route: 'cafe-ops-devices',group: 'SYSTEM' },
       { id: 'settings',     label: 'Settings',                icon: 'settings',     route: 'settings',        group: 'SYSTEM' },

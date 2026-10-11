@@ -39,6 +39,7 @@ const RELEASE_SUITE = [
   'p14_customersLoyaltyFeedbackCampaigns.test.js',
   'p15_channelsQrOrderingFrontService.test.js',
   'p16_tasksTrainingSopLifecycle.test.js',
+  'p17_forecastsPredictiveInsights.test.js',
 ];
 
 function parseArgs(argv) {

@@ -1,9 +1,9 @@
 # ZAMORIN CAFÉ ERP — PETPOOJA BENCHMARK IMPLEMENTATION REGISTER
 
-**Document ID**: `REG-PETPOOJA-485-P16-VERIFIED`  
+**Document ID**: `REG-PETPOOJA-485-P17-VERIFIED`  
 **Execution Scope**: `D:\Zamorin Cafe ERP\A Main Workspace`  
 **Canonical Branch**: `feature/foundation-five-windows`  
-**Verified Starting Closeout Commit**: `7048c69f165bf2f1e32f90b3c7538517741a329a` (P15 Closeout)  
+**Verified Starting Closeout Commit**: `3ae41c23a3b3e2dbcc933c3f42c3b0f6aadcb9c2` (P16 Closeout)  
 **Audit Date**: 11 October 2026 | **Status**: ACTIVE TRACEABLE GOVERNANCE  
 
 ---
@@ -26,21 +26,21 @@ A complete forensic inventory of the running Zamorin Café ERP was conducted out
 ### 1.2 Running Application Structure Inventory
 
 - **Frontend Architecture**:
-  - Navigation: Centralized in `Frontend/src/js/navigation.js` and enforced by `Frontend/src/js/router.js` (104 explicit routing cases).
-  - State & Caching: In-memory token storage in `apiClient.js` with single-flight deduplication, SWR caching, and automatic mutation cache invalidation (`clearApiCache("/attendance")`, `clearApiCache("/payroll")`, `clearApiCache("/employees")`).
+  - Navigation: Centralized in `Frontend/src/js/navigation.js` and enforced by `Frontend/src/js/router.js` (105 explicit routing cases).
+  - State & Caching: In-memory token storage in `apiClient.js` with single-flight deduplication, SWR caching, and automatic mutation cache invalidation.
+  - Predictive Intelligence UI: Interactive workspace in `Frontend/src/js/pages/forecastsInsights.js` wired to live endpoints.
   - Accessibility & Tokens: Semantic HTML5, CSS design tokens, WCAG 2.2 AA contrast compliance, and full keyboard navigation.
 
 - **Backend Architecture**:
-  - Runtime: Node.js 24 + Express with 72 route files and 77 modular controllers.
-  - Persistence: MongoDB with 240 Mongoose schemas, compound unique business indexes, and atomic state transitions.
-  - Business Services: 117 domain services covering POS, BOM depletion, FEFO picking, replenishment drafts, 3-way matching, attendance reconciliation, and statutory payroll.
+  - Runtime: Node.js 24 + Express with 73 route files and 78 modular controllers.
+  - Persistence: MongoDB with 242 Mongoose schemas (including `ForecastRun` and `ForecastEvaluation`), compound unique business indexes, and atomic state transitions.
+  - Business Services: 121 domain services covering POS, BOM depletion, FEFO picking, replenishment drafts, statutory payroll, sales demand forecasting, stockout risks, price variance, and assisted analysis.
   - Document Storage: Private GridFS & S3 storage adapters (`DocumentStorageProvider.js`) with AES-256-GCM encryption, strict MIME verification, and ClamAV/static malware screening.
-  - Scheduled Coordination: `jobCoordinationService.js` and `scheduledJobRegistry.js` for outbox dispatch, retention enforcement, and nightly reconciliation.
 
 - **Verification & Release Pipeline**:
-  - Release Test Runner: `npm run test:release` passing **10/10 suites, 159/159 tests**.
-  - Focused P13 Suite: `node --test test/p13_workforceAttendancePayroll.test.js` passing **23/23 tests** in 6.4s.
-  - Syntax & Integrity Gate: `npm run check` passing **639/639 JavaScript files** with 0 errors.
+  - Release Test Runner: `npm run test:release` passing **14/14 suites, 242/242 tests**.
+  - Focused P17 Suite: `node --test test/p17_forecastsPredictiveInsights.test.js` passing **9/9 tests** in 8.4s.
+  - Syntax & Integrity Gate: `npm run check` passing **677/677 JavaScript files** with 0 errors.
 
 ---
 
@@ -58,52 +58,51 @@ Total benchmark records evaluated: **485** (351 Core entries `F001`–`F351` + 1
 
 ---
 
-## 3. Package P13 — Workforce Attendance and Payroll Deep Dive
+## 3. Package Implementation Highlights & Governance
 
-Package P13 represents the enterprise workforce management engine corresponding to Petpooja Attendo (`F316`–`F325`, `A009`, `A011`).
+### 3.1 Package P17 — Forecasts, Predictive Insights & Assisted Analysis Deep Dive
 
-### 3.1 Implemented & Verified Capabilities
+1. **Sales & Item-Demand Forecasting (`salesForecastingService.js`)**:
+   - Uses finalized commercial `Bill` documents with canonical status checks (`COMPLETED`, `PAID`).
+   - Filters out voided, refunded, reversed, and training transactions.
+   - Provides transparent statistical methods (Day-of-Week Seasonality, Moving Average) and residual confidence bands (~80%).
+   - Sparsity and gaps produce explicit statuses (`INSUFFICIENT_HISTORY`, `DATA_QUALITY_WARNING`), never fabricated precision.
+   - Test Evidence: `test/p17_forecastsPredictiveInsights.test.js` Tests 1, 2, 3.
 
-1. **Overnight Shift & Midnight Crossover Reconciliation**:
-   - Check-in before midnight and checkout next morning automatically reconcile to the origin shift and correct business date (`attendanceCalculationService.js`).
-   - Test Evidence: `test/p13_workforceAttendancePayroll.test.js` Test 1.
+2. **Rolling-Origin Holdout Evaluation (`salesForecastingService.js`)**:
+   - Zero data leakage: Holdout observation window is strictly separated from training data cutoff.
+   - Computes MAE, WAPE, and Naive baseline comparisons with division-by-zero protection.
+   - Test Evidence: `test/p17_forecastsPredictiveInsights.test.js` Test 4.
 
-2. **Tamper-Resistant QR Check-In & Anti-Replay**:
-   - Universal QR tokens are bound to cafe, purpose (`ATTENDANCE`), and 60-second expiration. Replayed, forged, or cross-cafe QR tokens fail closed (`attendanceQrService.js`).
-   - Test Evidence: `test/p13_workforceAttendancePayroll.test.js` Tests 2 & 3.
+3. **Forward-Looking Stockout Risk Intelligence (`stockoutRiskService.js`)**:
+   - Combines historical consumption burn rates, forecast demand, and lead times.
+   - Strictly isolates usable stock: Expired, quarantined, and reserved lots are completely excluded.
+   - Factors in confirmed inbound supply arriving within the forecast horizon.
+   - Classifies risk levels (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `NONE`) with principal contributing reasons.
+   - Integrates with P06 Replenishment Recommendations without auto-generating purchase orders.
+   - Test Evidence: `test/p17_forecastsPredictiveInsights.test.js` Test 5.
 
-3. **Private Selfie & Geofence Evidence Vault**:
-   - Retained photographs require authenticated access, strict magic-number MIME validation, and private storage (`DocumentStorageProvider.js`). Direct unauthenticated image download is blocked.
-   - Test Evidence: `test/p13_workforceAttendancePayroll.test.js` Tests 4 & 5.
+4. **Supplier-Price Variance & Cost Analysis (`supplierPriceVarianceService.js`)**:
+   - Like-for-like comparison: Same canonical item, normalized base unit rates via conversion factors.
+   - Compares purchase order rates against contracted vendor catalogue baselines.
+   - Identifies severe increases (>15%), material increases (>5%), and favourable rates.
+   - Advisory finding: Historical invoices, purchase orders, and ledgers remain immutable.
+   - Test Evidence: `test/p17_forecastsPredictiveInsights.test.js` Test 6.
 
-4. **Strict Persona & Employee Isolation**:
-   - Staff members can only view their own attendance, leave, payslips, and loans (`staffScopeSecurity.test.js`). Cross-employee access returns `403` or `404`.
-   - Cafe Operations access is scoped strictly to assigned cafe (`cafeScope.js`).
-   - Owner is strictly read-only for payroll and attendance; operational mutations are blocked.
-   - Normal Master permanently returns `403 ROLE_RETIRED`.
-   - Test Evidence: `test/p13_workforceAttendancePayroll.test.js` Tests 6, 7, 8, 9, 10, 11.
+5. **Controlled Assisted Business Inquiries (`businessExplanationService.js`)**:
+   - Secure metric catalogue answering supported questions (`SALES_TREND`, `TOP_DEMAND_ITEMS`, `STOCKOUT_ALERT`, `PRICE_VOLATILITY`, `CAFE_COMPARISON`).
+   - No arbitrary model-generated queries; rules-based deterministic explanations first.
+   - Truthful AI adapter: Reports `UNCONFIGURED` when `AI_EXPLANATION_API_KEY` is absent without breaking deterministic insight.
+   - Test Evidence: `test/p17_forecastsPredictiveInsights.test.js` Test 7.
 
-5. **Attendance Corrections & Recalculation Safeguards**:
-   - Approved corrections record immutable audit history (`AuditEvent`).
-   - Corrections prior to payroll run trigger recalculation; corrections attempted after payroll finalization fail closed with `PAYROLL_RUN_LOCKED` (`attendanceController.js`).
-   - Test Evidence: `test/p13_workforceAttendancePayroll.test.js` Tests 12, 13, 14.
-
-6. **Concurrent Leave Balance Protection**:
-   - Leave requests utilize atomic MongoDB `$inc` guards to prevent overspending leave balance under concurrency (`leaveReconciliationService.js`).
-   - Test Evidence: `test/p13_workforceAttendancePayroll.test.js` Test 15.
-
-7. **Employee Loans & Salary Deductions**:
-   - Scheduled loan recovery is deducted during payroll processing with idempotent transaction keys (`loanAdvanceService.js`).
-   - Test Evidence: `test/p13_workforceAttendancePayroll.test.js` Test 16.
-
-8. **Effective-Dated Statutory Compliance & Finalized Payslips**:
-   - Governed statutory deductions (EPF 12%, ESI 0.75%, Professional Tax, TDS) computed via `payrollStatutoryService.js`.
-   - Finalized payslips preserve immutable snapshot values even if base employee salary is altered later.
-   - Test Evidence: `test/p13_workforceAttendancePayroll.test.js` Tests 17, 18, 19.
-
-9. **Employee Suspension, Exit & DPDP Compliance**:
-   - Lifecycle state changes (`SUSPENDED`, `SEPARATED`, `TERMINATED`) immediately revoke all active JWT/operator sessions while preserving historical attendance, payslips, and audit logs.
-   - Test Evidence: `test/p13_workforceAttendancePayroll.test.js` Test 20.
+6. **Canonical Persona Security Matrix & Non-Mutation Invariant**:
+   - Primary Master has unrestricted universal analytical oversight.
+   - Café Operations access is scoped strictly to assigned café; cross-café requests fail `403 CAFE_ACCESS_DENIED`.
+   - Owner is read-only; mutation endpoints fail `403 OWNER_READ_ONLY`.
+   - Staff and Vendor roles fail closed with `403`.
+   - Retired Normal Master permanently returns `403 ROLE_RETIRED`.
+   - Operational Invariant: Forecasting operations create 0 bills, 0 purchase orders, and 0 stock movements.
+   - Test Evidence: `test/p17_forecastsPredictiveInsights.test.js` Tests 8, 9.
 
 ---
 
@@ -606,10 +605,10 @@ Package P13 represents the enterprise workforce management engine corresponding 
 
 ---
 
-## 6. Traceable Backlog & Deferred Items (P17–P22)
+## 6. Traceable Backlog & Deferred Items (P18–P22)
 
-Per the governing execution instructions, packages P01–P16 are closed and verified. Future scope items are preserved in the traceable backlog below without destabilising accepted work:
+Per the governing execution instructions, packages P01–P17 are closed and verified. Future scope items are preserved in the traceable backlog below without destabilising accepted work:
 
-1. **Package P17 (Forecasting, Par-Level & Auto-Indent)**: AI demand prediction, seasonal factoring, and supplier replenishment suggestions.
+1. **Package P18–P19 (Advanced Marketing, Catering & Custom Integrations)**: Institutional quoting, multi-event catering, and customized integrations.
 2. **Package P20 & P21 (Hardware & External Services)**: 44 conditional entries (payment terminals, soundboxes, Google Business profile, and biometric clocking hardware). Correct adapter boundaries are defined; live operation remains marked conditional until physical hardware is connected.
 

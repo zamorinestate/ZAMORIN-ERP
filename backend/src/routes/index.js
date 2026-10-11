@@ -575,6 +575,14 @@ router.use(
   analyticsRoutes
 );
 
+const forecastRoutes =
+  require('./forecastRoutes');
+
+router.use(
+  '/forecasts',
+  forecastRoutes
+);
+
 const channelRoutes =
   require('./channelRoutes');
 

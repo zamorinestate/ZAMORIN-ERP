@@ -82,6 +82,7 @@ import { renderOwnerCustomerLoyalty, initOwnerCustomerLoyaltyEvents, setOwnerCus
 import { renderOwnerUtilitiesWaste, initOwnerUtilitiesWasteEvents, setOwnerUtilitiesWasteSection } from "./pages/ownerUtilitiesWaste.js";
 import { renderOwnerGovernanceDelegation, initOwnerGovernanceDelegationEvents, setOwnerGovernanceDelegationSection } from "./pages/ownerGovernanceDelegation.js";
 import { renderChannelsFrontService, wireChannelsFrontService, setChannelsActiveTab } from "./pages/channelsFrontService.js";
+import { renderForecastsInsights, wireForecastsInsights, setForecastsActiveTab } from "./pages/forecastsInsights.js";
 
 // ROLE_LABELS: display-safe generic labels used only for topbar scope chip
 // until /auth/me bootstrap provides the real user's display name.
@@ -489,6 +490,13 @@ async function renderPage() {
       setReportsActiveTab?.(subroute || "overview");
       content.innerHTML = renderReports(subroute);
       wireReports(content, subroute);
+      break;
+
+    case "forecasts-insights":
+    case "forecasts":
+      setForecastsActiveTab?.(subroute || "sales-forecast");
+      content.innerHTML = renderForecastsInsights();
+      wireForecastsInsights();
       break;
 
     case "admin":
