@@ -213,6 +213,35 @@ const employeeTrainingSchema = new mongoose.Schema(
       trim: true,
       default: '',
     },
+    courseId: {
+      type: String,
+      trim: true,
+      default: null,
+      index: true,
+    },
+    attempts: [
+      {
+        attemptNumber: { type: Number, required: true },
+        score: { type: Number, required: true },
+        totalPoints: { type: Number, required: true },
+        percentage: { type: Number, required: true },
+        passed: { type: Boolean, required: true },
+        attemptedAt: { type: Date, default: Date.now },
+        answers: [{ type: Number }],
+      },
+    ],
+    passingScorePercent: {
+      type: Number,
+      default: 80,
+    },
+    isCertified: {
+      type: Boolean,
+      default: false,
+    },
+    certifiedAt: {
+      type: Date,
+      default: null,
+    },
     notes: {
       type: String,
       trim: true,

@@ -159,12 +159,12 @@ def generate_register():
             notes = 'P13 Workforce Attendance & Payroll: QR check-in, overnight shift, leave, loans, statutory rules, payslips.'
         elif 326 <= num <= 334:
             pkg = 'P16'
-            frontend = 'Frontend/src/js/pages/tasks.js, ownerAcademy.js'
-            backend = 'Backend/src/routes/taskRoutes.js, ownerAcademyRoutes.js'
-            model = 'Task, TrainingRecord'
-            test = 'Backend/test/ownerStage02RiskAudit.test.js'
-            status = 'partially implemented'
-            notes = 'Action tasks and training SOPs implemented; full Stepwise recurring tasks scheduled in P16.'
+            frontend = 'Frontend/src/js/pages/tasksApprovals.js, ownerAcademy.js'
+            backend = 'Backend/src/routes/taskRoutes.js, taskController.js, taskManagementService.js, taskSchedulerService.js, employeeTrainingService.js'
+            model = 'Task, TaskTemplate, TaskRecurrenceSchedule, TrainingCourse, EmployeeTraining, StandardOperatingProcedure'
+            test = 'Backend/test/p16_tasksTrainingSopLifecycle.test.js'
+            status = 'implemented and verified'
+            notes = 'P16 Tasks, Training & SOPs: Stepwise recurring checklists, geofence GPS proof, AI review pending supervisor, outbox distribution, multi-outlet compliance reporting.'
         elif 335 <= num <= 351:
             pkg = 'P02 / P04 / P20'
             frontend = 'Frontend/src/js/navigation.js, cafeOperationsDevices.js'
@@ -332,10 +332,10 @@ def generate_register():
 
     with open(out_path, 'w', encoding='utf-8') as out:
         out.write('# ZAMORIN CAFÉ ERP — PETPOOJA BENCHMARK IMPLEMENTATION REGISTER\n\n')
-        out.write('**Document ID**: `REG-PETPOOJA-485-P15-VERIFIED`  \n')
+        out.write('**Document ID**: `REG-PETPOOJA-485-P16-VERIFIED`  \n')
         out.write('**Execution Scope**: `D:\\Zamorin Cafe ERP\\A Main Workspace`  \n')
         out.write('**Canonical Branch**: `feature/foundation-five-windows`  \n')
-        out.write('**Verified Starting Closeout Commit**: `b06a667` (P14 Closeout)  \n')
+        out.write('**Verified Starting Closeout Commit**: `7048c69f165bf2f1e32f90b3c7538517741a329a` (P15 Closeout)  \n')
         out.write('**Audit Date**: 11 October 2026 | **Status**: ACTIVE TRACEABLE GOVERNANCE  \n\n')
         out.write('---\n\n')
 
@@ -444,9 +444,9 @@ def generate_register():
             out.write(f'| **{e["id"]}** | {e["title"]} | {e["package"]} | `{e["frontend"]}` | `{e["backend"]}` | `{e["model"]}` | `{e["test"]}` | **{e["status"]}** | {e["notes"]} |\n')
 
         out.write('\n---\n\n')
-        out.write('## 6. Traceable Backlog & Deferred Items (P16–P22)\n\n')
-        out.write('Per the governing execution instructions, packages P01–P15 are closed or verified. Future scope items are preserved in the traceable backlog below without destabilising accepted work:\n\n')
-        out.write('1. **Package P16 (Tasks, Training SOPs & Recurring Checklists)**: 9 entries (`F326`–`F334`). Action Centre tasks and owner academy are active; recurring automated checklists will be enhanced in P16.\n')
+        out.write('## 6. Traceable Backlog & Deferred Items (P17–P22)\n\n')
+        out.write('Per the governing execution instructions, packages P01–P16 are closed and verified. Future scope items are preserved in the traceable backlog below without destabilising accepted work:\n\n')
+        out.write('1. **Package P17 (Forecasting, Par-Level & Auto-Indent)**: AI demand prediction, seasonal factoring, and supplier replenishment suggestions.\n')
         out.write('2. **Package P20 & P21 (Hardware & External Services)**: 44 conditional entries (payment terminals, soundboxes, Google Business profile, and biometric clocking hardware). Correct adapter boundaries are defined; live operation remains marked conditional until physical hardware is connected.\n\n')
 
     root_path = 'PETPOOJA_BENCHMARK_IMPLEMENTATION_REGISTER.md'

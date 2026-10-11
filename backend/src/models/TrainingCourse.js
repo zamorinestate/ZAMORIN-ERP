@@ -59,6 +59,27 @@ const trainingCourseSchema = new mongoose.Schema(
       type: String,
       default: '2026-08-05', // Standardized Procedure for Conduct of FoSTaC Programme (dated 5 August 2026)
     },
+    learningMaterials: [
+      {
+        title: { type: String, default: '' },
+        contentUrl: { type: String, default: '' },
+        format: { type: String, default: 'PDF' },
+      },
+    ],
+    mandatoryForCategories: [
+      {
+        type: String,
+        trim: true,
+      },
+    ],
+    quiz: [
+      {
+        question: { type: String, required: true },
+        options: [{ type: String, required: true }],
+        correctOptionIndex: { type: Number, required: true },
+        points: { type: Number, default: 10 },
+      },
+    ],
     isActive: {
       type: Boolean,
       default: true,

@@ -258,6 +258,12 @@ export function renderTasks({ title } = {}) {
           <button class="btn btn-primary" id="add-task-btn" type="button" style="font-weight:700;" aria-label="Assign New Management Task">
             + Assign Management Task
           </button>
+          <button class="btn btn-secondary" id="run-scheduler-btn" type="button" style="font-weight:600; display:flex; align-items:center; gap:6px;">
+            ⚡ Run Recurring Tasks
+          </button>
+          <button class="btn btn-secondary" id="compliance-report-btn" type="button" style="font-weight:600; display:flex; align-items:center; gap:6px;">
+            📊 Compliance Report
+          </button>
           <button class="btn btn-secondary" id="refresh-tasks-btn" type="button" title="Refresh task queue" aria-label="Refresh Tasks" style="font-weight:600; display:flex; align-items:center; gap:6px;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
             Refresh Tasks
@@ -746,6 +752,32 @@ function wireTaskEventListeners(root) {
       openAssignTaskModal(root);
     });
   }
+
+  // Recurring Scheduler Trigger (F326)
+  const schedBtn = root.querySelector("#run-scheduler-btn");
+  if (schedBtn) {
+    schedBtn.addEventListener("click", async () => {
+      schedBtn.disabled = true;
+      try {
+        const res = await apiPost("/tasks/scheduler/run", {});
+        showToast(`Recurring tasks run: ${res.data?.generatedCount || 0} generated, ${res.data?.skippedCount || 0} skipped.`, "mint");
+        await fetchTasksFromServer();
+        refreshTasksView(root);
+      } catch (err) {
+        showToast(err.message || "Failed to trigger recurring scheduler", "coral");
+      } finally {
+        schedBtn.disabled = false;
+      }
+    });
+  }
+
+  // Multi-Outlet Compliance Report (F331, F333)
+  const compBtn = root.querySelector("#compliance-report-btn");
+  if (compBtn) {
+    compBtn.addEventListener("click", () => {
+      openComplianceReportModal(root);
+    });
+  }
 }
 
 export function wireTasks(root) {
@@ -1011,8 +1043,62 @@ async function openTaskDetailModal(taskId, root) {
             : ""
         }
 
+        <!-- Evidence & AI Review Card -->
+        ${
+          task.submittedLocation || task.aiReview || (task.evidence && task.evidence.length > 0)
+            ? `
+            <div class="oto-drawer-section" style="background:var(--surface-sunken);padding:10px 12px;border-radius:6px;border:1px solid var(--line);">
+              <div class="oto-sec-title">Completion Proof &amp; Automated Verification</div>
+              ${
+                task.submittedLocation
+                  ? `
+                  <div style="font-size:12.5px;margin-bottom:6px;">
+                    <span style="color:var(--muted);">Location Proof:</span>
+                    <strong style="color:${task.submittedLocation.isVerified ? 'var(--success)' : 'var(--danger)'};">
+                      ${task.submittedLocation.isVerified ? '✓ Within Permitted Geofence' : '⚠ Out of Range'} (${task.submittedLocation.distanceMeters ?? 0}m)
+                    </strong>
+                  </div>
+                `
+                  : ''
+              }
+              ${
+                task.aiReview && task.aiReview.providerStatus !== 'NONE'
+                  ? `
+                  <div style="font-size:12.5px;margin-bottom:6px;">
+                    <span style="color:var(--muted);">AI Proof Review:</span>
+                    <strong style="color:${task.aiReview.providerStatus === 'VERIFIED' ? 'var(--success)' : '#f59e0b'};">
+                      ${task.aiReview.providerStatus} (${task.aiReview.confidenceScore != null ? Math.round(task.aiReview.confidenceScore * 100) + '%' : 'Pending Review'})
+                    </strong>
+                    <div style="font-size:11.5px;color:var(--muted);">${escapeHtml(task.aiReview.evaluationNotes || '')}</div>
+                  </div>
+                `
+                  : ''
+              }
+              ${
+                Array.isArray(task.evidence) && task.evidence.length > 0
+                  ? `
+                  <div style="font-size:12px;color:var(--muted);margin-top:4px;">
+                    Attachments: ${task.evidence.map(e => `<span style="display:inline-block;padding:2px 6px;background:var(--surface);border-radius:4px;border:1px solid var(--line);margin-right:4px;">📷 ${escapeHtml(e.fileName)}</span>`).join('')}
+                  </div>
+                `
+                  : ''
+              }
+            </div>
+          `
+            : ''
+        }
+
         <!-- Verification / Actions Controls -->
         <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;">
+          ${
+            ["PENDING", "IN_PROGRESS", "RETURNED_FOR_CORRECTION"].includes(task.status)
+              ? `
+              <button class="btn btn-sm btn-primary" id="modal-submit-evidence-btn" type="button">
+                📸 Submit Checklist &amp; GPS Proof
+              </button>
+            `
+              : ""
+          }
           ${
             task.status === "AWAITING_VERIFICATION" && isOwner
               ? `
@@ -1110,6 +1196,14 @@ async function openTaskDetailModal(taskId, root) {
       cancelBtn.addEventListener("click", () => {
         document.querySelector(".modal-backdrop")?.remove();
         openCancelTaskModal(task.taskId, root);
+      });
+    }
+
+    const submitEvBtn = document.querySelector("#modal-submit-evidence-btn");
+    if (submitEvBtn) {
+      submitEvBtn.addEventListener("click", () => {
+        document.querySelector(".modal-backdrop")?.remove();
+        openSubmitEvidenceModal(task, root);
       });
     }
   }, 50);
@@ -1473,3 +1567,195 @@ function openAssignTaskModal(root) {
     },
   });
 }
+
+function openComplianceReportModal(root) {
+  openModal({
+    title: "Multi-Outlet Task Compliance & Oversight (F331, F333)",
+    maxWidth: "750px",
+    body: `
+      <div id="compliance-modal-body" style="color:var(--ink);padding:4px 0;">
+        <div style="display:flex;justify-content:center;padding:20px;color:var(--muted);">
+          <span>Loading compliance metrics across outlets...</span>
+        </div>
+      </div>
+    `,
+    showSave: false,
+    cancelLabel: "Close",
+  });
+
+  setTimeout(async () => {
+    try {
+      const res = await apiGet("/tasks/reports/compliance");
+      const rep = res?.data?.report;
+      const bodyEl = document.querySelector("#compliance-modal-body");
+      if (!bodyEl || !rep) return;
+
+      const outlets = Object.entries(rep.byOutlet || {});
+
+      bodyEl.innerHTML = `
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">
+          <div style="background:var(--surface-sunken);padding:10px;border-radius:6px;border:1px solid var(--line);text-align:center;">
+            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700;">Completion Rate</div>
+            <div style="font-size:22px;font-weight:800;color:var(--success);margin-top:2px;">${rep.completionRate}%</div>
+          </div>
+          <div style="background:var(--surface-sunken);padding:10px;border-radius:6px;border:1px solid var(--line);text-align:center;">
+            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700;">On-Time Rate</div>
+            <div style="font-size:22px;font-weight:800;color:#38bdf8;margin-top:2px;">${rep.onTimeRate}%</div>
+          </div>
+          <div style="background:var(--surface-sunken);padding:10px;border-radius:6px;border:1px solid var(--line);text-align:center;">
+            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700;">Geofence Compliance</div>
+            <div style="font-size:22px;font-weight:800;color:#a855f7;margin-top:2px;">${rep.geofenceComplianceRate}%</div>
+          </div>
+          <div style="background:var(--surface-sunken);padding:10px;border-radius:6px;border:1px solid var(--line);text-align:center;">
+            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700;">Photo Proofs</div>
+            <div style="font-size:22px;font-weight:800;color:#f59e0b;margin-top:2px;">${rep.photoEvidenceCount}</div>
+          </div>
+        </div>
+
+        <div style="font-size:13px;font-weight:700;margin-bottom:6px;color:var(--ink);">Outlet Oversight Breakdown</div>
+        <table style="width:100%;font-size:12.5px;border-collapse:collapse;margin-bottom:16px;border:1px solid var(--line);">
+          <thead>
+            <tr style="background:var(--surface-sunken);border-bottom:1px solid var(--line);text-align:left;">
+              <th style="padding:6px 10px;">Café / Outlet</th>
+              <th style="padding:6px 10px;text-align:right;">Total Tasks</th>
+              <th style="padding:6px 10px;text-align:right;">Completed</th>
+              <th style="padding:6px 10px;text-align:right;">Overdue</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${outlets.map(([cafeId, st]) => `
+              <tr style="border-bottom:1px solid var(--line);">
+                <td style="padding:6px 10px;font-weight:600;">${escapeHtml(getCafeName(cafeId))}</td>
+                <td style="padding:6px 10px;text-align:right;">${st.total}</td>
+                <td style="padding:6px 10px;text-align:right;color:var(--success);font-weight:600;">${st.completed}</td>
+                <td style="padding:6px 10px;text-align:right;color:${st.overdue > 0 ? 'var(--danger)' : 'var(--muted)'};font-weight:600;">${st.overdue}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    } catch (err) {
+      const bodyEl = document.querySelector("#compliance-modal-body");
+      if (bodyEl) {
+        bodyEl.innerHTML = `<div style="color:var(--danger);padding:10px;">Failed to load compliance report: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+  }, 50);
+}
+
+function openSubmitEvidenceModal(task, root) {
+  const checklist = Array.isArray(task.checklist) ? task.checklist : [];
+
+  openModal({
+    title: `Submit Evidence & Complete · ${task.taskId}`,
+    maxWidth: "600px",
+    body: `
+      <form id="evidence-form" style="display:flex;flex-direction:column;gap:14px;color:var(--ink);">
+        <div>
+          <div style="font-weight:700;font-size:14px;margin-bottom:2px;">${escapeHtml(task.title)}</div>
+          <div style="font-size:12px;color:var(--muted);">${formatCategory(task.category)} · Target: ${formatDueDate(task.dueDate, task.dueTime)}</div>
+        </div>
+
+        ${checklist.length > 0 ? `
+          <div style="background:var(--surface-sunken);padding:10px 12px;border-radius:6px;border:1px solid var(--line);">
+            <div style="font-size:12px;font-weight:700;margin-bottom:6px;text-transform:uppercase;color:var(--ink);">Checklist Sign-off (${checklist.length})</div>
+            ${checklist.map((c, i) => `
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--line);font-size:12.5px;">
+                <span>${escapeHtml(c.item)}</span>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                  <input type="checkbox" class="ev-check-item" data-index="${i}" checked />
+                  <span style="font-size:11px;font-weight:600;color:var(--success);">PASS</span>
+                </label>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+
+        <div>
+          <label class="label" style="font-weight:700;font-size:12px;margin-bottom:4px;display:block;">Photo Proof (Filename / URL)</label>
+          <input type="text" id="ev-photo-url" class="input" placeholder="e.g. https://storage.local/evidence/opening-sanitisation.jpg" value="evidence-photo-${task.taskId}.jpg" style="width:100%;box-sizing:border-box;" />
+        </div>
+
+        <div style="background:var(--surface-sunken);padding:10px 12px;border-radius:6px;border:1px solid var(--line);">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <span style="font-size:12px;font-weight:700;color:var(--ink);">GPS Geofence Location Proof</span>
+            <button class="btn btn-sm btn-secondary" type="button" id="ev-capture-gps-btn" style="font-size:11px;">📍 Capture GPS Location</button>
+          </div>
+          <div style="grid-template-columns:1fr 1fr;gap:8px;display:grid;">
+            <div>
+              <label style="font-size:11px;color:var(--muted);display:block;">Latitude</label>
+              <input type="number" step="any" id="ev-lat" class="input input-sm" placeholder="11.2588" value="11.2588" style="width:100%;box-sizing:border-box;" />
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--muted);display:block;">Longitude</label>
+              <input type="number" step="any" id="ev-lng" class="input input-sm" placeholder="75.7804" value="75.7804" style="width:100%;box-sizing:border-box;" />
+            </div>
+          </div>
+          <div id="ev-gps-status" style="font-size:11px;color:var(--muted);margin-top:4px;">Coordinates captured for site geofence validation.</div>
+        </div>
+
+        <div>
+          <label class="label" style="font-weight:700;font-size:12px;margin-bottom:4px;display:block;">Completion Notes &amp; Observations</label>
+          <textarea id="ev-notes" class="input" rows="2" placeholder="Describe any observations or anomalies noticed during checklist execution..." style="width:100%;box-sizing:border-box;"></textarea>
+        </div>
+      </form>
+    `,
+    saveLabel: "Submit Evidence & Complete",
+    onSave: async (modalEl) => {
+      const photoUrl = modalEl.querySelector("#ev-photo-url")?.value?.trim();
+      const latVal = Number.parseFloat(modalEl.querySelector("#ev-lat")?.value);
+      const lngVal = Number.parseFloat(modalEl.querySelector("#ev-lng")?.value);
+      const notes = modalEl.querySelector("#ev-notes")?.value?.trim();
+
+      const updatedChecklist = checklist.map((c, i) => {
+        const checkbox = modalEl.querySelector(`.ev-check-item[data-index="${i}"]`);
+        return {
+          item: c.item,
+          status: checkbox && checkbox.checked ? "PASS" : "FAIL",
+          failureReason: checkbox && !checkbox.checked ? "Reported as failed during execution" : "",
+        };
+      });
+
+      const payload = {
+        checklist: updatedChecklist,
+        evidence: photoUrl ? [{ fileId: `FILE-${Date.now()}`, fileName: photoUrl, fileUrl: photoUrl }] : [],
+        location: !Number.isNaN(latVal) && !Number.isNaN(lngVal) ? { latitude: latVal, longitude: lngVal, accuracyMeters: 5 } : undefined,
+        notes: notes || "Completed via Stepwise checklist execution",
+      };
+
+      try {
+        const res = await apiPost(`/tasks/${task.taskId}/submit-evidence`, payload);
+        const aiStatus = res.data?.aiEvaluation?.providerStatus || "PENDING";
+        showToast(`Task ${task.taskId} submitted! AI Review: ${aiStatus}`, "mint");
+        await fetchTasksFromServer();
+        refreshTasksView(root);
+        return true;
+      } catch (err) {
+        showToast(err.message || "Failed to submit task evidence", "coral");
+        return false;
+      }
+    },
+  });
+
+  setTimeout(() => {
+    const gpsBtn = document.querySelector("#ev-capture-gps-btn");
+    if (gpsBtn && navigator.geolocation) {
+      gpsBtn.addEventListener("click", () => {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const latInput = document.querySelector("#ev-lat");
+            const lngInput = document.querySelector("#ev-lng");
+            const statusEl = document.querySelector("#ev-gps-status");
+            if (latInput) latInput.value = pos.coords.latitude.toFixed(6);
+            if (lngInput) lngInput.value = pos.coords.longitude.toFixed(6);
+            if (statusEl) statusEl.textContent = `📍 Captured live coordinates (±${Math.round(pos.coords.accuracy)}m)`;
+          },
+          (err) => {
+            showToast("GPS permission denied or unavailable: using manual site coordinates", "amber");
+          }
+        );
+      });
+    }
+  }, 50);
+}
+

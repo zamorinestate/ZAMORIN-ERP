@@ -38,6 +38,7 @@ const RELEASE_SUITE = [
   'p13_workforceAttendancePayroll.test.js',
   'p14_customersLoyaltyFeedbackCampaigns.test.js',
   'p15_channelsQrOrderingFrontService.test.js',
+  'p16_tasksTrainingSopLifecycle.test.js',
 ];
 
 function parseArgs(argv) {

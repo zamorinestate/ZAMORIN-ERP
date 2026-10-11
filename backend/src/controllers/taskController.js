@@ -31,7 +31,36 @@ const {
 
 const {
   recordRequestAudit,
+  recordAuditEvent,
 } = require('../services/auditService');
+
+const {
+  NotificationOutbox,
+} = require('../models/NotificationOutbox');
+
+const {
+  TaskTemplate,
+} = require('../models/TaskTemplate');
+
+const {
+  EmployeeTraining,
+} = require('../models/EmployeeTraining');
+
+const {
+  TrainingCourse,
+} = require('../models/TrainingCourse');
+
+const {
+  TaskManagementService,
+} = require('../services/taskManagementService');
+
+const {
+  TaskSchedulerService,
+} = require('../services/taskSchedulerService');
+
+const {
+  EmployeeTrainingService,
+} = require('../services/employeeTrainingService');
 
 const { resolveEffectiveCafeScope, assertResourceCafeOwnership } = require('../utils/cafeScope');
 
@@ -309,12 +338,19 @@ const createTask = asyncHandler(async (request, response) => {
 
   await task.save();
 
-  await AuditEvent.create({
+  await recordAuditEvent({
     organisationId: task.organisationId,
+    actorUserId: request.auth.userId,
+    actorRole: request.auth.role,
+    module: 'OPERATIONAL_TASKS',
     action: 'TASK_CREATED',
-    actor: { userId: request.auth.userId, role: request.auth.role },
-    target: { entityType: 'TASK', entityId: task.taskId },
-    details: {
+    entityType: 'TASK',
+    entityId: task.taskId,
+    cafeId: task.cafeId,
+    reason: 'Task created',
+    result: 'SUCCESS',
+    riskClassification: task.risk === 'CRITICAL' ? 'CRITICAL' : (task.risk === 'HIGH' ? 'HIGH' : 'LOW'),
+    metadata: {
       cafeId: task.cafeId,
       title: task.title,
       category: task.category,
@@ -322,6 +358,20 @@ const createTask = asyncHandler(async (request, response) => {
       assignedUserId: task.assignedUserId,
       dueDate: task.dueDate,
     },
+  }).catch(() => {});
+
+  await NotificationOutbox.create({
+    outboxId: `OUTBOX-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
+    organisationId: task.organisationId,
+    eventType: 'TASK_ASSIGNED',
+    recipientUserId: task.assignedUserId || null,
+    recipientEmail: `${(task.assignedUserId || 'ops').toLowerCase()}@zamorin.test`,
+    recipientRole: task.assignedRole || 'STAFF',
+    templateId: 'TASK_ASSIGNMENT_EMAIL',
+    subject: `Task Assigned: ${task.title}`,
+    channels: ['EMAIL', 'IN_APP'],
+    payload: { taskId: task.taskId, priority: task.priority },
+    status: 'QUEUED',
   }).catch(() => {});
 
   return response.status(201).json({
@@ -368,6 +418,18 @@ const updateTaskStatus = asyncHandler(async (request, response) => {
 
   if (targetStatus === 'CANCELLED') {
     throw new ApiError(400, 'USE_CANCEL_ENDPOINT', 'Use /cancel endpoint with mandatory reason to cancel a task.');
+  }
+
+  // Check predecessor dependencies
+  if (['IN_PROGRESS', 'SUBMITTED', 'AWAITING_VERIFICATION', 'COMPLETED'].includes(targetStatus)) {
+    try {
+      await TaskManagementService.assertDependenciesSatisfied(task);
+    } catch (err) {
+      if (err.code === 'PREDECESSOR_NOT_COMPLETED') {
+        throw new ApiError(400, 'PREDECESSOR_NOT_COMPLETED', err.message);
+      }
+      throw err;
+    }
   }
 
   // Work completion vs verification check
@@ -432,6 +494,15 @@ const completeTask = asyncHandler(async (request, response) => {
       data: { task: task.toObject() },
       correlationId: request.correlationId || null,
     });
+  }
+
+  try {
+    await TaskManagementService.assertDependenciesSatisfied(task);
+  } catch (err) {
+    if (err.code === 'PREDECESSOR_NOT_COMPLETED') {
+      throw new ApiError(400, 'PREDECESSOR_NOT_COMPLETED', err.message);
+    }
+    throw err;
   }
 
   if (task.verificationRequired) {
@@ -516,12 +587,19 @@ const verifyTask = asyncHandler(async (request, response) => {
 
   await task.save();
 
-  await AuditEvent.create({
+  await recordAuditEvent({
     organisationId: task.organisationId,
+    actorUserId: request.auth.userId,
+    actorRole: request.auth.role,
+    module: 'OPERATIONAL_TASKS',
     action: 'TASK_VERIFIED',
-    actor: { userId: request.auth.userId, role: request.auth.role },
-    target: { entityType: 'TASK', entityId: taskId },
-    details: { remarks: task.verificationRemarks, verifiedAt: task.verifiedAt },
+    entityType: 'TASK',
+    entityId: taskId,
+    cafeId: task.cafeId,
+    reason: task.verificationRemarks || 'Task verified',
+    result: 'SUCCESS',
+    riskClassification: 'LOW',
+    metadata: { remarks: task.verificationRemarks, verifiedAt: task.verifiedAt },
   }).catch(() => {});
 
   return response.status(200).json({
@@ -573,12 +651,19 @@ const returnTask = asyncHandler(async (request, response) => {
 
   await task.save();
 
-  await AuditEvent.create({
+  await recordAuditEvent({
     organisationId: task.organisationId,
+    actorUserId: request.auth.userId,
+    actorRole: request.auth.role,
+    module: 'OPERATIONAL_TASKS',
     action: 'TASK_RETURNED_FOR_CORRECTION',
-    actor: { userId: request.auth.userId, role: request.auth.role },
-    target: { entityType: 'TASK', entityId: taskId },
-    details: { reason: task.returnReason, remarks },
+    entityType: 'TASK',
+    entityId: taskId,
+    cafeId: task.cafeId,
+    reason: task.returnReason,
+    result: 'SUCCESS',
+    riskClassification: 'LOW',
+    metadata: { reason: task.returnReason, remarks },
   }).catch(() => {});
 
   return response.status(200).json({
@@ -624,12 +709,18 @@ const reopenTask = asyncHandler(async (request, response) => {
 
   await task.save();
 
-  await AuditEvent.create({
+  await recordAuditEvent({
     organisationId: task.organisationId,
+    actorUserId: request.auth.userId,
+    actorRole: request.auth.role,
+    module: 'OPERATIONAL_TASKS',
     action: 'TASK_REOPENED',
-    actor: { userId: request.auth.userId, role: request.auth.role },
-    target: { entityType: 'TASK', entityId: taskId },
-    details: { reason: reason.trim() },
+    entityType: 'TASK',
+    entityId: taskId,
+    cafeId: task.cafeId,
+    reason: reason.trim(),
+    result: 'SUCCESS',
+    riskClassification: 'LOW',
   }).catch(() => {});
 
   return response.status(200).json({
@@ -675,12 +766,18 @@ const cancelTask = asyncHandler(async (request, response) => {
 
   await task.save();
 
-  await AuditEvent.create({
+  await recordAuditEvent({
     organisationId: task.organisationId,
+    actorUserId: request.auth.userId,
+    actorRole: request.auth.role,
+    module: 'OPERATIONAL_TASKS',
     action: 'TASK_CANCELLED',
-    actor: { userId: request.auth.userId, role: request.auth.role },
-    target: { entityType: 'TASK', entityId: taskId },
-    details: { reason: task.cancellationReason },
+    entityType: 'TASK',
+    entityId: taskId,
+    cafeId: task.cafeId,
+    reason: task.cancellationReason,
+    result: 'SUCCESS',
+    riskClassification: 'LOW',
   }).catch(() => {});
 
   return response.status(200).json({
@@ -726,12 +823,18 @@ const blockTask = asyncHandler(async (request, response) => {
 
   await task.save();
 
-  await AuditEvent.create({
+  await recordAuditEvent({
     organisationId: task.organisationId,
+    actorUserId: request.auth.userId,
+    actorRole: request.auth.role,
+    module: 'OPERATIONAL_TASKS',
     action: 'TASK_BLOCKED',
-    actor: { userId: request.auth.userId, role: request.auth.role },
-    target: { entityType: 'TASK', entityId: taskId },
-    details: { reason: task.blockedReason },
+    entityType: 'TASK',
+    entityId: taskId,
+    cafeId: task.cafeId,
+    reason: task.blockedReason,
+    result: 'SUCCESS',
+    riskClassification: 'LOW',
   }).catch(() => {});
 
   return response.status(200).json({
@@ -776,12 +879,19 @@ const reassignTask = asyncHandler(async (request, response) => {
 
   await task.save();
 
-  await AuditEvent.create({
+  await recordAuditEvent({
     organisationId: task.organisationId,
+    actorUserId: request.auth.userId,
+    actorRole: request.auth.role,
+    module: 'OPERATIONAL_TASKS',
     action: 'TASK_REASSIGNED',
-    actor: { userId: request.auth.userId, role: request.auth.role },
-    target: { entityType: 'TASK', entityId: taskId },
-    details: {
+    entityType: 'TASK',
+    entityId: taskId,
+    cafeId: task.cafeId,
+    reason: 'Task reassigned',
+    result: 'SUCCESS',
+    riskClassification: 'LOW',
+    metadata: {
       previousAssignee,
       newAssignee: task.assignedUserId,
       responsibleUserId: task.responsibleUserId,
@@ -793,6 +903,260 @@ const reassignTask = asyncHandler(async (request, response) => {
     success: true,
     message: `Task ${taskId} reassigned successfully.`,
     data: { task: task.toObject() },
+    correlationId: request.correlationId || null,
+  });
+});
+
+// ─── SUBMIT TASK EVIDENCE (CHECKLIST, LOCATION, PHOTO, AI REVIEW) ───────────
+const submitTaskEvidence = asyncHandler(async (request, response) => {
+  const taskId = normalizeId(request.params.taskId);
+  const { checklist, evidence, location, notes } = request.body;
+
+  // If staff, verify this task is assigned to them
+  if (request.auth.role === 'STAFF') {
+    const existing = await Task.findOne({
+      taskId,
+      organisationId: request.auth.organisationId,
+    });
+    if (!existing) throw new ApiError(404, 'NOT_FOUND', 'Task not found.');
+    if (existing.assignedUserId && existing.assignedUserId !== request.auth.userId) {
+      throw new ApiError(403, 'NOT_YOUR_TASK', 'You may only submit evidence for your own assigned tasks.');
+    }
+  }
+
+  const result = await TaskManagementService.submitTaskEvidence({
+    organisationId: request.auth.organisationId,
+    taskId,
+    submission: { checklist, evidence, location, notes },
+    auth: request.auth,
+  });
+
+  return response.status(200).json({
+    success: true,
+    message: result.task.verificationRequired
+      ? `Task ${taskId} submitted with evidence for supervisor verification.`
+      : `Task ${taskId} completed with verified evidence.`,
+    data: {
+      task: result.task.toObject ? result.task.toObject() : result.task,
+      locationProof: result.locationProofResult,
+      aiEvaluation: result.aiEvaluation,
+    },
+    correlationId: request.correlationId || null,
+  });
+});
+
+// ─── TASK TEMPLATES MANAGEMENT (F326) ─────────────────────────────────────────
+const listTemplates = asyncHandler(async (request, response) => {
+  const effectiveCafe = resolveEffectiveCafeScope(request);
+  const query = { organisationId: request.auth.organisationId, isActive: true };
+  if (effectiveCafe) {
+    query.$or = [{ cafeId: null }, { cafeId: effectiveCafe }];
+  } else if (request.query.cafeId && request.query.cafeId !== 'ALL') {
+    query.$or = [{ cafeId: null }, { cafeId: normalizeId(request.query.cafeId) }];
+  }
+
+  const templates = await TaskTemplate.find(query).sort({ createdAt: -1 }).lean();
+  return response.status(200).json({
+    success: true,
+    data: { templates },
+    correlationId: request.correlationId || null,
+  });
+});
+
+const createTemplate = asyncHandler(async (request, response) => {
+  const data = request.body;
+  if (!data.title) throw new ApiError(400, 'TITLE_REQUIRED', 'Template title is required.');
+
+  const seqId = await SequenceCounter.generateId({
+    organisationId: request.auth.organisationId,
+    sequenceKey: 'TASK_TEMPLATE',
+    prefix: 'TPL',
+    minimumDigits: 4,
+  });
+
+  const effectiveCafe = resolveEffectiveCafeScope(request);
+  const cafeId = request.auth.role === 'CAFE_ADMIN' ? effectiveCafe : (data.cafeId ? normalizeId(data.cafeId) : null);
+
+  const template = new TaskTemplate({
+    ...data,
+    templateId: seqId,
+    organisationId: request.auth.organisationId,
+    cafeId,
+    createdByUserId: request.auth.userId,
+  });
+
+  await template.save();
+
+  return response.status(201).json({
+    success: true,
+    message: `Task template ${seqId} created.`,
+    data: { template: template.toObject() },
+    correlationId: request.correlationId || null,
+  });
+});
+
+const getTemplate = asyncHandler(async (request, response) => {
+  const templateId = normalizeId(request.params.templateId);
+  const template = await TaskTemplate.findOne({
+    templateId,
+    organisationId: request.auth.organisationId,
+  }).lean();
+
+  if (!template) throw new ApiError(404, 'NOT_FOUND', 'Template not found.');
+
+  return response.status(200).json({
+    success: true,
+    data: { template },
+    correlationId: request.correlationId || null,
+  });
+});
+
+const updateTemplate = asyncHandler(async (request, response) => {
+  const templateId = normalizeId(request.params.templateId);
+  const template = await TaskTemplate.findOne({
+    templateId,
+    organisationId: request.auth.organisationId,
+  });
+
+  if (!template) throw new ApiError(404, 'NOT_FOUND', 'Template not found.');
+
+  Object.assign(template, request.body);
+  await template.save();
+
+  return response.status(200).json({
+    success: true,
+    message: `Template ${templateId} updated.`,
+    data: { template: template.toObject() },
+    correlationId: request.correlationId || null,
+  });
+});
+
+// ─── SCHEDULER & RECURRING GENERATION (F326, F330) ───────────────────────────
+const runScheduler = asyncHandler(async (request, response) => {
+  const effectiveCafe = resolveEffectiveCafeScope(request);
+  const { executionDate } = request.body;
+
+  const result = await TaskSchedulerService.runRecurringGeneration({
+    organisationId: request.auth.organisationId,
+    cafeId: effectiveCafe,
+    executionDate,
+    actorId: request.auth.userId,
+  });
+
+  return response.status(200).json({
+    success: true,
+    message: `Recurring generation completed for ${result.executionDate}. Generated: ${result.generatedCount}, Skipped: ${result.skippedCount}.`,
+    data: result,
+    correlationId: request.correlationId || null,
+  });
+});
+
+const processOverdue = asyncHandler(async (request, response) => {
+  const effectiveCafe = resolveEffectiveCafeScope(request);
+  const result = await TaskSchedulerService.processOverdueTasks({
+    organisationId: request.auth.organisationId,
+    cafeId: effectiveCafe,
+  });
+
+  return response.status(200).json({
+    success: true,
+    message: `Processed overdue tasks. Overdue count: ${result.overdueCount}, Reminders queued: ${result.remindersQueued}.`,
+    data: result,
+    correlationId: request.correlationId || null,
+  });
+});
+
+// ─── MULTI-OUTLET COMPLIANCE REPORTING (F331, F333) ───────────────────────────
+const getComplianceReport = asyncHandler(async (request, response) => {
+  const effectiveCafe = resolveEffectiveCafeScope(request);
+  const cafeId = effectiveCafe || request.query.cafeId;
+
+  const report = await TaskManagementService.getComplianceReport({
+    organisationId: request.auth.organisationId,
+    cafeId,
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: { report },
+    correlationId: request.correlationId || null,
+  });
+});
+
+// ─── STAFF SELF-SERVICE WORKFLOWS (SECTION 9) ─────────────────────────────────
+const getMyTasks = asyncHandler(async (request, response) => {
+  const userId = request.auth.userId;
+  const filter = {
+    organisationId: request.auth.organisationId,
+    $or: [
+      { assignedUserId: userId },
+      { assignedRole: request.auth.role },
+    ],
+  };
+
+  const tasks = await Task.find(filter)
+    .select('-__v -version')
+    .sort({ dueDate: 1, priority: -1 })
+    .lean();
+
+  return response.status(200).json({
+    success: true,
+    data: { tasks },
+    correlationId: request.correlationId || null,
+  });
+});
+
+// ─── EMPLOYEE TRAINING INTEGRATION (F326-F334, SECTION 5) ─────────────────────
+const assignTraining = asyncHandler(async (request, response) => {
+  const { userId, courseId, dueDate, cafeId } = request.body;
+  const assignment = await EmployeeTrainingService.assignTraining({
+    organisationId: request.auth.organisationId,
+    cafeId: cafeId || resolveEffectiveCafeScope(request) || '',
+    userId,
+    courseId,
+    dueDate,
+    assignedByUserId: request.auth.userId,
+  });
+
+  return response.status(201).json({
+    success: true,
+    message: `Training course ${courseId} assigned to ${userId}.`,
+    data: { assignment: assignment.toObject() },
+    correlationId: request.correlationId || null,
+  });
+});
+
+const submitTrainingAssessment = asyncHandler(async (request, response) => {
+  const trainingId = normalizeId(request.params.trainingId);
+  const { answers } = request.body;
+
+  const result = await EmployeeTrainingService.submitAssessmentAttempt({
+    organisationId: request.auth.organisationId,
+    trainingId,
+    userId: request.auth.userId,
+    answers,
+  });
+
+  return response.status(200).json({
+    success: true,
+    message: result.passed
+      ? `Assessment passed (${result.percentage}% >= ${result.passingThreshold}%). Certification awarded.`
+      : `Assessment failed (${result.percentage}% < ${result.passingThreshold}%). Retraining required.`,
+    data: result,
+    correlationId: request.correlationId || null,
+  });
+});
+
+const getMyTraining = asyncHandler(async (request, response) => {
+  const userId = request.auth.userId;
+  const records = await EmployeeTraining.find({
+    organisationId: request.auth.organisationId,
+    userId,
+  }).sort({ dueDate: 1 }).lean();
+
+  return response.status(200).json({
+    success: true,
+    data: { trainingRecords: records },
     correlationId: request.correlationId || null,
   });
 });
@@ -809,4 +1173,17 @@ module.exports = {
   cancelTask,
   blockTask,
   reassignTask,
+  submitTaskEvidence,
+  listTemplates,
+  createTemplate,
+  getTemplate,
+  updateTemplate,
+  runScheduler,
+  processOverdue,
+  getComplianceReport,
+  getMyTasks,
+  assignTraining,
+  submitTrainingAssessment,
+  getMyTraining,
 };
+

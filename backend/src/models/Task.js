@@ -217,12 +217,70 @@ const taskSchema = new mongoose.Schema(
         fileUrl: String,
         uploadedByUserId: String,
         uploadedAt: { type: Date, default: Date.now },
+        photoType: { type: String, default: 'TASK_PROOF' },
+      },
+    ],
+
+    templateId: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: null,
+      index: true,
+    },
+
+    dependencyTaskIds: [
+      {
+        type: String,
+        trim: true,
+        uppercase: true,
+      },
+    ],
+
+    locationRequirement: {
+      requiresLocation: { type: Boolean, default: false },
+      targetLatitude: { type: Number, default: null },
+      targetLongitude: { type: Number, default: null },
+      allowedRadiusMeters: { type: Number, default: 200 },
+    },
+
+    submittedLocation: {
+      latitude: { type: Number, default: null },
+      longitude: { type: Number, default: null },
+      accuracyMeters: { type: Number, default: null },
+      distanceMeters: { type: Number, default: null },
+      isVerified: { type: Boolean, default: null },
+      submittedAt: { type: Date, default: null },
+    },
+
+    aiReview: {
+      reviewedAt: { type: Date, default: null },
+      isApproved: { type: Boolean, default: null },
+      confidenceScore: { type: Number, default: null },
+      providerStatus: {
+        type: String,
+        enum: ['VERIFIED', 'PENDING_HUMAN_REVIEW', 'BLOCKED_EXTERNAL_DEPENDENCY', 'NONE'],
+        default: 'NONE',
+      },
+      evaluationNotes: { type: String, default: '' },
+      flaggedIssues: [{ type: String }],
+    },
+
+    history: [
+      {
+        action: { type: String, required: true },
+        actorId: { type: String, required: true },
+        actorRole: { type: String, default: '' },
+        timestamp: { type: Date, default: Date.now },
+        reason: { type: String, default: '' },
+        details: { type: mongoose.Schema.Types.Mixed, default: {} },
       },
     ],
 
     sopReference: {
+      sopId: { type: String, default: null },
       title: { type: String, default: '' },
-      version: { type: String, default: '' },
+      version: { type: Number, default: 1 },
       docUrl: { type: String, default: '' },
     },
 
