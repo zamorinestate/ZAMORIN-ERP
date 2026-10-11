@@ -47,6 +47,7 @@ const RELEASE_SUITE = [
   'p18_governancePortfolioFollowThrough.test.js',
   'p19_onboardingTemplatesMigration.test.js',
   'p20_updatesServerReadinessBackupHardware.test.js',
+  'p21_externalServicesBenchmarkScope.test.js',
 ];
 
 function parseArgs(argv) {

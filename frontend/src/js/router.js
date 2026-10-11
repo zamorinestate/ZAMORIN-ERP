@@ -337,6 +337,7 @@ async function renderPage() {
 
     case "system-health":
     case "ops":
+    case "integration-scope":
       content.innerHTML = renderSystemHealthPage();
       initSystemHealthPage();
       break;

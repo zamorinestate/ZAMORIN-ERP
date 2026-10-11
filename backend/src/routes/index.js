@@ -623,6 +623,14 @@ router.use(
   dailyCloseRoutes
 );
 
+const benchmarkScopeRoutes =
+  require('./benchmarkScopeRoutes');
+
+router.use(
+  '/integration-scope',
+  benchmarkScopeRoutes
+);
+
 router.use(
   '/',
   expansionModulesRoutes

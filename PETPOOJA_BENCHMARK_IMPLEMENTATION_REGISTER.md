@@ -1,9 +1,9 @@
 # ZAMORIN CAFÉ ERP — PETPOOJA BENCHMARK IMPLEMENTATION REGISTER
 
-**Document ID**: `REG-PETPOOJA-485-P19-VERIFIED`  
+**Document ID**: `REG-PETPOOJA-485-P21-VERIFIED`  
 **Execution Scope**: `D:\Zamorin Cafe ERP\A Main Workspace`  
 **Canonical Branch**: `feature/foundation-five-windows`  
-**Verified Starting Closeout Commit**: `ffda4a10454b21ccfdfb4c6d4119de95c948e46a` (P18 Closeout)  
+**Verified Starting Closeout Commit**: `356a8af0aa03dd8ffbc2780b18875b6baa40692a` (P20 Closeout)  
 **Audit Date**: 11 October 2026 | **Status**: ACTIVE TRACEABLE GOVERNANCE  
 
 ---
@@ -264,6 +264,52 @@ Total benchmark records evaluated: **485** (351 Core entries `F001`–`F351` + 1
     - Café Operations: Scoped strictly to assigned café (cross-café device management rejected with 403 `CAFE_ACCESS_DENIED`).
     - Retired Normal Master: Permanently fails closed with 403 `INSUFFICIENT_PERMISSIONS` or `ROLE_RETIRED`.
     - Test Evidence: `test/p20_updatesServerReadinessBackupHardware.test.js` Test 11.
+ 
+### 3.5 Package P21 — External Services, Integration Dependencies and Benchmark Scope Decisions Deep Dive
+
+1. **Authoritative 485 Benchmark Scope Decisions Register (`benchmarkScopeDecisionService.js`, `BenchmarkScopeDecision.js`)**:
+   - Reconciles all 485 Petpooja benchmark records (351 main report items `F001`–`F351` + 134 omissions supplement items `A001`–`A134`) without loss, renumbering, or artificial delivery inflation.
+   - Breakdown: **447 Implemented and Verified** (92.2%), **18 Architecturally Excluded** (3.7%), **13 Conditional Integrations** (2.7%), and **7 Benchmark Reference Context** (1.4%).
+   - Strict compound unique indexing: `{ organisationId, cafeId, benchmarkId }`.
+   - Test Evidence: `test/p21_externalServicesBenchmarkScope.test.js` Test 1.
+
+2. **Mandatory Documentation Invariant on Conditional & Excluded Items (`BenchmarkScopeDecision.js`)**:
+   - Every conditional (13) and excluded (18) entry must have a non-trivial, meaningful documented reason (minimum 10 characters) and a concrete next decision / review prerequisite (minimum 5 characters).
+   - Vague placeholders ("later", "pending", "not supported") are strictly blocked by model pre-save validation hooks.
+   - Test Evidence: `test/p21_externalServicesBenchmarkScope.test.js` Test 2.
+
+3. **Primary Master Decision Updates & Immutable Decision History (`benchmarkScopeDecisionService.js`)**:
+   - Primary Master possesses exclusive enterprise authority to amend benchmark dispositions and evidence references.
+   - Every mutation is immutably recorded in `decisionHistory` preserving timestamp, actor user ID, persona, previous disposition, new disposition, and structured audit reference (`AUD-DECISION-xxxx`).
+   - Test Evidence: `test/p21_externalServicesBenchmarkScope.test.js` Test 3.
+
+4. **Four-Persona Governance & Security Matrix Enforcement (`benchmarkScopeController.js`, `benchmarkScopeRoutes.js`)**:
+   - **Primary Master**: Full universal governance and scope decision update authority.
+   - **Owner**: Strictly read-only strategic digest. Mutation attempts are rejected with `403 OWNER_READ_ONLY`.
+   - **Café Operations**: Scoped strictly to assigned café. Cross-café requests are rejected with `403 CAFE_ACCESS_DENIED`.
+   - **Staff & Vendor**: Forbidden from accessing enterprise scope records, rejected with `403 INSUFFICIENT_PERMISSIONS`.
+   - **Retired Normal Master**: Permanently decommissioned, failing closed with `403 ROLE_RETIRED`.
+   - Test Evidence: `test/p21_externalServicesBenchmarkScope.test.js` Test 4.
+
+5. **Truthful Provider Integration Probes & Zero Fabrication (`benchmarkScopeDecisionService.js`)**:
+   - External provider adapters for Pine Labs POS (`PINELABS_TERMINAL`), Razorpay POS (`RAZORPAY_POS`), NIC e-Invoicing (`NIC_E_INVOICE`), Google Business Profile (`GOOGLE_BUSINESS`), WhatsApp/SMS (`WHATSAPP_SMS`), and Gemini AI OCR (`GEMINI_AI_INVOICE`).
+   - Truthful probing: When credentials or physical hardware devices are absent, the service truthfully reports `BLOCKED_UNCONFIGURED` and enumerates missing environment variable names.
+   - Zero fabrication invariant: Never simulates successful payment captures, fake delivery receipts, artificial OCR outputs, or mock hardware connections.
+   - Test Evidence: `test/p21_externalServicesBenchmarkScope.test.js` Test 5.
+
+6. **Strict Zero-Secret Retention & Redaction Guarantee (`BenchmarkScopeDecision.js`)**:
+   - Zero-secret guarantee: Passwords, private API keys, payment tokens, and database connection strings are never stored in the benchmark scope registry.
+   - Model `toPublicJSON()` method scrubs any private keys before transmission to the frontend.
+   - Test Evidence: `test/p21_externalServicesBenchmarkScope.test.js` Test 6.
+
+7. **Financial, Billing & Inventory Non-Mutation Invariant (`benchmarkScopeDecisionService.js`)**:
+   - Benchmark scope governance modifications strictly create 0 bills, 0 purchase orders, 0 stock movements, and 0 ledger transactions.
+   - Test Evidence: `test/p21_externalServicesBenchmarkScope.test.js` Test 7.
+
+8. **KDS Architectural Exclusion & Freeze Enforcement Invariant (`BenchmarkScopeDecision.js`)**:
+   - All 18 KDS items (`F275`–`F292`) remain permanently excluded under the Four-Persona architectural freeze.
+   - Any attempt to activate KDS via API or service call is strictly rejected with `403 KDS_ACTIVATION_EXCLUDED_BY_FREEZE`.
+   - Test Evidence: `test/p21_externalServicesBenchmarkScope.test.js` Test 8.
 
 ---
 
