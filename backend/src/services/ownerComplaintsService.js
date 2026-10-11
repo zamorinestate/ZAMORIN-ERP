@@ -55,13 +55,20 @@ class OwnerComplaintsService {
       throw new Error('CAFE_ID_AND_DESCRIPTION_REQUIRED');
     }
 
+    if (user && (user.role === 'CAFE_ADMIN' || user.role === 'STORE_MANAGER')) {
+      const assigned = user.assignedCafeIds || [user.cafeId || user.primaryCafeId].filter(Boolean);
+      if (assigned.length > 0 && !assigned.includes(cafeId)) {
+        throw new Error('CROSS_CAFE_ACCESS_DENIED: Cannot create complaint for another café.');
+      }
+    }
+
     // Bill linkage verification: verify real bill exists if provided
     let linkedBill = null;
     if (billId) {
       linkedBill = await Bill.findOne({
-        _id: billId,
-        $or: [{ organisationId }, { organisationId: organisationId.toString() }],
-        $or: [{ cafeId }, { cafeId: cafeId.toString() }]
+        $or: [{ _id: billId }, { billId: billId }],
+        organisationId: { $in: [organisationId, organisationId.toString()] },
+        cafeId: { $in: [cafeId, cafeId.toString()] }
       }).lean();
       if (!linkedBill) {
         throw new Error('BILL_NOT_FOUND_IN_SPECIFIED_CAFE');
@@ -153,6 +160,13 @@ class OwnerComplaintsService {
     });
     if (!complaint) throw new Error('COMPLAINT_NOT_FOUND');
 
+    if (user && (user.role === 'CAFE_ADMIN' || user.role === 'STORE_MANAGER')) {
+      const assigned = user.assignedCafeIds || [user.cafeId || user.primaryCafeId].filter(Boolean);
+      if (assigned.length > 0 && !assigned.includes(complaint.cafeId)) {
+        throw new Error('CROSS_CAFE_ACCESS_DENIED: Cannot mutate complaint from another café.');
+      }
+    }
+
     const allowedNext = VALID_TRANSITIONS[complaint.status] || [];
     if (!allowedNext.includes(newStatus)) {
       throw new Error(`ILLEGAL_LIFECYCLE_TRANSITION: Cannot transition from ${complaint.status} to ${newStatus}`);
@@ -187,6 +201,13 @@ class OwnerComplaintsService {
       complaintId
     });
     if (!complaint) throw new Error('COMPLAINT_NOT_FOUND');
+
+    if (user && (user.role === 'CAFE_ADMIN' || user.role === 'STORE_MANAGER')) {
+      const assigned = user.assignedCafeIds || [user.cafeId || user.primaryCafeId].filter(Boolean);
+      if (assigned.length > 0 && !assigned.includes(complaint.cafeId)) {
+        throw new Error('CROSS_CAFE_COMPENSATION_DENIED: Cannot issue compensation or refund for another café.');
+      }
+    }
 
     if (!complaint.billId) {
       throw new Error('CANNOT_REFUND_WITHOUT_CANONICAL_BILL_LINKAGE');
@@ -287,6 +308,16 @@ class OwnerComplaintsService {
     if (filters.status) query.status = filters.status;
     if (filters.severity) query.severity = filters.severity;
 
+    if (user && (user.role === 'CAFE_ADMIN' || user.role === 'STORE_MANAGER')) {
+      const assigned = user.assignedCafeIds || [user.cafeId || user.primaryCafeId].filter(Boolean);
+      if (assigned.length > 0) {
+        if (filters.cafeId && !assigned.includes(filters.cafeId)) {
+          throw new Error('CROSS_CAFE_ACCESS_DENIED: Cannot access complaints for another café.');
+        }
+        query.cafeId = { $in: assigned };
+      }
+    }
+
     const complaints = await CustomerComplaint.find(query).sort({ complaintDate: -1 }).lean();
     return complaints.map(c => this._formatComplaint(c, user));
   }
@@ -300,6 +331,13 @@ class OwnerComplaintsService {
       complaintId
     }).lean();
     if (!complaint) throw new Error('COMPLAINT_NOT_FOUND');
+
+    if (user && (user.role === 'CAFE_ADMIN' || user.role === 'STORE_MANAGER')) {
+      const assigned = user.assignedCafeIds || [user.cafeId || user.primaryCafeId].filter(Boolean);
+      if (assigned.length > 0 && !assigned.includes(complaint.cafeId)) {
+        throw new Error('CROSS_CAFE_ACCESS_DENIED: Cannot access complaint from another café.');
+      }
+    }
     return this._formatComplaint(complaint, user);
   }
 

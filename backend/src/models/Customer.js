@@ -207,6 +207,31 @@ const customerSchema = new mongoose.Schema(
       default: 'ACTIVE',
     },
 
+    walletBalancePaise: {
+      type: Number,
+      min: 0,
+      default: 0,
+      validate: {
+        validator: (v) => Number.isInteger(v) && v >= 0,
+        message: 'walletBalancePaise must be a non-negative integer in paise.',
+      },
+    },
+
+    groups: {
+      type: [String],
+      default: [],
+    },
+
+    dateOfBirth: {
+      type: Date,
+      default: null,
+    },
+
+    anniversary: {
+      type: Date,
+      default: null,
+    },
+
     tags: {
       type: [String],
       default: [],
@@ -217,9 +242,23 @@ const customerSchema = new mongoose.Schema(
       loyaltyCommunications: { type: Boolean, default: true },
       marketingEmail: { type: Boolean, default: false },
       marketingSms: { type: Boolean, default: false },
+      marketingWhatsApp: { type: Boolean, default: false },
       updatedAt: { type: Date, default: Date.now },
       source: { type: String, default: 'PORTAL_ENROLMENT' },
     },
+
+    consentHistory: [
+      {
+        purpose: { type: String, required: true },
+        channel: { type: String, required: true },
+        status: { type: String, required: true },
+        source: { type: String, default: 'DIRECT_REQUEST' },
+        timestamp: { type: Date, default: Date.now },
+        noticeVersion: { type: String, default: 'V1.0' },
+        actorUserId: { type: String, default: 'CUSTOMER' },
+        evidenceRef: { type: String, default: null },
+      },
+    ],
 
     notes: {
       type: [customerNoteSchema],

@@ -16,7 +16,10 @@ class OwnerComplaintsController {
       user: {
         userId: auth.userId || auth.id || auth.email || 'USER',
         email: auth.email || 'user@zamorincafe.com',
-        role: auth.role || auth.userType || 'OWNER'
+        role: auth.role || auth.userType || 'OWNER',
+        assignedCafeIds: auth.assignedCafeIds || [],
+        primaryCafeId: auth.primaryCafeId,
+        cafeId: auth.cafeId,
       }
     };
   }

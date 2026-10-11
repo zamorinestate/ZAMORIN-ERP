@@ -36,35 +36,35 @@ router.get(
 // Create Complaint (Intake)
 router.post(
   '/',
-  authorize('ADMIN_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STORE_MANAGER'] }),
+  authorize('ADMIN_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN', 'STORE_MANAGER'] }),
   (req, res) => controller.createComplaint(req, res)
 );
 
 // Transition Lifecycle Status
 router.patch(
   '/:complaintId/status',
-  authorize('ADMIN_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STORE_MANAGER'] }),
+  authorize('ADMIN_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN', 'STORE_MANAGER'] }),
   (req, res) => controller.updateComplaintStatus(req, res)
 );
 
 // Service Recovery Refund
 router.post(
   '/:complaintId/refund',
-  authorize('ADMIN_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'STORE_MANAGER'] }),
+  authorize('ADMIN_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN', 'STORE_MANAGER'] }),
   (req, res) => controller.issueServiceRecoveryRefund(req, res)
 );
 
 // Communication Log
 router.post(
   '/:complaintId/communications',
-  authorize('ADMIN_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STORE_MANAGER'] }),
+  authorize('ADMIN_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN', 'STORE_MANAGER'] }),
   (req, res) => controller.addCommunication(req, res)
 );
 
 // Evidence Attachments
 router.post(
   '/:complaintId/evidence',
-  authorize('ADMIN_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STORE_MANAGER'] }),
+  authorize('ADMIN_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN', 'STORE_MANAGER'] }),
   (req, res) => controller.attachEvidence(req, res)
 );
 

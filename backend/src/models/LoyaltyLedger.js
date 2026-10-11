@@ -16,6 +16,7 @@ const LOYALTY_TX_TYPES = [
   'REWARD_RELEASED',
   'REWARD_REDEEMED',
   'REFUND_REVERSAL',
+  'VOID_REVERSAL',
   'POINTS_EXPIRED',
   'TIER_CHANGED',
   'PROMOTION_BONUS',
@@ -32,7 +33,7 @@ const loyaltyLedgerSchema = new mongoose.Schema(
       immutable: true,
       trim: true,
       uppercase: true,
-      match: /^LOY-\d{8}-\d{4,}$/,
+      match: /^LOY(-\d{8})?-\d{4,}$/,
       index: true,
     },
 

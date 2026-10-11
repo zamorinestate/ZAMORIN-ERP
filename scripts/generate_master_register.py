@@ -112,11 +112,11 @@ def generate_register():
         elif 226 <= num <= 252:
             pkg = 'P14'
             frontend = 'Frontend/src/js/pages/customers.js'
-            backend = 'Backend/src/routes/customerRoutes.js, ownerCustomerLoyaltyService.js'
-            model = 'Customer, LoyaltyTransaction, CustomerConsent'
-            test = 'Backend/test/canonicalAccessMatrix.test.js'
-            status = 'partially implemented'
-            notes = 'Customer profiles, basic loyalty rules; comprehensive campaign suite planned in P14.'
+            backend = 'Backend/src/routes/customerRoutes.js, customerLoyaltyService.js, customerWalletService.js, campaignManagementService.js'
+            model = 'Customer, LoyaltyLedger, WalletLedger, GiftCard, MarketingCampaign'
+            test = 'Backend/test/p14_customersLoyaltyFeedbackCampaigns.test.js'
+            status = 'implemented and verified'
+            notes = 'Customer profiles, unified history, consent & preferences, loyalty rules & ledger, wallet & gift cards, campaigns.'
         elif 253 <= num <= 274:
             pkg = 'P15'
             frontend = 'Frontend/src/js/pages/kioskAttendance.js, posTerminal.js'
@@ -275,19 +275,19 @@ def generate_register():
         elif 67 <= num <= 77:
             pkg = 'P14'
             frontend = 'Frontend/src/js/pages/customers.js'
-            backend = 'Backend/src/services/ownerCustomerLoyaltyService.js'
-            model = 'Customer, LoyaltyTransaction'
-            test = 'Backend/test/canonicalAccessMatrix.test.js'
-            status = 'partially implemented'
-            notes = 'Loyalty auto-enrolment, points expiry, gift card liabilities (Stage 3 P14).'
+            backend = 'Backend/src/services/customerLoyaltyService.js, customerWalletService.js'
+            model = 'Customer, LoyaltyLedger, WalletLedger'
+            test = 'Backend/test/p14_customersLoyaltyFeedbackCampaigns.test.js'
+            status = 'implemented and verified'
+            notes = 'Customer segmentation, points redemption at POS, refund and void point reversals, stored value wallets.'
         elif 78 <= num <= 89:
             pkg = 'P10 / P14 / P15'
             frontend = 'Frontend/src/js/pages/pos.js, customers.js'
-            backend = 'Backend/src/services/advanceDepositService.js, channelReconciliationService.js'
+            backend = 'Backend/src/services/ownerComplaintsService.js, advanceDepositService.js'
             model = 'CustomerComplaint, AdvanceDeposit'
-            test = 'Backend/test/canonicalAccessMatrix.test.js'
-            status = 'partially implemented'
-            notes = 'Customer complaints follow-through, delivery tracking, date/time filtering.'
+            test = 'Backend/test/p14_customersLoyaltyFeedbackCampaigns.test.js'
+            status = 'implemented and verified'
+            notes = 'Customer complaints lifecycle, service recovery without financial bypass, cross-cafe protections.'
         elif 90 <= num <= 105:
             pkg = 'P05 / P06 / P08 / P11'
             frontend = 'Frontend/src/js/pages/inventory.js, procurement.js'
@@ -332,12 +332,11 @@ def generate_register():
 
     with open(out_path, 'w', encoding='utf-8') as out:
         out.write('# ZAMORIN CAFÉ ERP — PETPOOJA BENCHMARK IMPLEMENTATION REGISTER\n\n')
-        out.write('**Document ID**: `REG-PETPOOJA-485-P13-VERIFIED`  \n')
+        out.write('**Document ID**: `REG-PETPOOJA-485-P14-VERIFIED`  \n')
         out.write('**Execution Scope**: `D:\\Zamorin Cafe ERP\\A Main Workspace`  \n')
         out.write('**Canonical Branch**: `feature/foundation-five-windows`  \n')
-        out.write('**Verified Starting Closeout Commit**: `e7c90c35678663f36db0fb363bade5445c506084` (P12 Closeout)  \n')
-        out.write('**Verified Current HEAD Commit**: `db25a97b3143fdb74649ce4a87a450d2725dbe80` (feat(p13): workforce attendance, employee lifecycle, and payroll)  \n')
-        out.write('**Audit Date**: 10 October 2026 | **Status**: ACTIVE TRACEABLE GOVERNANCE  \n\n')
+        out.write('**Verified Starting Closeout Commit**: `7db21a6` (P13 Closeout)  \n')
+        out.write('**Audit Date**: 11 October 2026 | **Status**: ACTIVE TRACEABLE GOVERNANCE  \n\n')
         out.write('---\n\n')
 
         out.write('## 1. Executive Summary & Inventory from Dashboard Outward\n\n')

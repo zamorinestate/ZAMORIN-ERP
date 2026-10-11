@@ -46,6 +46,35 @@ const {
 } = require('../models/SequenceCounter');
 
 const {
+  WalletLedger,
+} = require('../models/WalletLedger');
+
+const {
+  GiftCard,
+} = require('../models/GiftCard');
+
+const {
+  MarketingCampaign,
+} = require('../models/MarketingCampaign');
+
+const {
+  redeemPointsAtomic,
+} = require('../services/customerLoyaltyService');
+
+const {
+  topUpWallet,
+  redeemWallet,
+  issueGiftCard,
+  redeemGiftCard,
+} = require('../services/customerWalletService');
+
+const {
+  previewCampaign,
+  dispatchCampaign,
+  updateCustomerConsent,
+} = require('../services/campaignManagementService');
+
+const {
   asyncHandler,
 } = require('../utils/asyncHandler');
 
@@ -189,7 +218,13 @@ const listCustomers = asyncHandler(async (request, response) => {
     filter.customerType = customerType.toUpperCase();
   }
 
-  if (cafeId) {
+  const effectiveCafe = resolveEffectiveCafeScope(request);
+  if (effectiveCafe) {
+    if (cafeId && normalizeId(cafeId) !== effectiveCafe) {
+      throw new ApiError(403, 'FORBIDDEN_CAFE_SCOPE', 'Cannot query customer list for another café.');
+    }
+    filter.preferredCafeId = effectiveCafe;
+  } else if (cafeId) {
     filter.preferredCafeId = normalizeId(cafeId);
   }
 
@@ -254,6 +289,11 @@ const getCustomer = asyncHandler(async (request, response) => {
     throw new ApiError(404, 'NOT_FOUND', 'Customer profile not found.');
   }
 
+  const effectiveCafe = resolveEffectiveCafeScope(request);
+  if (effectiveCafe && customer.preferredCafeId && customer.preferredCafeId !== effectiveCafe) {
+    throw new ApiError(403, 'FORBIDDEN_CAFE_SCOPE', 'Cannot access customer profile from another café.');
+  }
+
   // Tier progress calculation
   const nextTierMap = {
     BRONZE: { next: 'SILVER', targetSpendPaisa: 500000 },
@@ -308,6 +348,11 @@ const createCustomer = asyncHandler(async (request, response) => {
   }
   if (!phone || typeof phone !== 'string' || !phone.trim()) {
     throw new ApiError(400, 'PHONE_REQUIRED', 'Customer phone number is required.');
+  }
+
+  const effectiveCafe = resolveEffectiveCafeScope(request);
+  if (effectiveCafe && normalizeId(preferredCafeId) !== effectiveCafe) {
+    throw new ApiError(403, 'FORBIDDEN_CAFE_SCOPE', 'Cannot create customer for an unassigned café.');
   }
 
   const normPhone = phone.trim();
@@ -442,6 +487,11 @@ const adjustCustomerPoints = asyncHandler(async (request, response) => {
     throw new ApiError(404, 'NOT_FOUND', 'Customer not found.');
   }
 
+  const effectiveCafe = resolveEffectiveCafeScope(request);
+  if (effectiveCafe && customer.preferredCafeId && customer.preferredCafeId !== effectiveCafe) {
+    throw new ApiError(403, 'FORBIDDEN_CAFE_SCOPE', 'Cannot adjust points for a customer associated with another café.');
+  }
+
   const prevBalance = customer.pointsBalance || 0;
   const effectiveDelta = action.toUpperCase() === 'SUBTRACT' ? -pointsDelta : pointsDelta;
   const newBalance = Math.max(0, prevBalance + effectiveDelta);
@@ -464,7 +514,7 @@ const adjustCustomerPoints = asyncHandler(async (request, response) => {
     pointsDelta: effectiveDelta,
     balanceBefore: prevBalance,
     balanceAfter: newBalance,
-    reasonCode: reasonCode.trim(),
+    reasonCode: effectiveReason,
     description: typeof note === 'string' ? note.trim() : `Manual Adjustment (${action.toUpperCase()})`,
     referenceBillId: referenceBillId ? normalizeId(referenceBillId) : null,
     performedByUserId: request.auth.userId,
@@ -480,7 +530,7 @@ const adjustCustomerPoints = asyncHandler(async (request, response) => {
     entityType: 'LOYALTY_ACCOUNT',
     entityId: customerId,
     before: { balance: prevBalance },
-    after: { balance: newBalance, delta: effectiveDelta, reason: reasonCode },
+    after: { balance: newBalance, delta: effectiveDelta, reason: effectiveReason },
     result: 'SUCCESS',
     riskClassification: 'MEDIUM',
   });
@@ -746,6 +796,585 @@ const createReward = asyncHandler(async (request, response) => {
   });
 });
 
+/**
+ * POST /api/v1/customers/:customerId/consent
+ */
+const updateCustomerConsentHandler = asyncHandler(async (request, response) => {
+  const customerId = normalizeId(request.params.customerId);
+  const { consent, source = 'PORTAL_UPDATE', evidenceRef = null, noticeVersion = 'V1.0' } = request.body || {};
+
+  if (!consent || typeof consent !== 'object') {
+    throw new ApiError(400, 'CONSENT_OBJECT_REQUIRED', 'Consent update payload is required.');
+  }
+
+  const effectiveCafe = resolveEffectiveCafeScope(request);
+  const customer = await Customer.findOne({ customerId, organisationId: request.auth.organisationId });
+  if (!customer) {
+    throw new ApiError(404, 'CUSTOMER_NOT_FOUND', 'Customer not found.');
+  }
+  if (effectiveCafe && customer.preferredCafeId && customer.preferredCafeId !== effectiveCafe) {
+    throw new ApiError(403, 'FORBIDDEN_CAFE_SCOPE', 'Cannot update consent for a customer outside assigned café.');
+  }
+
+  const result = await updateCustomerConsent({
+    organisationId: request.auth.organisationId,
+    customerId,
+    consentUpdates: consent,
+    source,
+    actorUserId: request.auth.userId,
+    evidenceRef,
+    noticeVersion,
+  });
+
+  await recordRequestAudit({
+    request,
+    module: 'CUSTOMERS_LOYALTY',
+    action: 'UPDATE_CUSTOMER_CONSENT',
+    entityType: 'CUSTOMER',
+    entityId: customerId,
+    after: { consent: result.consent },
+    result: 'SUCCESS',
+    riskClassification: 'LOW',
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: result,
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * POST /api/v1/customers/:customerId/points/redeem
+ */
+const redeemPointsHandler = asyncHandler(async (request, response) => {
+  const customerId = normalizeId(request.params.customerId);
+  const { points, pointsToRedeem: rawPoints, billId, rewardId, idempotencyKey } = request.body || {};
+
+  const pointsCount = Math.round(Number(points !== undefined ? points : rawPoints));
+  if (!pointsCount || pointsCount <= 0) {
+    throw new ApiError(400, 'INVALID_POINTS', 'Points to redeem must be a positive integer.');
+  }
+
+  const effectiveCafe = resolveEffectiveCafeScope(request);
+  const customer = await Customer.findOne({ customerId, organisationId: request.auth.organisationId }).lean();
+  if (!customer) {
+    throw new ApiError(404, 'CUSTOMER_NOT_FOUND', 'Customer not found.');
+  }
+  if (effectiveCafe && customer.preferredCafeId && customer.preferredCafeId !== effectiveCafe) {
+    throw new ApiError(403, 'FORBIDDEN_CAFE_SCOPE', 'Cannot redeem points for a customer outside assigned café.');
+  }
+
+  const result = await redeemPointsAtomic({
+    organisationId: request.auth.organisationId,
+    customerId,
+    pointsToRedeem: pointsCount,
+    billId: billId ? normalizeId(billId) : null,
+    rewardId: rewardId ? normalizeId(rewardId) : null,
+    performedByUserId: request.auth.userId,
+    idempotencyKey,
+  });
+
+  await recordRequestAudit({
+    request,
+    module: 'CUSTOMERS_LOYALTY',
+    action: 'REDEEM_POINTS',
+    entityType: 'CUSTOMER',
+    entityId: customerId,
+    after: { pointsRedeemed: pointsCount, newBalance: result.newBalance },
+    result: 'SUCCESS',
+    riskClassification: 'MEDIUM',
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: result,
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * POST /api/v1/customers/:customerId/wallet/topup
+ */
+const topUpCustomerWalletHandler = asyncHandler(async (request, response) => {
+  const customerId = normalizeId(request.params.customerId);
+  const { amountPaise, amountRupees, sourcePaymentId, sourcePaymentMethod = 'CASH', paymentStatus = 'CONFIRMED', idempotencyKey, note } = request.body || {};
+
+  const effectiveAmountPaise = Math.round(Number(amountPaise !== undefined ? amountPaise : (Number(amountRupees) * 100)));
+  if (!effectiveAmountPaise || effectiveAmountPaise <= 0) {
+    throw new ApiError(400, 'INVALID_AMOUNT', 'Top-up amount must be a positive integer in paise.');
+  }
+
+  const effectiveCafe = resolveEffectiveCafeScope(request) || 'ZC-0001';
+
+  const result = await topUpWallet({
+    organisationId: request.auth.organisationId,
+    cafeId: effectiveCafe,
+    customerId,
+    amountPaise: effectiveAmountPaise,
+    sourcePaymentId,
+    sourcePaymentMethod,
+    paymentStatus,
+    performedByUserId: request.auth.userId,
+    idempotencyKey,
+    note,
+  });
+
+  await recordRequestAudit({
+    request,
+    module: 'CUSTOMERS_LOYALTY',
+    action: 'TOPUP_WALLET',
+    entityType: 'CUSTOMER_WALLET',
+    entityId: customerId,
+    after: { amountCreditedPaise: effectiveAmountPaise, newBalancePaise: result.newBalancePaise },
+    result: 'SUCCESS',
+    riskClassification: 'MEDIUM',
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: result,
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * POST /api/v1/customers/:customerId/wallet/redeem
+ */
+const redeemCustomerWalletHandler = asyncHandler(async (request, response) => {
+  const customerId = normalizeId(request.params.customerId);
+  const { amountPaise, amountRupees, referenceBillId, idempotencyKey, note } = request.body || {};
+
+  const effectiveAmountPaise = Math.round(Number(amountPaise !== undefined ? amountPaise : (Number(amountRupees) * 100)));
+  if (!effectiveAmountPaise || effectiveAmountPaise <= 0) {
+    throw new ApiError(400, 'INVALID_AMOUNT', 'Redemption amount must be a positive integer in paise.');
+  }
+
+  const effectiveCafe = resolveEffectiveCafeScope(request) || 'ZC-0001';
+
+  const result = await redeemWallet({
+    organisationId: request.auth.organisationId,
+    cafeId: effectiveCafe,
+    customerId,
+    amountPaise: effectiveAmountPaise,
+    referenceBillId: referenceBillId ? normalizeId(referenceBillId) : null,
+    performedByUserId: request.auth.userId,
+    idempotencyKey,
+    note,
+  });
+
+  await recordRequestAudit({
+    request,
+    module: 'CUSTOMERS_LOYALTY',
+    action: 'REDEEM_WALLET',
+    entityType: 'CUSTOMER_WALLET',
+    entityId: customerId,
+    after: { amountRedeemedPaise: effectiveAmountPaise, newBalancePaise: result.newBalancePaise },
+    result: 'SUCCESS',
+    riskClassification: 'MEDIUM',
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: result,
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * GET /api/v1/customers/:customerId/wallet
+ */
+const getCustomerWalletHandler = asyncHandler(async (request, response) => {
+  const customerId = normalizeId(request.params.customerId);
+  const customer = await Customer.findOne({
+    customerId,
+    organisationId: request.auth.organisationId,
+  }).lean();
+
+  if (!customer) {
+    throw new ApiError(404, 'CUSTOMER_NOT_FOUND', 'Customer not found.');
+  }
+
+  const effectiveCafe = resolveEffectiveCafeScope(request);
+  if (effectiveCafe && customer.preferredCafeId && customer.preferredCafeId !== effectiveCafe) {
+    throw new ApiError(403, 'FORBIDDEN_CAFE_SCOPE', 'Cannot access wallet for a customer outside assigned café.');
+  }
+
+  const ledger = await WalletLedger.find({
+    customerId,
+    organisationId: request.auth.organisationId,
+  }).sort({ createdAt: -1 }).limit(20).lean();
+
+  return response.status(200).json({
+    success: true,
+    data: {
+      customerId,
+      walletBalancePaise: customer.walletBalancePaise || 0,
+      walletBalanceRupees: Number(((customer.walletBalancePaise || 0) / 100).toFixed(2)),
+      ledger,
+    },
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * POST /api/v1/customers/gift-cards/issue
+ */
+const issueGiftCardHandler = asyncHandler(async (request, response) => {
+  const { amountPaise, amountRupees, purchasedByCustomerId, validityDays = 365 } = request.body || {};
+  const effectiveAmountPaise = Math.round(Number(amountPaise !== undefined ? amountPaise : (Number(amountRupees) * 100)));
+  if (!effectiveAmountPaise || effectiveAmountPaise <= 0) {
+    throw new ApiError(400, 'INVALID_AMOUNT', 'Gift card initial balance must be a positive integer in paise.');
+  }
+
+  const effectiveCafe = resolveEffectiveCafeScope(request) || 'ZC-0001';
+
+  const result = await issueGiftCard({
+    organisationId: request.auth.organisationId,
+    cafeId: effectiveCafe,
+    amountPaise: effectiveAmountPaise,
+    purchasedByCustomerId: purchasedByCustomerId ? normalizeId(purchasedByCustomerId) : null,
+    validityDays,
+    performedByUserId: request.auth.userId,
+  });
+
+  await recordRequestAudit({
+    request,
+    module: 'CUSTOMERS_LOYALTY',
+    action: 'ISSUE_GIFT_CARD',
+    entityType: 'GIFT_CARD',
+    entityId: result.giftCardId,
+    after: { cardNumber: result.cardNumber, balancePaise: result.balancePaise },
+    result: 'SUCCESS',
+    riskClassification: 'HIGH',
+  });
+
+  return response.status(201).json({
+    success: true,
+    data: result,
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * POST /api/v1/customers/gift-cards/redeem
+ */
+const redeemGiftCardHandler = asyncHandler(async (request, response) => {
+  const { giftCardId, secretCode, amountPaise, amountRupees, billId } = request.body || {};
+  if (!giftCardId || !secretCode) {
+    throw new ApiError(400, 'GIFT_CARD_AND_SECRET_REQUIRED', 'Gift card ID and secret code are required.');
+  }
+
+  const effectiveAmountPaise = Math.round(Number(amountPaise !== undefined ? amountPaise : (Number(amountRupees) * 100)));
+  if (!effectiveAmountPaise || effectiveAmountPaise <= 0) {
+    throw new ApiError(400, 'INVALID_AMOUNT', 'Redemption amount must be a positive integer in paise.');
+  }
+
+  const effectiveCafe = resolveEffectiveCafeScope(request) || 'ZC-0001';
+
+  const result = await redeemGiftCard({
+    organisationId: request.auth.organisationId,
+    cafeId: effectiveCafe,
+    giftCardId: normalizeId(giftCardId),
+    secretCode,
+    amountPaise: effectiveAmountPaise,
+    billId: billId ? normalizeId(billId) : null,
+    performedByUserId: request.auth.userId,
+  });
+
+  await recordRequestAudit({
+    request,
+    module: 'CUSTOMERS_LOYALTY',
+    action: 'REDEEM_GIFT_CARD',
+    entityType: 'GIFT_CARD',
+    entityId: normalizeId(giftCardId),
+    after: { amountRedeemedPaise: effectiveAmountPaise, remainingBalancePaise: result.remainingBalancePaise },
+    result: 'SUCCESS',
+    riskClassification: 'MEDIUM',
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: result,
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * GET /api/v1/customers/gift-cards/:giftCardId
+ */
+const getGiftCardHandler = asyncHandler(async (request, response) => {
+  const giftCardId = normalizeId(request.params.giftCardId);
+  const giftCard = await GiftCard.findOne({
+    giftCardId,
+    organisationId: request.auth.organisationId,
+  }).select('-cardCodeHash -__v').lean();
+
+  if (!giftCard) {
+    throw new ApiError(404, 'GIFT_CARD_NOT_FOUND', 'Gift card not found.');
+  }
+
+  return response.status(200).json({
+    success: true,
+    data: { giftCard },
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * GET /api/v1/customers/campaigns
+ */
+const listCampaigns = asyncHandler(async (request, response) => {
+  const campaigns = await MarketingCampaign.find({
+    organisationId: request.auth.organisationId,
+  }).sort({ createdAt: -1 }).limit(50).lean();
+
+  return response.status(200).json({
+    success: true,
+    data: { campaigns },
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * POST /api/v1/customers/campaigns
+ */
+const createCampaign = asyncHandler(async (request, response) => {
+  const { name, type = 'PROMOTIONAL', channel = 'SMS', targetCriteria, messageTemplate, scheduledAt } = request.body || {};
+  if (!name || !name.trim()) throw new ApiError(400, 'CAMPAIGN_NAME_REQUIRED', 'Campaign name is required.');
+  if (!messageTemplate?.body?.trim()) throw new ApiError(400, 'MESSAGE_BODY_REQUIRED', 'Message body is required.');
+
+  const seqId = await SequenceCounter.generateId({
+    organisationId: request.auth.organisationId,
+    sequenceKey: 'CAMPAIGN_SEQ',
+    prefix: 'CMP',
+    minimumDigits: 4,
+  });
+
+  const effectiveCafe = resolveEffectiveCafeScope(request);
+
+  const campaign = new MarketingCampaign({
+    campaignId: seqId,
+    organisationId: request.auth.organisationId,
+    cafeId: effectiveCafe || null,
+    name: name.trim(),
+    type,
+    channel,
+    status: scheduledAt ? 'SCHEDULED' : 'DRAFT',
+    targetCriteria: targetCriteria || {},
+    messageTemplate: {
+      subject: messageTemplate.subject || '',
+      body: messageTemplate.body.trim(),
+    },
+    scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
+    createdByUserId: request.auth.userId,
+  });
+
+  await campaign.save();
+
+  await recordRequestAudit({
+    request,
+    module: 'CUSTOMERS_LOYALTY',
+    action: 'CREATE_CAMPAIGN',
+    entityType: 'MARKETING_CAMPAIGN',
+    entityId: seqId,
+    after: { name: campaign.name, channel: campaign.channel, status: campaign.status },
+    result: 'SUCCESS',
+    riskClassification: 'LOW',
+  });
+
+  return response.status(201).json({
+    success: true,
+    data: { campaign: campaign.toObject() },
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * POST /api/v1/customers/campaigns/:campaignId/preview
+ */
+const previewCampaignHandler = asyncHandler(async (request, response) => {
+  const campaignId = normalizeId(request.params.campaignId);
+  const result = await previewCampaign({
+    campaignId,
+    organisationId: request.auth.organisationId,
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: result,
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * POST /api/v1/customers/campaigns/:campaignId/dispatch
+ */
+const dispatchCampaignHandler = asyncHandler(async (request, response) => {
+  const campaignId = normalizeId(request.params.campaignId);
+  const { idempotencyKey, providerAdapter } = request.body || {};
+
+  const result = await dispatchCampaign({
+    campaignId,
+    organisationId: request.auth.organisationId,
+    performedByUserId: request.auth.userId,
+    idempotencyKey,
+    providerAdapter,
+  });
+
+  await recordRequestAudit({
+    request,
+    module: 'CUSTOMERS_LOYALTY',
+    action: 'DISPATCH_CAMPAIGN',
+    entityType: 'MARKETING_CAMPAIGN',
+    entityId: campaignId,
+    after: { status: result.campaign?.status, executionResult: result.campaign?.executionResult },
+    result: result.success ? 'SUCCESS' : 'BLOCKED',
+    riskClassification: 'MEDIUM',
+  });
+
+  return response.status(result.success ? 200 : 422).json({
+    ...result,
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * POST /api/v1/customers/campaigns/:campaignId/cancel
+ */
+const cancelCampaignHandler = asyncHandler(async (request, response) => {
+  const campaignId = normalizeId(request.params.campaignId);
+  const { reason = 'User cancelled' } = request.body || {};
+
+  const campaign = await MarketingCampaign.findOne({
+    campaignId,
+    organisationId: request.auth.organisationId,
+  });
+
+  if (!campaign) {
+    throw new ApiError(404, 'CAMPAIGN_NOT_FOUND', 'Campaign not found.');
+  }
+
+  campaign.status = 'CANCELLED';
+  campaign.cancelledByUserId = request.auth.userId;
+  campaign.cancellationReason = reason;
+  await campaign.save();
+
+  await recordRequestAudit({
+    request,
+    module: 'CUSTOMERS_LOYALTY',
+    action: 'CANCEL_CAMPAIGN',
+    entityType: 'MARKETING_CAMPAIGN',
+    entityId: campaignId,
+    after: { status: 'CANCELLED', reason },
+    result: 'SUCCESS',
+    riskClassification: 'LOW',
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: { campaign: campaign.toObject() },
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * GET /api/v1/customers/duplicates/candidates
+ */
+const getDuplicateCandidates = asyncHandler(async (request, response) => {
+  const customers = await Customer.find({
+    organisationId: request.auth.organisationId,
+    status: 'ACTIVE',
+  }).select('customerId name phone email tier pointsBalance preferredCafeId').lean();
+
+  const phoneMap = {};
+  const emailMap = {};
+  const duplicateSets = [];
+
+  for (const c of customers) {
+    if (c.phone) {
+      if (!phoneMap[c.phone]) phoneMap[c.phone] = [];
+      phoneMap[c.phone].push(c);
+    }
+    if (c.email) {
+      if (!emailMap[c.email]) emailMap[c.email] = [];
+      emailMap[c.email].push(c);
+    }
+  }
+
+  const seenIds = new Set();
+  for (const list of Object.values(phoneMap)) {
+    if (list.length > 1) {
+      const ids = list.map((x) => x.customerId).sort().join(':');
+      if (!seenIds.has(ids)) {
+        seenIds.add(ids);
+        duplicateSets.push({ matchType: 'PHONE', records: list });
+      }
+    }
+  }
+  for (const list of Object.values(emailMap)) {
+    if (list.length > 1) {
+      const ids = list.map((x) => x.customerId).sort().join(':');
+      if (!seenIds.has(ids)) {
+        seenIds.add(ids);
+        duplicateSets.push({ matchType: 'EMAIL', records: list });
+      }
+    }
+  }
+
+  return response.status(200).json({
+    success: true,
+    data: { candidates: duplicateSets, count: duplicateSets.length },
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * DELETE /api/v1/customers/:customerId
+ */
+const deleteCustomer = asyncHandler(async (request, response) => {
+  const customerId = normalizeId(request.params.customerId);
+  const customer = await Customer.findOne({
+    customerId,
+    organisationId: request.auth.organisationId,
+  });
+
+  if (!customer) {
+    throw new ApiError(404, 'CUSTOMER_NOT_FOUND', 'Customer not found.');
+  }
+
+  const effectiveCafe = resolveEffectiveCafeScope(request);
+  if (effectiveCafe && customer.preferredCafeId && customer.preferredCafeId !== effectiveCafe) {
+    throw new ApiError(403, 'FORBIDDEN_CAFE_SCOPE', 'Cannot archive customer outside assigned café.');
+  }
+
+  customer.status = 'ARCHIVED';
+  customer.name = `Archived Customer ${customerId}`;
+  customer.phone = `0000000000`;
+  customer.email = `archived-${customerId}@deleted.local`;
+  customer.notes = [];
+  customer.dateOfBirth = null;
+  customer.anniversary = null;
+  await customer.save();
+
+  await recordRequestAudit({
+    request,
+    module: 'CUSTOMERS_LOYALTY',
+    action: 'ARCHIVE_CUSTOMER',
+    entityType: 'CUSTOMER',
+    entityId: customerId,
+    after: { status: 'ARCHIVED' },
+    result: 'SUCCESS',
+    riskClassification: 'HIGH',
+  });
+
+  return response.status(200).json({
+    success: true,
+    message: `Customer ${customerId} archived and personal data masked.`,
+    correlationId: request.correlationId || null,
+  });
+});
+
 module.exports = {
   getCustomersOverview,
   listCustomers,
@@ -760,4 +1389,20 @@ module.exports = {
   getProgrammeStatus,
   publishProgrammeVersion,
   getIntegrityStatus,
+  updateCustomerConsentHandler,
+  redeemPointsHandler,
+  topUpCustomerWalletHandler,
+  redeemCustomerWalletHandler,
+  getCustomerWalletHandler,
+  issueGiftCardHandler,
+  redeemGiftCardHandler,
+  getGiftCardHandler,
+  listCampaigns,
+  createCampaign,
+  previewCampaignHandler,
+  dispatchCampaignHandler,
+  cancelCampaignHandler,
+  getDuplicateCandidates,
+  deleteCustomer,
 };
+
