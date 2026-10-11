@@ -66,6 +66,7 @@ const PRIMARY_MASTER_ITEMS = [
   // ── INSIGHTS ─────────────────────────────────────────────────────────────────
   { id: 'reports',       label: 'Reports & Analytics',    icon: 'reports',      route: 'reports',           group: 'INSIGHTS' },
   { id: 'forecasts-insights', label: 'Forecasts & Insights', icon: 'reports', route: 'forecasts-insights', group: 'INSIGHTS' },
+  { id: 'portfolio-governance', label: 'Portfolio Governance', icon: 'reports', route: 'portfolio-governance', group: 'INSIGHTS' },
 
   // ── ADMINISTRATION ───────────────────────────────────────────────────────────
   { id: 'admin',         label: 'Administration',         icon: 'admin',        route: 'admin',             group: 'ADMINISTRATION' },
@@ -124,6 +125,7 @@ export const NAVIGATION = {
       { id: 'revenue-share',label: 'Revenue Share & Outlets', icon: 'revenueShare', route: 'revenue-share', group: 'COMMERCIAL' },
       { id: 'reports',      label: 'Reports',                 icon: 'reports',      route: 'reports',         group: 'INSIGHTS' },
       { id: 'forecasts-insights', label: 'Forecasts & Insights', icon: 'reports', route: 'forecasts-insights', group: 'INSIGHTS' },
+      { id: 'portfolio-governance', label: 'Portfolio Governance', icon: 'reports', route: 'portfolio-governance', group: 'INSIGHTS' },
       { id: 'system-health',label: 'System Health & Ops',     icon: 'settings',     route: 'system-health',   group: 'SYSTEM' },
       { id: 'settings',     label: 'Settings',                icon: 'settings',     route: 'settings',        group: 'SYSTEM' },
     ],

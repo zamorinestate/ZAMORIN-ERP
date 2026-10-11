@@ -40,6 +40,7 @@ const RELEASE_SUITE = [
   'p15_channelsQrOrderingFrontService.test.js',
   'p16_tasksTrainingSopLifecycle.test.js',
   'p17_forecastsPredictiveInsights.test.js',
+  'p18_governancePortfolioFollowThrough.test.js',
 ];
 
 function parseArgs(argv) {

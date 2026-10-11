@@ -137,6 +137,11 @@ const capexRequestSchema = new mongoose.Schema(
       trim: true,
       default: '',
     },
+    requestedByUserId: {
+      type: String,
+      trim: true,
+      default: null,
+    },
     linkedPurchaseOrderId: {
       type: String,
       trim: true,

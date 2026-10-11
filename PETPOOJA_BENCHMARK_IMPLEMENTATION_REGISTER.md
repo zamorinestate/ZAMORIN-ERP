@@ -1,9 +1,9 @@
 # ZAMORIN CAFÉ ERP — PETPOOJA BENCHMARK IMPLEMENTATION REGISTER
 
-**Document ID**: `REG-PETPOOJA-485-P17-VERIFIED`  
+**Document ID**: `REG-PETPOOJA-485-P18-VERIFIED`  
 **Execution Scope**: `D:\Zamorin Cafe ERP\A Main Workspace`  
 **Canonical Branch**: `feature/foundation-five-windows`  
-**Verified Starting Closeout Commit**: `3ae41c23a3b3e2dbcc933c3f42c3b0f6aadcb9c2` (P16 Closeout)  
+**Verified Starting Closeout Commit**: `9f2b2e18bc4f466c3e5bf9a1846b11980d4c36a5` (P17 Closeout)  
 **Audit Date**: 11 October 2026 | **Status**: ACTIVE TRACEABLE GOVERNANCE  
 
 ---
@@ -26,21 +26,21 @@ A complete forensic inventory of the running Zamorin Café ERP was conducted out
 ### 1.2 Running Application Structure Inventory
 
 - **Frontend Architecture**:
-  - Navigation: Centralized in `Frontend/src/js/navigation.js` and enforced by `Frontend/src/js/router.js` (105 explicit routing cases).
+  - Navigation: Centralized in `Frontend/src/js/navigation.js` and enforced by `Frontend/src/js/router.js` (106 explicit routing cases).
   - State & Caching: In-memory token storage in `apiClient.js` with single-flight deduplication, SWR caching, and automatic mutation cache invalidation.
-  - Predictive Intelligence UI: Interactive workspace in `Frontend/src/js/pages/forecastsInsights.js` wired to live endpoints.
+  - Portfolio Governance UI: Interactive executive workspace in `Frontend/src/js/pages/portfolioGovernance.js` wired to live endpoints.
   - Accessibility & Tokens: Semantic HTML5, CSS design tokens, WCAG 2.2 AA contrast compliance, and full keyboard navigation.
 
 - **Backend Architecture**:
-  - Runtime: Node.js 24 + Express with 73 route files and 78 modular controllers.
-  - Persistence: MongoDB with 242 Mongoose schemas (including `ForecastRun` and `ForecastEvaluation`), compound unique business indexes, and atomic state transitions.
-  - Business Services: 121 domain services covering POS, BOM depletion, FEFO picking, replenishment drafts, statutory payroll, sales demand forecasting, stockout risks, price variance, and assisted analysis.
+  - Runtime: Node.js 24 + Express with 74 route files and 79 modular controllers.
+  - Persistence: MongoDB with 242 Mongoose schemas (including `GovernanceDecision`, `Task`, `BudgetPlan`, `CapexRequest`), compound unique business indexes, and atomic state transitions.
+  - Business Services: 122 domain services covering POS, BOM depletion, FEFO picking, replenishment drafts, statutory payroll, forecasting, portfolio governance, and decision follow-through.
   - Document Storage: Private GridFS & S3 storage adapters (`DocumentStorageProvider.js`) with AES-256-GCM encryption, strict MIME verification, and ClamAV/static malware screening.
 
 - **Verification & Release Pipeline**:
-  - Release Test Runner: `npm run test:release` passing **14/14 suites, 242/242 tests**.
-  - Focused P17 Suite: `node --test test/p17_forecastsPredictiveInsights.test.js` passing **9/9 tests** in 8.4s.
-  - Syntax & Integrity Gate: `npm run check` passing **677/677 JavaScript files** with 0 errors.
+  - Release Test Runner: `npm run test:release` passing **15/15 suites, 252/252 tests**.
+  - Focused P18 Suite: `node --test test/p18_governancePortfolioFollowThrough.test.js` passing **10/10 tests**.
+  - Syntax & Integrity Gate: `npm run check` passing **680/680 JavaScript files** with 0 errors.
 
 ---
 
@@ -95,14 +95,57 @@ Total benchmark records evaluated: **485** (351 Core entries `F001`–`F351` + 1
    - Truthful AI adapter: Reports `UNCONFIGURED` when `AI_EXPLANATION_API_KEY` is absent without breaking deterministic insight.
    - Test Evidence: `test/p17_forecastsPredictiveInsights.test.js` Test 7.
 
-6. **Canonical Persona Security Matrix & Non-Mutation Invariant**:
-   - Primary Master has unrestricted universal analytical oversight.
-   - Café Operations access is scoped strictly to assigned café; cross-café requests fail `403 CAFE_ACCESS_DENIED`.
-   - Owner is read-only; mutation endpoints fail `403 OWNER_READ_ONLY`.
-   - Staff and Vendor roles fail closed with `403`.
-   - Retired Normal Master permanently returns `403 ROLE_RETIRED`.
-   - Operational Invariant: Forecasting operations create 0 bills, 0 purchase orders, and 0 stock movements.
-   - Test Evidence: `test/p17_forecastsPredictiveInsights.test.js` Tests 8, 9.
+### 3.2 Package P18 — Governance, Portfolio & Decision Follow-Through Deep Dive
+
+1. **Reconciled Budget vs Financial Actuals (`portfolioGovernanceFollowThroughService.js`)**:
+   - Authoritative reconciliation: Sales from completed `Bill` records, procurement from approved `APInvoice` records, and CAPEX from capitalized assets.
+   - Precision invariant: All calculations in integer minor units (paise) with exact variance amount and variance %.
+   - Test Evidence: `test/p18_governancePortfolioFollowThrough.test.js` Test 1.
+
+2. **CAPEX Approval Lifecycle & Separation of Duties (`portfolioGovernanceFollowThroughService.js`)**:
+   - Requesters strictly prohibited from approving own CAPEX (403 `SELF_APPROVAL_PROHIBITED`).
+   - Approval automatically spawns traceable procurement follow-through `Task` (`TSK-xxxx`) with verification controls.
+   - Accounting invariant: Capex approval never bypasses standard PO/GRN receiving authority or creates automated unauthorized journal entries.
+   - Test Evidence: `test/p18_governancePortfolioFollowThrough.test.js` Test 2.
+
+3. **Traceable Decision Follow-Through Pipeline (`portfolioGovernanceFollowThroughService.js`)**:
+   - Complete closed-loop workflow: `PROPOSED` -> `SUBMITTED` -> `APPROVED` -> `ACTION_IN_PROGRESS` -> `VERIFIED_COMPLETED`.
+   - Proposer self-approval strictly rejected (403 `SELF_APPROVAL_PROHIBITED`).
+   - Approval atomically delegates an actionable `Task` with assigned owner and due date.
+   - Idempotency invariant: Repeated approval requests return the existing task without duplicate creation.
+   - Test Evidence: `test/p18_governancePortfolioFollowThrough.test.js` Test 3.
+
+4. **Independent Outcome Verification (`portfolioGovernanceFollowThroughService.js`)**:
+   - Task assignee strictly prohibited from verifying their own completed action (403 `SELF_VERIFICATION_PROHIBITED`).
+   - Requires independent governance authority verification, mandatory outcome notes, and supporting evidence.
+   - Test Evidence: `test/p18_governancePortfolioFollowThrough.test.js` Test 4.
+
+5. **Enterprise Risk Register Lifecycle (`portfolioGovernanceFollowThroughService.js`)**:
+   - Mandates substantive mitigation evidence notes before transitioning any risk to `MITIGATED`.
+   - Maintains immutable audit trail of review dates, reviewers, and treatments.
+   - Test Evidence: `test/p18_governancePortfolioFollowThrough.test.js` Test 5.
+
+6. **Multi-Party Revenue Sharing Settlements (`portfolioGovernanceFollowThroughService.js`)**:
+   - Integrates SCR-026 settlement engine with portfolio overview balances and duplicate-posting prevention.
+   - Test Evidence: `test/p18_governancePortfolioFollowThrough.test.js` Test 6.
+
+7. **Cross-Café Training Compliance Oversight (`portfolioGovernanceFollowThroughService.js`)**:
+   - Aggregates real completion rates and overdue assignments from `EmployeeTraining` records.
+   - Privacy invariant: Zero employee personal identifiable information (PII) is exposed in portfolio rollup views.
+   - Test Evidence: `test/p18_governancePortfolioFollowThrough.test.js` Test 7.
+
+8. **Strategic Scenario Sandbox Non-Mutation Invariant (`portfolioGovernanceFollowThroughService.js`)**:
+   - Computes hypothetical projections (revenue growth, food costs, wage adjustments, break-even targets).
+   - Strict non-mutation invariant: Creates 0 bills, 0 purchase orders, 0 inventory lots, and 0 ledger entries.
+   - Test Evidence: `test/p18_governancePortfolioFollowThrough.test.js` Test 8.
+
+9. **Canonical Persona Security Matrix**:
+   - Primary Master: Full universal governance authority.
+   - Owner: Read-only boundary strictly enforced (mutation endpoints reject 403 `OWNER_READ_ONLY`).
+   - Café Operations: Scoped strictly to assigned café (cross-café requests reject 403 `CAFE_ACCESS_DENIED`).
+   - Staff & Vendor: Fail closed with 403 `FORBIDDEN`.
+   - Retired Normal Master: Permanently rejects with 403 `ROLE_RETIRED`.
+   - Test Evidence: `test/p18_governancePortfolioFollowThrough.test.js` Test 9.
 
 ---
 
@@ -605,10 +648,10 @@ Total benchmark records evaluated: **485** (351 Core entries `F001`–`F351` + 1
 
 ---
 
-## 6. Traceable Backlog & Deferred Items (P18–P22)
+## 6. Traceable Backlog & Deferred Items (P19–P22)
 
-Per the governing execution instructions, packages P01–P17 are closed and verified. Future scope items are preserved in the traceable backlog below without destabilising accepted work:
+Per the governing execution instructions, packages P01–P18 are closed and verified. Future scope items are preserved in the traceable backlog below without destabilising accepted work:
 
-1. **Package P18–P19 (Advanced Marketing, Catering & Custom Integrations)**: Institutional quoting, multi-event catering, and customized integrations.
+1. **Package P19 (Advanced Marketing, Catering & Custom Integrations)**: Institutional quoting, multi-event catering, and customized integrations (remains unstarted).
 2. **Package P20 & P21 (Hardware & External Services)**: 44 conditional entries (payment terminals, soundboxes, Google Business profile, and biometric clocking hardware). Correct adapter boundaries are defined; live operation remains marked conditional until physical hardware is connected.
 

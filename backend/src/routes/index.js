@@ -583,6 +583,14 @@ router.use(
   forecastRoutes
 );
 
+const portfolioGovernanceRoutes =
+  require('./portfolioGovernanceRoutes');
+
+router.use(
+  '/portfolio-governance',
+  portfolioGovernanceRoutes
+);
+
 const channelRoutes =
   require('./channelRoutes');
 

@@ -79,8 +79,18 @@ const GovernanceDecisionSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['IMPLEMENTING', 'REVIEW_DUE', 'REVIEW_COMPLETED', 'SUPERSEDED'],
-      default: 'IMPLEMENTING',
+      enum: [
+        'PROPOSED',
+        'SUBMITTED',
+        'APPROVED',
+        'IMPLEMENTING',
+        'ACTION_IN_PROGRESS',
+        'REVIEW_DUE',
+        'REVIEW_COMPLETED',
+        'VERIFIED_COMPLETED',
+        'SUPERSEDED',
+      ],
+      default: 'PROPOSED',
       index: true,
     },
     supportingAttachmentIds: [
@@ -92,6 +102,39 @@ const GovernanceDecisionSchema = new mongoose.Schema(
       type: String,
       default: 'SYSTEM',
     },
+    linkedTaskId: {
+      type: String,
+      default: null,
+      index: true,
+    },
+    linkedCapexId: {
+      type: String,
+      default: null,
+    },
+    proposerUserId: {
+      type: String,
+      default: null,
+    },
+    approvedByUserId: {
+      type: String,
+      default: null,
+    },
+    approvedAt: {
+      type: Date,
+      default: null,
+    },
+    verifiedByUserId: {
+      type: String,
+      default: null,
+    },
+    auditHistory: [
+      {
+        action: { type: String, required: true },
+        performedBy: { type: String, required: true },
+        performedAt: { type: Date, default: Date.now },
+        notes: { type: String, default: '' },
+      },
+    ],
   },
   {
     timestamps: true,

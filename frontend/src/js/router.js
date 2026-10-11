@@ -81,8 +81,8 @@ import { renderOwnerMenuPricing, initOwnerMenuPricingEvents, setOwnerMenuPricing
 import { renderOwnerCustomerLoyalty, initOwnerCustomerLoyaltyEvents, setOwnerCustomerLoyaltySection } from "./pages/ownerCustomerLoyalty.js";
 import { renderOwnerUtilitiesWaste, initOwnerUtilitiesWasteEvents, setOwnerUtilitiesWasteSection } from "./pages/ownerUtilitiesWaste.js";
 import { renderOwnerGovernanceDelegation, initOwnerGovernanceDelegationEvents, setOwnerGovernanceDelegationSection } from "./pages/ownerGovernanceDelegation.js";
-import { renderChannelsFrontService, wireChannelsFrontService, setChannelsActiveTab } from "./pages/channelsFrontService.js";
 import { renderForecastsInsights, wireForecastsInsights, setForecastsActiveTab } from "./pages/forecastsInsights.js";
+import { renderPortfolioGovernance, initPortfolioGovernance, setPortfolioGovernanceTab } from "./pages/portfolioGovernance.js";
 
 // ROLE_LABELS: display-safe generic labels used only for topbar scope chip
 // until /auth/me bootstrap provides the real user's display name.
@@ -497,6 +497,13 @@ async function renderPage() {
       setForecastsActiveTab?.(subroute || "sales-forecast");
       content.innerHTML = renderForecastsInsights();
       wireForecastsInsights();
+      break;
+
+    case "portfolio-governance":
+    case "portfolio":
+      setPortfolioGovernanceTab?.(subroute || "decisions");
+      content.innerHTML = renderPortfolioGovernance();
+      initPortfolioGovernance();
       break;
 
     case "admin":
