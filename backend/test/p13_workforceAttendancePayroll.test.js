@@ -53,6 +53,7 @@ const { StatutoryRule } = require('../src/models/StatutoryRule');
 const { StaffLoanAdvance } = require('../src/models/StaffLoanAdvance');
 const { LoanTransaction } = require('../src/models/LoanTransaction');
 const { AuditEvent } = require('../src/models/AuditEvent');
+const { AttendanceQrChallenge } = require('../src/models/AttendanceQrChallenge');
 
 // Controllers & Services
 const {
@@ -64,7 +65,11 @@ const {
   requestStaffCorrection,
   reviewStaffCorrection,
   getAttendanceOverview,
+  saveRoster,
+  publishRoster,
 } = require('../src/modules/attendance/attendanceController');
+
+const { sanitizeCsvValue, generateCsv } = require('../src/utils/exportGenerators');
 
 const {
   getLeaveDetail,
@@ -184,6 +189,7 @@ test('P13: Workforce Attendance, Employee Lifecycle & Payroll Suite', async (sui
       StaffLoanAdvance.createCollection(),
       LoanTransaction.createCollection(),
       AuditEvent.createCollection(),
+      AttendanceQrChallenge.createCollection(),
     ]);
   });
 
@@ -210,6 +216,7 @@ test('P13: Workforce Attendance, Employee Lifecycle & Payroll Suite', async (sui
       StatutoryRule.deleteMany({}),
       StaffLoanAdvance.deleteMany({}),
       LoanTransaction.deleteMany({}),
+      AttendanceQrChallenge.deleteMany({}),
     ]);
 
     // Seed default Cafe
@@ -1246,5 +1253,160 @@ test('P13: Workforce Attendance, Employee Lifecycle & Payroll Suite', async (sui
     assert.equal(result.data.success, true);
     assert.ok(Array.isArray(result.data.data.reports), 'Report catalogue must be an array');
     assert.ok(result.data.data.reports.length >= 18, 'Report catalogue must contain all 18 reports');
+  });
+
+  // ── 23. SHARED QR MULTI-EMPLOYEE CONCURRENCY & IDEMPOTENCY ─────────────────
+  await suite.test('23. Shared QR works for different employees while repeated punch by same employee is rejected', async () => {
+    const orgId = 'ORG-ZAMORIN';
+    const cafeId = 'ZC-0001';
+    const emp1 = 'ST-EMPA';
+    const emp2 = 'ST-EMPB';
+
+    // Mock challenge token
+    const challenge = await attendanceQrService.getActiveOrNewChallenge({
+      organisationId: orgId,
+      cafeId,
+      deviceId: 'TERMINAL-01',
+      requestedByUserId: 'CA-0001',
+      requestedByRole: 'CAFE_ADMIN',
+      assignedCafeIds: [cafeId],
+    });
+    assert.ok(challenge.qrToken, 'QR challenge token must be issued');
+
+    // Both employees can validate the shared QR challenge token
+    const val1 = await attendanceQrService.validateChallengeToken(challenge.qrToken, {
+      employeeOrgId: orgId,
+      employeeAssignedCafes: [cafeId],
+      employeeRole: 'STAFF',
+    });
+    assert.equal(val1.cafeId, cafeId);
+
+    const val2 = await attendanceQrService.validateChallengeToken(challenge.qrToken, {
+      employeeOrgId: orgId,
+      employeeAssignedCafes: [cafeId],
+      employeeRole: 'STAFF',
+    });
+    assert.equal(val2.cafeId, cafeId);
+
+    // First punch for emp1 succeeds
+    await Attendance.create({
+      attendanceId: 'AT-20261010-023',
+      organisationId: orgId,
+      cafeId,
+      userId: emp1,
+      businessDate: '2026-10-10',
+      status: 'CHECKED_IN',
+      checkInAt: new Date(),
+      createdBy: emp1,
+    });
+
+    // Replay/repeated punch for emp1 is rejected
+    const { req: reqDup, res: resDup } = buildMockReqRes('STAFF', { userId: emp1, organisationId: orgId, primaryCafeId: cafeId }, {
+      qrToken: challenge.qrToken,
+      latitude: 11.2588,
+      longitude: 75.7804,
+    });
+    await assert.rejects(
+      async () => {
+        await staffCheckIn(reqDup, resDup);
+      },
+      (err) => err.statusCode === 400 && err.code === 'ALREADY_CHECKED_IN'
+    );
+  });
+
+  // ── 24. ROSTER PUBLICATION & CONFLICT DETECTION ────────────────────────────
+  await suite.test('24. Roster publication records publisher, preserves change history, and detects overlapping assignments', async () => {
+    const orgId = 'ORG-ZAMORIN';
+    const cafeId = 'ZC-0001';
+    const weekStartDate = '2026-10-12'; // Monday
+
+    // 24a. Create draft roster with duplicate assignment
+    const { req: reqDraft, res: resDraft } = buildMockReqRes('CAFE_ADMIN', {
+      organisationId: orgId,
+      assignedCafeIds: [cafeId],
+      userId: 'CA-0001',
+    }, {
+      cafeId,
+      weekStartDate,
+      assignments: [
+        { userId: 'ST-0001', date: '2026-10-12', shiftId: 'SH-MORNING', startTime: '08:00', endTime: '16:00' },
+        { userId: 'ST-0001', date: '2026-10-12', shiftId: 'SH-EVENING', startTime: '16:00', endTime: '23:00' }, // Overlapping duplicate day assignment
+      ],
+    });
+
+    await saveRoster(reqDraft, resDraft);
+
+    const savedRoster = await ShiftRoster.findOne({ cafeId, weekStartDate });
+    assert.ok(savedRoster);
+    assert.equal(savedRoster.status, 'DRAFT');
+
+    // 24b. Publishing with duplicate day assignment fails validation
+    const { req: reqPubErr, res: resPubErr } = buildMockReqRes('CAFE_ADMIN', {
+      organisationId: orgId,
+      assignedCafeIds: [cafeId],
+      userId: 'CA-0001',
+    }, {}, {}, { rosterId: savedRoster.rosterId });
+
+    await assert.rejects(
+      async () => {
+        await publishRoster(reqPubErr, resPubErr);
+      },
+      (err) => err.statusCode === 422 && err.code === 'ROSTER_VALIDATION_FAILED'
+    );
+
+    // 24c. Correct assignments and publish successfully
+    savedRoster.assignments = [
+      { userId: 'ST-0001', date: '2026-10-12', shiftId: 'SH-MORNING', startTime: '08:00', endTime: '16:00' },
+      { userId: 'ST-0002', date: '2026-10-12', shiftId: 'SH-EVENING', startTime: '16:00', endTime: '23:00' },
+    ];
+    await savedRoster.save();
+
+    const { req: reqPubOk, res: resPubOk, getResult } = buildMockReqRes('CAFE_ADMIN', {
+      organisationId: orgId,
+      assignedCafeIds: [cafeId],
+      userId: 'CA-0001',
+    }, {}, {}, { rosterId: savedRoster.rosterId });
+
+    await publishRoster(reqPubOk, resPubOk);
+    assert.equal(getResult().statusCode, 200);
+
+    const publishedRoster = await ShiftRoster.findOne({ rosterId: savedRoster.rosterId });
+    assert.equal(publishedRoster.status, 'PUBLISHED');
+    assert.equal(publishedRoster.publishedByUserId, 'CA-0001');
+    assert.ok(publishedRoster.publishedAt);
+
+    // Verify audit log
+    const audit = await AuditEvent.findOne({
+      entityId: savedRoster.rosterId,
+      action: 'ROSTER_PUBLISHED',
+    });
+    assert.ok(audit, 'AuditEvent for ROSTER_PUBLISHED must be recorded');
+  });
+
+  // ── 25. EXPORT SANITIZATION & FORMULA INJECTION NEUTRALIZATION ─────────────
+  await suite.test('25. Formula-injection and private-data protections remain intact in workforce exports', async () => {
+    // 25a. CSV formula injection neutralization
+    assert.equal(sanitizeCsvValue('=CMD|"/C calc"!A0'), `"'=CMD|""/C calc""!A0"`);
+    assert.equal(sanitizeCsvValue('+12345'), '\'+12345');
+    assert.equal(sanitizeCsvValue('-500'), '\'-500');
+    assert.equal(sanitizeCsvValue('@SUM(A1:A10)'), '\'@SUM(A1:A10)');
+    assert.equal(sanitizeCsvValue('\tTabInjection'), '\'\tTabInjection');
+
+    // 25b. Verify CSV generation
+    const exportResult = generateCsv({
+      columns: [
+        { key: 'employeeName', label: 'Employee Name' },
+        { key: 'formulaField', label: 'Formula Field' },
+      ],
+      rows: [
+        { employeeName: 'Alice', formulaField: '=HYPERLINK("evil.com")' },
+        { employeeName: 'Bob, Barista', formulaField: '@SUM(1+1)' },
+      ],
+      reportTitle: 'Payroll Summary',
+    });
+
+    assert.ok(exportResult.csv.includes('\'=HYPERLINK'), 'Formula prefix = must be escaped');
+    assert.ok(exportResult.csv.includes('\'@SUM(1+1)'), 'Formula prefix @ must be escaped');
+    assert.ok(exportResult.csv.includes('"Bob, Barista"'), 'Comma in name must be enclosed in RFC 4180 quotes');
   });
 });

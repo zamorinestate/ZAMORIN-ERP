@@ -39,13 +39,20 @@ const RELEASE_SUITE = [
 ];
 
 function parseArgs(argv) {
+  let explicitConcurrency = false;
   const args = { mode: 'full', concurrency: 4, timeout: 300000, report: null };
   for (const a of argv) {
     if (a === '--release') args.mode = 'release';
     else if (a === '--full') args.mode = 'full';
-    else if (a.startsWith('--concurrency=')) args.concurrency = Math.max(1, Number(a.split('=')[1]) || 4);
+    else if (a.startsWith('--concurrency=')) {
+      args.concurrency = Math.max(1, Number(a.split('=')[1]) || 4);
+      explicitConcurrency = true;
+    }
     else if (a.startsWith('--timeout=')) args.timeout = Number(a.split('=')[1]) || 300000;
     else if (a.startsWith('--report=')) args.report = a.split('=')[1];
+  }
+  if (!explicitConcurrency && args.mode === 'release') {
+    args.concurrency = 2;
   }
   if (!args.report) args.report = path.join(BACKEND_ROOT, 'test-results', `${args.mode}-report.json`);
   return args;
