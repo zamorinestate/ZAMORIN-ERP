@@ -83,6 +83,7 @@ import { renderOwnerUtilitiesWaste, initOwnerUtilitiesWasteEvents, setOwnerUtili
 import { renderOwnerGovernanceDelegation, initOwnerGovernanceDelegationEvents, setOwnerGovernanceDelegationSection } from "./pages/ownerGovernanceDelegation.js";
 import { renderForecastsInsights, wireForecastsInsights, setForecastsActiveTab } from "./pages/forecastsInsights.js";
 import { renderPortfolioGovernance, initPortfolioGovernance, setPortfolioGovernanceTab } from "./pages/portfolioGovernance.js";
+import { renderOnboardingMigration, initOnboardingMigration, setOnboardingMigrationTab } from "./pages/onboardingMigration.js";
 
 // ROLE_LABELS: display-safe generic labels used only for topbar scope chip
 // until /auth/me bootstrap provides the real user's display name.
@@ -504,6 +505,14 @@ async function renderPage() {
       setPortfolioGovernanceTab?.(subroute || "decisions");
       content.innerHTML = renderPortfolioGovernance();
       initPortfolioGovernance();
+      break;
+
+    case "onboarding-migration":
+    case "onboarding":
+    case "templates-migration":
+      setOnboardingMigrationTab?.(subroute || "onboarding");
+      content.innerHTML = renderOnboardingMigration();
+      initOnboardingMigration();
       break;
 
     case "admin":

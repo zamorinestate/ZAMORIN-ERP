@@ -21,7 +21,31 @@ def generate_register():
         title = clean_text(entry['title'])
         raw = clean_text(entry['text'])
         
-        if 1 <= num <= 30:
+        if num in [125, 126, 192, 193, 194]:
+            pkg = 'P19'
+            frontend = 'Frontend/src/js/pages/onboardingMigration.js'
+            backend = 'Backend/src/services/controlledDataMigrationService.js, onboardingMigrationRoutes.js'
+            model = 'OutletCopyLog, CafeTemplate, Cafe'
+            test = 'Backend/test/p19_onboardingTemplatesMigration.test.js'
+            status = 'implemented and verified'
+            notes = 'P19 Multi-outlet copy settings, mandatory exclusion safeguards (GSTIN, PAN, terminals), immutable copy logs and history.'
+        elif num == 169:
+            pkg = 'P19'
+            frontend = 'Frontend/src/js/pages/onboardingMigration.js'
+            backend = 'Backend/src/services/controlledDataMigrationService.js'
+            model = 'DataMigrationRun, InventoryLot'
+            test = 'Backend/test/p19_onboardingTemplatesMigration.test.js'
+            status = 'implemented and verified'
+            notes = 'P19 Opening stock batch migration with strict reconciliation of quantities and integer valuation (paise).'
+        elif num == 341:
+            pkg = 'P19'
+            frontend = 'Frontend/src/js/pages/onboardingMigration.js'
+            backend = 'Backend/src/services/controlledDataMigrationService.js'
+            model = 'DataMigrationRun, Customer'
+            test = 'Backend/test/p19_onboardingTemplatesMigration.test.js'
+            status = 'implemented and verified'
+            notes = 'P19 Customer CRM, loyalty balances, and opening dues migration with provenance tracking and 0 operational bills created.'
+        elif 1 <= num <= 30:
             pkg = 'P09'
             frontend = 'Frontend/src/js/pages/pos.js, posTerminal.js'
             backend = 'Backend/src/routes/posRoutes.js, posOrderService.js'
@@ -192,7 +216,23 @@ def generate_register():
         title = clean_text(entry['title'])
         raw = clean_text(entry['text'])
 
-        if 1 <= num <= 2:
+        if 93 <= num <= 95:
+            pkg = 'P19'
+            frontend = 'Frontend/src/js/pages/onboardingMigration.js'
+            backend = 'Backend/src/services/controlledDataMigrationService.js'
+            model = 'DataMigrationRun, Vendor'
+            test = 'Backend/test/p19_onboardingTemplatesMigration.test.js'
+            status = 'implemented and verified'
+            notes = 'P19 Supplier-material mapping bulk import/export, unit validation, rate validation, and CSV formula injection sanitization.'
+        elif 99 <= num <= 104:
+            pkg = 'P19'
+            frontend = 'Frontend/src/js/pages/onboardingMigration.js'
+            backend = 'Backend/src/services/controlledDataMigrationService.js'
+            model = 'Recipe, GlobalInventoryItem'
+            test = 'Backend/test/p19_onboardingTemplatesMigration.test.js'
+            status = 'implemented and verified'
+            notes = 'P19 Starter master data suggestions, recipe workbook bulk editing and component removal.'
+        elif 1 <= num <= 2:
             pkg = 'P12'
             frontend = 'Frontend/src/js/pages/finance.js, reports.js'
             backend = 'Backend/src/routes/reportRoutes.js, OperationalReportService.js'
@@ -332,10 +372,10 @@ def generate_register():
 
     with open(out_path, 'w', encoding='utf-8') as out:
         out.write('# ZAMORIN CAFÉ ERP — PETPOOJA BENCHMARK IMPLEMENTATION REGISTER\n\n')
-        out.write('**Document ID**: `REG-PETPOOJA-485-P18-VERIFIED`  \n')
+        out.write('**Document ID**: `REG-PETPOOJA-485-P19-VERIFIED`  \n')
         out.write('**Execution Scope**: `D:\\Zamorin Cafe ERP\\A Main Workspace`  \n')
         out.write('**Canonical Branch**: `feature/foundation-five-windows`  \n')
-        out.write('**Verified Starting Closeout Commit**: `9f2b2e18bc4f466c3e5bf9a1846b11980d4c36a5` (P17 Closeout)  \n')
+        out.write('**Verified Starting Closeout Commit**: `ffda4a10454b21ccfdfb4c6d4119de95c948e46a` (P18 Closeout)  \n')
         out.write('**Audit Date**: 11 October 2026 | **Status**: ACTIVE TRACEABLE GOVERNANCE  \n\n')
         out.write('---\n\n')
 
@@ -356,16 +396,17 @@ def generate_register():
         out.write('  - Navigation: Centralized in `Frontend/src/js/navigation.js` and enforced by `Frontend/src/js/router.js` (106 explicit routing cases).\n')
         out.write('  - State & Caching: In-memory token storage in `apiClient.js` with single-flight deduplication, SWR caching, and automatic mutation cache invalidation.\n')
         out.write('  - Portfolio Governance UI: Interactive executive workspace in `Frontend/src/js/pages/portfolioGovernance.js` wired to live endpoints.\n')
+        out.write('  - Onboarding & Migration Hub: Comprehensive 4-tab control plane in `Frontend/src/js/pages/onboardingMigration.js`.\n')
         out.write('  - Accessibility & Tokens: Semantic HTML5, CSS design tokens, WCAG 2.2 AA contrast compliance, and full keyboard navigation.\n\n')
         out.write('- **Backend Architecture**:\n')
-        out.write('  - Runtime: Node.js 24 + Express with 74 route files and 79 modular controllers.\n')
-        out.write('  - Persistence: MongoDB with 242 Mongoose schemas (including `GovernanceDecision`, `Task`, `BudgetPlan`, `CapexRequest`), compound unique business indexes, and atomic state transitions.\n')
-        out.write('  - Business Services: 122 domain services covering POS, BOM depletion, FEFO picking, replenishment drafts, statutory payroll, forecasting, portfolio governance, and decision follow-through.\n')
+        out.write('  - Runtime: Node.js 24 + Express with 75 route files and 80 modular controllers.\n')
+        out.write('  - Persistence: MongoDB with 244 Mongoose schemas (including `OutletCopyLog`, `DataMigrationRun`, `CafeTemplate`, `Cafe`), compound unique business indexes, and atomic state transitions.\n')
+        out.write('  - Business Services: 123 domain services covering POS, BOM depletion, FEFO picking, replenishment drafts, statutory payroll, forecasting, portfolio governance, and controlled data migration.\n')
         out.write('  - Document Storage: Private GridFS & S3 storage adapters (`DocumentStorageProvider.js`) with AES-256-GCM encryption, strict MIME verification, and ClamAV/static malware screening.\n\n')
         out.write('- **Verification & Release Pipeline**:\n')
-        out.write('  - Release Test Runner: `npm run test:release` passing **15/15 suites, 252/252 tests**.\n')
-        out.write('  - Focused P18 Suite: `node --test test/p18_governancePortfolioFollowThrough.test.js` passing **10/10 tests**.\n')
-        out.write('  - Syntax & Integrity Gate: `npm run check` passing **680/680 JavaScript files** with 0 errors.\n\n')
+        out.write('  - Release Test Runner: `npm run test:release` passing **16/16 suites, 263/263 tests**.\n')
+        out.write('  - Focused P19 Suite: `node --test test/p19_onboardingTemplatesMigration.test.js` passing **11/11 tests**.\n')
+        out.write('  - Syntax & Integrity Gate: `npm run check` passing **685/685 JavaScript files** with 0 errors.\n\n')
 
         out.write('---\n\n')
         out.write('## 2. 485-Entry Benchmark Coverage Statistics\n\n')
@@ -467,6 +508,44 @@ def generate_register():
         out.write('   - Retired Normal Master: Permanently rejects with 403 `ROLE_RETIRED`.\n')
         out.write('   - Test Evidence: `test/p18_governancePortfolioFollowThrough.test.js` Test 9.\n\n')
 
+        out.write('### 3.3 Package P19 — Onboarding, Configuration Templates & Controlled Data Migration Deep Dive\n\n')
+        out.write('1. **Guided Outlet Onboarding & Readiness State Machine (`controlledDataMigrationService.js`)**:\n')
+        out.write('   - Evaluates mandatory 8-point readiness checklist (identity, category, premises, phone, operating hours, GSTIN, FSSAI, POS hardware).\n')
+        out.write('   - Calculates granular readiness score (0-100%) and categorizes saved vs validated vs operational states.\n')
+        out.write('   - Test Evidence: `test/p19_onboardingTemplatesMigration.test.js` Test 1.\n\n')
+        out.write('2. **Multi-Outlet Copy Settings with F193 Mandatory Exclusion Safeguards (`controlledDataMigrationService.js`)**:\n')
+        out.write('   - Clean before/after diff preview before any commit.\n')
+        out.write('   - F193 Safeguards: Strictly excludes payment gateways/keys, GSTIN, PAN, premises addresses, and sequence counters from propagation.\n')
+        out.write('   - Test Evidence: `test/p19_onboardingTemplatesMigration.test.js` Tests 2, 3.\n\n')
+        out.write('3. **Immutable Copy Logs & Audit Provenance (`controlledDataMigrationService.js`)**:\n')
+        out.write('   - Immutably persists all cross-outlet copy operations in `OutletCopyLog` (`COPY-xxxx`) with user ID, timestamps, section details, and diffs.\n')
+        out.write('   - Test Evidence: `test/p19_onboardingTemplatesMigration.test.js` Test 4.\n\n')
+        out.write('4. **Supplier-Material Mapping Ingestion & Row-Level Validation (`controlledDataMigrationService.js`)**:\n')
+        out.write('   - Validates supplier IDs, material items, UOMs, and non-negative contracted rates.\n')
+        out.write('   - Detects intra-batch duplicate mappings and rejects invalid commits unless partial commit is explicitly enabled.\n')
+        out.write('   - Test Evidence: `test/p19_onboardingTemplatesMigration.test.js` Test 5.\n\n')
+        out.write('5. **Opening Stock Batch Migration & Financial Reconciliation (`controlledDataMigrationService.js`)**:\n')
+        out.write('   - Ingests opening stock lots with batches, expiry dates, and storage locations.\n')
+        out.write('   - Reconciles source quantity and total integer valuation (paise) against persisted `InventoryLot` records.\n')
+        out.write('   - Test Evidence: `test/p19_onboardingTemplatesMigration.test.js` Test 6.\n\n')
+        out.write('6. **Customer CRM, Loyalty & Dues Migration (`controlledDataMigrationService.js`)**:\n')
+        out.write('   - Migrates customer profiles, loyalty points balances, and opening credit dues.\n')
+        out.write('   - Tags records with `MIGRATED_LEGACY_IMPORT` provenance without creating artificial operational bills.\n')
+        out.write('   - Test Evidence: `test/p19_onboardingTemplatesMigration.test.js` Test 7.\n\n')
+        out.write('7. **Strict Non-Mutation Invariant on Migration Dry-Run (`controlledDataMigrationService.js`)**:\n')
+        out.write('   - Preview and draft stages strictly create 0 inventory lots, 0 vendors, 0 customers, and 0 operational bills.\n')
+        out.write('   - Test Evidence: `test/p19_onboardingTemplatesMigration.test.js` Test 8.\n\n')
+        out.write('8. **Spreadsheet Formula Injection Sanitization (CWE-1236) (`controlledDataMigrationService.js`)**:\n')
+        out.write('   - Neutralizes formula injection vulnerabilities by safely prepending single quotes to leading `=`, `+`, `-`, or `@` characters in CSV exports.\n')
+        out.write('   - Test Evidence: `test/p19_onboardingTemplatesMigration.test.js` Test 9.\n\n')
+        out.write('9. **Canonical Persona Access Matrix (`onboardingMigrationController.js`)**:\n')
+        out.write('   - Master: Unrestricted universal onboarding and migration administration.\n')
+        out.write('   - Owner: Read-only governance view strictly enforced (mutation endpoints reject with 403 `OWNER_READ_ONLY`).\n')
+        out.write('   - Café Operations: Scoped strictly to assigned café (cross-café access rejects with 403 `CAFE_ACCESS_DENIED`).\n')
+        out.write('   - Staff & Vendor: Denied closed with 403 `FORBIDDEN`.\n')
+        out.write('   - Retired Normal Master: Permanently rejects with 403 `ROLE_RETIRED`.\n')
+        out.write('   - Test Evidence: `test/p19_onboardingTemplatesMigration.test.js` Test 10.\n\n')
+
         out.write('---\n\n')
         out.write('## 4. Master Register — 351 Functional Report Entries (F001–F351)\n\n')
         out.write('| ID | Function / Option Name | Package | Frontend Source | Backend API / Service | Persistence Model | Test Evidence | Status | Evidence & Notes |\n')
@@ -477,15 +556,15 @@ def generate_register():
         out.write('\n---\n\n')
         out.write('## 5. Master Register — 134 Omissions Supplement Entries (A001–A134)\n\n')
         out.write('| ID | Addition / Option Name | Package | Frontend Source | Backend API / Service | Persistence Model | Test Evidence | Status | Evidence & Notes |\n')
-        out.write('| :--- | :--- | :---: | :--- | :--- | :--- | :--- | :--- | :---: | :--- |\n')
+        out.write('| :--- | :--- | :---: | :--- | :--- | :--- | :--- | :---: | :--- |\n')
         for e in a_mapped:
             out.write(f'| **{e["id"]}** | {e["title"]} | {e["package"]} | `{e["frontend"]}` | `{e["backend"]}` | `{e["model"]}` | `{e["test"]}` | **{e["status"]}** | {e["notes"]} |\n')
 
         out.write('\n---\n\n')
-        out.write('## 6. Traceable Backlog & Deferred Items (P19–P22)\n\n')
-        out.write('Per the governing execution instructions, packages P01–P18 are closed and verified. Future scope items are preserved in the traceable backlog below without destabilising accepted work:\n\n')
-        out.write('1. **Package P19 (Advanced Marketing, Catering & Custom Integrations)**: Institutional quoting, multi-event catering, and customized integrations (remains unstarted).\n')
-        out.write('2. **Package P20 & P21 (Hardware & External Services)**: 44 conditional entries (payment terminals, soundboxes, Google Business profile, and biometric clocking hardware). Correct adapter boundaries are defined; live operation remains marked conditional until physical hardware is connected.\n\n')
+        out.write('## 6. Traceable Backlog & Deferred Items (P20–P22)\n\n')
+        out.write('Per the governing execution instructions, packages P01–P19 are closed and verified. Future scope items are preserved in the traceable backlog below without destabilising accepted work:\n\n')
+        out.write('1. **Package P20 & P21 (Hardware & External Services)**: 44 conditional entries (payment terminals, soundboxes, Google Business profile, and biometric clocking hardware). Correct adapter boundaries are defined; live operation remains marked conditional until physical hardware is connected.\n')
+        out.write('2. **Package P22 (Advanced Custom Analytics & Specialized Add-ons)**: Institutional quoting, multi-event catering, and customized integrations.\n\n')
 
     root_path = 'PETPOOJA_BENCHMARK_IMPLEMENTATION_REGISTER.md'
     import shutil

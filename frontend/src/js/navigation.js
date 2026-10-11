@@ -70,6 +70,7 @@ const PRIMARY_MASTER_ITEMS = [
 
   // ── ADMINISTRATION ───────────────────────────────────────────────────────────
   { id: 'admin',         label: 'Administration',         icon: 'admin',        route: 'admin',             group: 'ADMINISTRATION' },
+  { id: 'onboarding-migration', label: 'Onboarding & Migration', icon: 'admin', route: 'onboarding-migration', group: 'ADMINISTRATION' },
 
   // ── SYSTEM ───────────────────────────────────────────────────────────────────
   { id: 'cafe-ops-devices', label: 'Devices & Sessions',  icon: 'devices',      route: 'cafe-ops-devices',  group: 'SYSTEM' },
@@ -126,6 +127,7 @@ export const NAVIGATION = {
       { id: 'reports',      label: 'Reports',                 icon: 'reports',      route: 'reports',         group: 'INSIGHTS' },
       { id: 'forecasts-insights', label: 'Forecasts & Insights', icon: 'reports', route: 'forecasts-insights', group: 'INSIGHTS' },
       { id: 'portfolio-governance', label: 'Portfolio Governance', icon: 'reports', route: 'portfolio-governance', group: 'INSIGHTS' },
+      { id: 'onboarding-migration', label: 'Onboarding & Migration', icon: 'reports', route: 'onboarding-migration', group: 'INSIGHTS' },
       { id: 'system-health',label: 'System Health & Ops',     icon: 'settings',     route: 'system-health',   group: 'SYSTEM' },
       { id: 'settings',     label: 'Settings',                icon: 'settings',     route: 'settings',        group: 'SYSTEM' },
     ],

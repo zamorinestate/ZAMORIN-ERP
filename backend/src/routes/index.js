@@ -591,6 +591,14 @@ router.use(
   portfolioGovernanceRoutes
 );
 
+const onboardingMigrationRoutes =
+  require('./onboardingMigrationRoutes');
+
+router.use(
+  '/onboarding-migration',
+  onboardingMigrationRoutes
+);
+
 const channelRoutes =
   require('./channelRoutes');
 

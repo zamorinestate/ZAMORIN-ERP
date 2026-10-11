@@ -41,6 +41,7 @@ const RELEASE_SUITE = [
   'p16_tasksTrainingSopLifecycle.test.js',
   'p17_forecastsPredictiveInsights.test.js',
   'p18_governancePortfolioFollowThrough.test.js',
+  'p19_onboardingTemplatesMigration.test.js',
 ];
 
 function parseArgs(argv) {

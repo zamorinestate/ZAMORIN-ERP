@@ -1,9 +1,9 @@
 # ZAMORIN CAFÉ ERP — PETPOOJA BENCHMARK IMPLEMENTATION REGISTER
 
-**Document ID**: `REG-PETPOOJA-485-P18-VERIFIED`  
+**Document ID**: `REG-PETPOOJA-485-P19-VERIFIED`  
 **Execution Scope**: `D:\Zamorin Cafe ERP\A Main Workspace`  
 **Canonical Branch**: `feature/foundation-five-windows`  
-**Verified Starting Closeout Commit**: `9f2b2e18bc4f466c3e5bf9a1846b11980d4c36a5` (P17 Closeout)  
+**Verified Starting Closeout Commit**: `ffda4a10454b21ccfdfb4c6d4119de95c948e46a` (P18 Closeout)  
 **Audit Date**: 11 October 2026 | **Status**: ACTIVE TRACEABLE GOVERNANCE  
 
 ---
@@ -29,18 +29,19 @@ A complete forensic inventory of the running Zamorin Café ERP was conducted out
   - Navigation: Centralized in `Frontend/src/js/navigation.js` and enforced by `Frontend/src/js/router.js` (106 explicit routing cases).
   - State & Caching: In-memory token storage in `apiClient.js` with single-flight deduplication, SWR caching, and automatic mutation cache invalidation.
   - Portfolio Governance UI: Interactive executive workspace in `Frontend/src/js/pages/portfolioGovernance.js` wired to live endpoints.
+  - Onboarding & Migration Hub: Comprehensive 4-tab control plane in `Frontend/src/js/pages/onboardingMigration.js`.
   - Accessibility & Tokens: Semantic HTML5, CSS design tokens, WCAG 2.2 AA contrast compliance, and full keyboard navigation.
 
 - **Backend Architecture**:
-  - Runtime: Node.js 24 + Express with 74 route files and 79 modular controllers.
-  - Persistence: MongoDB with 242 Mongoose schemas (including `GovernanceDecision`, `Task`, `BudgetPlan`, `CapexRequest`), compound unique business indexes, and atomic state transitions.
-  - Business Services: 122 domain services covering POS, BOM depletion, FEFO picking, replenishment drafts, statutory payroll, forecasting, portfolio governance, and decision follow-through.
+  - Runtime: Node.js 24 + Express with 75 route files and 80 modular controllers.
+  - Persistence: MongoDB with 244 Mongoose schemas (including `OutletCopyLog`, `DataMigrationRun`, `CafeTemplate`, `Cafe`), compound unique business indexes, and atomic state transitions.
+  - Business Services: 123 domain services covering POS, BOM depletion, FEFO picking, replenishment drafts, statutory payroll, forecasting, portfolio governance, and controlled data migration.
   - Document Storage: Private GridFS & S3 storage adapters (`DocumentStorageProvider.js`) with AES-256-GCM encryption, strict MIME verification, and ClamAV/static malware screening.
 
 - **Verification & Release Pipeline**:
-  - Release Test Runner: `npm run test:release` passing **15/15 suites, 252/252 tests**.
-  - Focused P18 Suite: `node --test test/p18_governancePortfolioFollowThrough.test.js` passing **10/10 tests**.
-  - Syntax & Integrity Gate: `npm run check` passing **680/680 JavaScript files** with 0 errors.
+  - Release Test Runner: `npm run test:release` passing **16/16 suites, 263/263 tests**.
+  - Focused P19 Suite: `node --test test/p19_onboardingTemplatesMigration.test.js` passing **11/11 tests**.
+  - Syntax & Integrity Gate: `npm run check` passing **685/685 JavaScript files** with 0 errors.
 
 ---
 
@@ -146,6 +147,53 @@ Total benchmark records evaluated: **485** (351 Core entries `F001`–`F351` + 1
    - Staff & Vendor: Fail closed with 403 `FORBIDDEN`.
    - Retired Normal Master: Permanently rejects with 403 `ROLE_RETIRED`.
    - Test Evidence: `test/p18_governancePortfolioFollowThrough.test.js` Test 9.
+
+### 3.3 Package P19 — Onboarding, Configuration Templates & Controlled Data Migration Deep Dive
+
+1. **Guided Outlet Onboarding & Readiness State Machine (`controlledDataMigrationService.js`)**:
+   - Evaluates mandatory 8-point readiness checklist (identity, category, premises, phone, operating hours, GSTIN, FSSAI, POS hardware).
+   - Calculates granular readiness score (0-100%) and categorizes saved vs validated vs operational states.
+   - Test Evidence: `test/p19_onboardingTemplatesMigration.test.js` Test 1.
+
+2. **Multi-Outlet Copy Settings with F193 Mandatory Exclusion Safeguards (`controlledDataMigrationService.js`)**:
+   - Clean before/after diff preview before any commit.
+   - F193 Safeguards: Strictly excludes payment gateways/keys, GSTIN, PAN, premises addresses, and sequence counters from propagation.
+   - Test Evidence: `test/p19_onboardingTemplatesMigration.test.js` Tests 2, 3.
+
+3. **Immutable Copy Logs & Audit Provenance (`controlledDataMigrationService.js`)**:
+   - Immutably persists all cross-outlet copy operations in `OutletCopyLog` (`COPY-xxxx`) with user ID, timestamps, section details, and diffs.
+   - Test Evidence: `test/p19_onboardingTemplatesMigration.test.js` Test 4.
+
+4. **Supplier-Material Mapping Ingestion & Row-Level Validation (`controlledDataMigrationService.js`)**:
+   - Validates supplier IDs, material items, UOMs, and non-negative contracted rates.
+   - Detects intra-batch duplicate mappings and rejects invalid commits unless partial commit is explicitly enabled.
+   - Test Evidence: `test/p19_onboardingTemplatesMigration.test.js` Test 5.
+
+5. **Opening Stock Batch Migration & Financial Reconciliation (`controlledDataMigrationService.js`)**:
+   - Ingests opening stock lots with batches, expiry dates, and storage locations.
+   - Reconciles source quantity and total integer valuation (paise) against persisted `InventoryLot` records.
+   - Test Evidence: `test/p19_onboardingTemplatesMigration.test.js` Test 6.
+
+6. **Customer CRM, Loyalty & Dues Migration (`controlledDataMigrationService.js`)**:
+   - Migrates customer profiles, loyalty points balances, and opening credit dues.
+   - Tags records with `MIGRATED_LEGACY_IMPORT` provenance without creating artificial operational bills.
+   - Test Evidence: `test/p19_onboardingTemplatesMigration.test.js` Test 7.
+
+7. **Strict Non-Mutation Invariant on Migration Dry-Run (`controlledDataMigrationService.js`)**:
+   - Preview and draft stages strictly create 0 inventory lots, 0 vendors, 0 customers, and 0 operational bills.
+   - Test Evidence: `test/p19_onboardingTemplatesMigration.test.js` Test 8.
+
+8. **Spreadsheet Formula Injection Sanitization (CWE-1236) (`controlledDataMigrationService.js`)**:
+   - Neutralizes formula injection vulnerabilities by safely prepending single quotes to leading `=`, `+`, `-`, or `@` characters in CSV exports.
+   - Test Evidence: `test/p19_onboardingTemplatesMigration.test.js` Test 9.
+
+9. **Canonical Persona Access Matrix (`onboardingMigrationController.js`)**:
+   - Master: Unrestricted universal onboarding and migration administration.
+   - Owner: Read-only governance view strictly enforced (mutation endpoints reject with 403 `OWNER_READ_ONLY`).
+   - Café Operations: Scoped strictly to assigned café (cross-café access rejects with 403 `CAFE_ACCESS_DENIED`).
+   - Staff & Vendor: Denied closed with 403 `FORBIDDEN`.
+   - Retired Normal Master: Permanently rejects with 403 `ROLE_RETIRED`.
+   - Test Evidence: `test/p19_onboardingTemplatesMigration.test.js` Test 10.
 
 ---
 
@@ -277,8 +325,8 @@ Total benchmark records evaluated: **485** (351 Core entries `F001`–`F351` + 1
 | **F122** | Stock-driven | P05 | `Frontend/src/js/pages/inventory.js` | `Backend/src/routes/inventoryRoutes.js, bomDepletionService.js` | `InventoryItem, BOM, CafeInventoryConfig` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | Raw materials master, recipes, unit conversions, yield factors, packaging BOM. |
 | **F123** | Category filtering | P05 | `Frontend/src/js/pages/inventory.js` | `Backend/src/routes/inventoryRoutes.js, bomDepletionService.js` | `InventoryItem, BOM, CafeInventoryConfig` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | Raw materials master, recipes, unit conversions, yield factors, packaging BOM. |
 | **F124** | Creation history | P05 | `Frontend/src/js/pages/inventory.js` | `Backend/src/routes/inventoryRoutes.js, bomDepletionService.js` | `InventoryItem, BOM, CafeInventoryConfig` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | Raw materials master, recipes, unit conversions, yield factors, packaging BOM. |
-| **F125** | Copy history | P05 | `Frontend/src/js/pages/inventory.js` | `Backend/src/routes/inventoryRoutes.js, bomDepletionService.js` | `InventoryItem, BOM, CafeInventoryConfig` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | Raw materials master, recipes, unit conversions, yield factors, packaging BOM. |
-| **F126** | File operations | P05 | `Frontend/src/js/pages/inventory.js` | `Backend/src/routes/inventoryRoutes.js, bomDepletionService.js` | `InventoryItem, BOM, CafeInventoryConfig` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | Raw materials master, recipes, unit conversions, yield factors, packaging BOM. |
+| **F125** | Copy history | P19 | `Frontend/src/js/pages/onboardingMigration.js` | `Backend/src/services/controlledDataMigrationService.js, onboardingMigrationRoutes.js` | `OutletCopyLog, CafeTemplate, Cafe` | `Backend/test/p19_onboardingTemplatesMigration.test.js` | **implemented and verified** | P19 Multi-outlet copy settings, mandatory exclusion safeguards (GSTIN, PAN, terminals), immutable copy logs and history. |
+| **F126** | File operations | P19 | `Frontend/src/js/pages/onboardingMigration.js` | `Backend/src/services/controlledDataMigrationService.js, onboardingMigrationRoutes.js` | `OutletCopyLog, CafeTemplate, Cafe` | `Backend/test/p19_onboardingTemplatesMigration.test.js` | **implemented and verified** | P19 Multi-outlet copy settings, mandatory exclusion safeguards (GSTIN, PAN, terminals), immutable copy logs and history. |
 | **F127** | Recipe setup | P05 | `Frontend/src/js/pages/inventory.js` | `Backend/src/routes/inventoryRoutes.js, bomDepletionService.js` | `InventoryItem, BOM, CafeInventoryConfig` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | Raw materials master, recipes, unit conversions, yield factors, packaging BOM. |
 | **F128** | Multiple purchase | P05 | `Frontend/src/js/pages/inventory.js` | `Backend/src/routes/inventoryRoutes.js, bomDepletionService.js` | `InventoryItem, BOM, CafeInventoryConfig` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | Raw materials master, recipes, unit conversions, yield factors, packaging BOM. |
 | **F129** | Base-unit costing | P05 | `Frontend/src/js/pages/inventory.js` | `Backend/src/routes/inventoryRoutes.js, bomDepletionService.js` | `InventoryItem, BOM, CafeInventoryConfig` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | Raw materials master, recipes, unit conversions, yield factors, packaging BOM. |
@@ -321,7 +369,7 @@ Total benchmark records evaluated: **485** (351 Core entries `F001`–`F351` + 1
 | **F166** | Batch/valuation | P11 | `Frontend/src/js/pages/inventory.js, quality.js` | `Backend/src/services/fefoService.js, recallTraceService.js` | `InventoryLot, WasteLog, NonConformanceReport` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | Batch tracking, expiry dates, FEFO picking, photo-verified wastage, recall tracing. |
 | **F167** | Batch code changes | P11 | `Frontend/src/js/pages/inventory.js, quality.js` | `Backend/src/services/fefoService.js, recallTraceService.js` | `InventoryLot, WasteLog, NonConformanceReport` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | Batch tracking, expiry dates, FEFO picking, photo-verified wastage, recall tracing. |
 | **F168** | Expiry settings | P11 | `Frontend/src/js/pages/inventory.js, quality.js` | `Backend/src/services/fefoService.js, recallTraceService.js` | `InventoryLot, WasteLog, NonConformanceReport` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | Batch tracking, expiry dates, FEFO picking, photo-verified wastage, recall tracing. |
-| **F169** | Opening batch | P11 | `Frontend/src/js/pages/inventory.js, quality.js` | `Backend/src/services/fefoService.js, recallTraceService.js` | `InventoryLot, WasteLog, NonConformanceReport` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | Batch tracking, expiry dates, FEFO picking, photo-verified wastage, recall tracing. |
+| **F169** | Opening batch | P19 | `Frontend/src/js/pages/onboardingMigration.js` | `Backend/src/services/controlledDataMigrationService.js` | `DataMigrationRun, InventoryLot` | `Backend/test/p19_onboardingTemplatesMigration.test.js` | **implemented and verified** | P19 Opening stock batch migration with strict reconciliation of quantities and integer valuation (paise). |
 | **F170** | Batch purchase | P11 | `Frontend/src/js/pages/inventory.js, quality.js` | `Backend/src/services/fefoService.js, recallTraceService.js` | `InventoryLot, WasteLog, NonConformanceReport` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | Batch tracking, expiry dates, FEFO picking, photo-verified wastage, recall tracing. |
 | **F171** | Batch consumption | P11 | `Frontend/src/js/pages/inventory.js, quality.js` | `Backend/src/services/fefoService.js, recallTraceService.js` | `InventoryLot, WasteLog, NonConformanceReport` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | Batch tracking, expiry dates, FEFO picking, photo-verified wastage, recall tracing. |
 | **F172** | Expiry and batch | P11 | `Frontend/src/js/pages/inventory.js, quality.js` | `Backend/src/services/fefoService.js, recallTraceService.js` | `InventoryLot, WasteLog, NonConformanceReport` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | Batch tracking, expiry dates, FEFO picking, photo-verified wastage, recall tracing. |
@@ -344,9 +392,9 @@ Total benchmark records evaluated: **485** (351 Core entries `F001`–`F351` + 1
 | **F189** | Backdated | P11 | `Frontend/src/js/pages/inventory.js` | `Backend/src/routes/stockTransferRoutes.js, inventoryCountService.js` | `StockTransfer, StockCount, StockMovement` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Blind physical counts, variance adjustment, two-stage inter-cafe stock transfers. |
 | **F190** | Freeze | P11 | `Frontend/src/js/pages/inventory.js` | `Backend/src/routes/stockTransferRoutes.js, inventoryCountService.js` | `StockTransfer, StockCount, StockMovement` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Blind physical counts, variance adjustment, two-stage inter-cafe stock transfers. |
 | **F191** | Freeze date limits | P11 | `Frontend/src/js/pages/inventory.js` | `Backend/src/routes/stockTransferRoutes.js, inventoryCountService.js` | `StockTransfer, StockCount, StockMovement` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Blind physical counts, variance adjustment, two-stage inter-cafe stock transfers. |
-| **F192** | Inventory settings | P11 | `Frontend/src/js/pages/inventory.js` | `Backend/src/routes/stockTransferRoutes.js, inventoryCountService.js` | `StockTransfer, StockCount, StockMovement` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Blind physical counts, variance adjustment, two-stage inter-cafe stock transfers. |
-| **F193** | Excluded copy | P11 | `Frontend/src/js/pages/inventory.js` | `Backend/src/routes/stockTransferRoutes.js, inventoryCountService.js` | `StockTransfer, StockCount, StockMovement` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Blind physical counts, variance adjustment, two-stage inter-cafe stock transfers. |
-| **F194** | Copy logs | P11 | `Frontend/src/js/pages/inventory.js` | `Backend/src/routes/stockTransferRoutes.js, inventoryCountService.js` | `StockTransfer, StockCount, StockMovement` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Blind physical counts, variance adjustment, two-stage inter-cafe stock transfers. |
+| **F192** | Inventory settings | P19 | `Frontend/src/js/pages/onboardingMigration.js` | `Backend/src/services/controlledDataMigrationService.js, onboardingMigrationRoutes.js` | `OutletCopyLog, CafeTemplate, Cafe` | `Backend/test/p19_onboardingTemplatesMigration.test.js` | **implemented and verified** | P19 Multi-outlet copy settings, mandatory exclusion safeguards (GSTIN, PAN, terminals), immutable copy logs and history. |
+| **F193** | Excluded copy | P19 | `Frontend/src/js/pages/onboardingMigration.js` | `Backend/src/services/controlledDataMigrationService.js, onboardingMigrationRoutes.js` | `OutletCopyLog, CafeTemplate, Cafe` | `Backend/test/p19_onboardingTemplatesMigration.test.js` | **implemented and verified** | P19 Multi-outlet copy settings, mandatory exclusion safeguards (GSTIN, PAN, terminals), immutable copy logs and history. |
+| **F194** | Copy logs | P19 | `Frontend/src/js/pages/onboardingMigration.js` | `Backend/src/services/controlledDataMigrationService.js, onboardingMigrationRoutes.js` | `OutletCopyLog, CafeTemplate, Cafe` | `Backend/test/p19_onboardingTemplatesMigration.test.js` | **implemented and verified** | P19 Multi-outlet copy settings, mandatory exclusion safeguards (GSTIN, PAN, terminals), immutable copy logs and history. |
 | **F195** | Central master | P11 | `Frontend/src/js/pages/inventory.js` | `Backend/src/routes/stockTransferRoutes.js, inventoryCountService.js` | `StockTransfer, StockCount, StockMovement` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Blind physical counts, variance adjustment, two-stage inter-cafe stock transfers. |
 | **F196** | Regional groupings | P11 | `Frontend/src/js/pages/inventory.js` | `Backend/src/routes/stockTransferRoutes.js, inventoryCountService.js` | `StockTransfer, StockCount, StockMovement` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Blind physical counts, variance adjustment, two-stage inter-cafe stock transfers. |
 | **F197** | Menu price | P11 | `Frontend/src/js/pages/inventory.js` | `Backend/src/routes/stockTransferRoutes.js, inventoryCountService.js` | `StockTransfer, StockCount, StockMovement` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Blind physical counts, variance adjustment, two-stage inter-cafe stock transfers. |
@@ -493,7 +541,7 @@ Total benchmark records evaluated: **485** (351 Core entries `F001`–`F351` + 1
 | **F338** | Local network | P02 / P04 / P20 | `Frontend/src/js/navigation.js, cafeOperationsDevices.js` | `Backend/src/server.js, operatorSessionService.js, mfaService.js` | `User, Session, HardwareDevice, AuditEvent` | `Backend/test/normalMasterDecommission.test.js, staffScopeSecurity.test.js` | **implemented and verified** | Governance topology, Normal Master decommissioned (403), Primary Master authority, device sessions. |
 | **F339** | Scheduled local | P02 / P04 / P20 | `Frontend/src/js/navigation.js, cafeOperationsDevices.js` | `Backend/src/server.js, operatorSessionService.js, mfaService.js` | `User, Session, HardwareDevice, AuditEvent` | `Backend/test/normalMasterDecommission.test.js, staffScopeSecurity.test.js` | **implemented and verified** | Governance topology, Normal Master decommissioned (403), Primary Master authority, device sessions. |
 | **F340** | Backup destination | P02 / P04 / P20 | `Frontend/src/js/navigation.js, cafeOperationsDevices.js` | `Backend/src/server.js, operatorSessionService.js, mfaService.js` | `User, Session, HardwareDevice, AuditEvent` | `Backend/test/normalMasterDecommission.test.js, staffScopeSecurity.test.js` | **implemented and verified** | Governance topology, Normal Master decommissioned (403), Primary Master authority, device sessions. |
-| **F341** | Migration | P02 / P04 / P20 | `Frontend/src/js/navigation.js, cafeOperationsDevices.js` | `Backend/src/server.js, operatorSessionService.js, mfaService.js` | `User, Session, HardwareDevice, AuditEvent` | `Backend/test/normalMasterDecommission.test.js, staffScopeSecurity.test.js` | **implemented and verified** | Governance topology, Normal Master decommissioned (403), Primary Master authority, device sessions. |
+| **F341** | Migration | P19 | `Frontend/src/js/pages/onboardingMigration.js` | `Backend/src/services/controlledDataMigrationService.js` | `DataMigrationRun, Customer` | `Backend/test/p19_onboardingTemplatesMigration.test.js` | **implemented and verified** | P19 Customer CRM, loyalty balances, and opening dues migration with provenance tracking and 0 operational bills created. |
 | **F342** | Terminal | P02 / P04 / P20 | `Frontend/src/js/navigation.js, cafeOperationsDevices.js` | `Backend/src/server.js, operatorSessionService.js, mfaService.js` | `User, Session, HardwareDevice, AuditEvent` | `Backend/test/normalMasterDecommission.test.js, staffScopeSecurity.test.js` | **implemented and verified** | Governance topology, Normal Master decommissioned (403), Primary Master authority, device sessions. |
 | **F343** | Plan families | P02 / P04 / P20 | `Frontend/src/js/navigation.js, cafeOperationsDevices.js` | `Backend/src/server.js, operatorSessionService.js, mfaService.js` | `User, Session, HardwareDevice, AuditEvent` | `Backend/test/normalMasterDecommission.test.js, staffScopeSecurity.test.js` | **implemented and verified** | Governance topology, Normal Master decommissioned (403), Primary Master authority, device sessions. |
 | **F344** | Regional services | P02 / P04 / P20 | `Frontend/src/js/navigation.js, cafeOperationsDevices.js` | `Backend/src/server.js, operatorSessionService.js, mfaService.js` | `User, Session, HardwareDevice, AuditEvent` | `Backend/test/normalMasterDecommission.test.js, staffScopeSecurity.test.js` | **implemented and verified** | Governance topology, Normal Master decommissioned (403), Primary Master authority, device sessions. |
@@ -510,7 +558,7 @@ Total benchmark records evaluated: **485** (351 Core entries `F001`–`F351` + 1
 ## 5. Master Register — 134 Omissions Supplement Entries (A001–A134)
 
 | ID | Addition / Option Name | Package | Frontend Source | Backend API / Service | Persistence Model | Test Evidence | Status | Evidence & Notes |
-| :--- | :--- | :---: | :--- | :--- | :--- | :--- | :--- | :---: | :--- |
+| :--- | :--- | :---: | :--- | :--- | :--- | :--- | :---: | :--- |
 | **A001** | Finance dashboard | P12 | `Frontend/src/js/pages/finance.js, reports.js` | `Backend/src/routes/reportRoutes.js, OperationalReportService.js` | `FinancialTransaction, StoreDayAudit` | `Backend/test/ownerReportsAnalyticsParity.test.js` | **implemented and verified** | Finance dashboard, payout tracking, operational KPI consolidation. |
 | **A002** | Finance roadmap | P12 | `Frontend/src/js/pages/finance.js, reports.js` | `Backend/src/routes/reportRoutes.js, OperationalReportService.js` | `FinancialTransaction, StoreDayAudit` | `Backend/test/ownerReportsAnalyticsParity.test.js` | **implemented and verified** | Finance dashboard, payout tracking, operational KPI consolidation. |
 | **A003** | Restaurant electronic tax | P12 / P21 | `Frontend/src/js/pages/finance.js` | `Backend/src/services/gstTaxService.js` | `APInvoice, BusinessDocument` | `Backend/test/aiInvoiceStagingValidation.test.js` | **conditional on an external dependency** | Restaurant electronic tax documents (e-invoice, e-way bill via NIC/IRP portal API). |
@@ -603,18 +651,18 @@ Total benchmark records evaluated: **485** (351 Core entries `F001`–`F351` + 1
 | **A090** | Action-needed dashboard | P05 / P06 / P08 / P11 | `Frontend/src/js/pages/inventory.js, procurement.js` | `Backend/src/services/fefoService.js, replenishmentRecommendationService.js` | `InventoryItem, InventoryLot, PurchaseOrder` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Inventory bulk editing, recipe yield scaling, minimum order quantities, supplier price variances. |
 | **A091** | Sub-tender visibility | P05 / P06 / P08 / P11 | `Frontend/src/js/pages/inventory.js, procurement.js` | `Backend/src/services/fefoService.js, replenishmentRecommendationService.js` | `InventoryItem, InventoryLot, PurchaseOrder` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Inventory bulk editing, recipe yield scaling, minimum order quantities, supplier price variances. |
 | **A092** | Brand sales summaries | P05 / P06 / P08 / P11 | `Frontend/src/js/pages/inventory.js, procurement.js` | `Backend/src/services/fefoService.js, replenishmentRecommendationService.js` | `InventoryItem, InventoryLot, PurchaseOrder` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Inventory bulk editing, recipe yield scaling, minimum order quantities, supplier price variances. |
-| **A093** | Supplier mapping import | P05 / P06 / P08 / P11 | `Frontend/src/js/pages/inventory.js, procurement.js` | `Backend/src/services/fefoService.js, replenishmentRecommendationService.js` | `InventoryItem, InventoryLot, PurchaseOrder` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Inventory bulk editing, recipe yield scaling, minimum order quantities, supplier price variances. |
-| **A094** | Supplier mapping | P05 / P06 / P08 / P11 | `Frontend/src/js/pages/inventory.js, procurement.js` | `Backend/src/services/fefoService.js, replenishmentRecommendationService.js` | `InventoryItem, InventoryLot, PurchaseOrder` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Inventory bulk editing, recipe yield scaling, minimum order quantities, supplier price variances. |
-| **A095** | Supplier import | P05 / P06 / P08 / P11 | `Frontend/src/js/pages/inventory.js, procurement.js` | `Backend/src/services/fefoService.js, replenishmentRecommendationService.js` | `InventoryItem, InventoryLot, PurchaseOrder` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Inventory bulk editing, recipe yield scaling, minimum order quantities, supplier price variances. |
+| **A093** | Supplier mapping import | P19 | `Frontend/src/js/pages/onboardingMigration.js` | `Backend/src/services/controlledDataMigrationService.js` | `DataMigrationRun, Vendor` | `Backend/test/p19_onboardingTemplatesMigration.test.js` | **implemented and verified** | P19 Supplier-material mapping bulk import/export, unit validation, rate validation, and CSV formula injection sanitization. |
+| **A094** | Supplier mapping | P19 | `Frontend/src/js/pages/onboardingMigration.js` | `Backend/src/services/controlledDataMigrationService.js` | `DataMigrationRun, Vendor` | `Backend/test/p19_onboardingTemplatesMigration.test.js` | **implemented and verified** | P19 Supplier-material mapping bulk import/export, unit validation, rate validation, and CSV formula injection sanitization. |
+| **A095** | Supplier import | P19 | `Frontend/src/js/pages/onboardingMigration.js` | `Backend/src/services/controlledDataMigrationService.js` | `DataMigrationRun, Vendor` | `Backend/test/p19_onboardingTemplatesMigration.test.js` | **implemented and verified** | P19 Supplier-material mapping bulk import/export, unit validation, rate validation, and CSV formula injection sanitization. |
 | **A096** | Delegated department | P05 / P06 / P08 / P11 | `Frontend/src/js/pages/inventory.js, procurement.js` | `Backend/src/services/fefoService.js, replenishmentRecommendationService.js` | `InventoryItem, InventoryLot, PurchaseOrder` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Inventory bulk editing, recipe yield scaling, minimum order quantities, supplier price variances. |
 | **A097** | Department defaults | P05 / P06 / P08 / P11 | `Frontend/src/js/pages/inventory.js, procurement.js` | `Backend/src/services/fefoService.js, replenishmentRecommendationService.js` | `InventoryItem, InventoryLot, PurchaseOrder` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Inventory bulk editing, recipe yield scaling, minimum order quantities, supplier price variances. |
 | **A098** | Department modification | P05 / P06 / P08 / P11 | `Frontend/src/js/pages/inventory.js, procurement.js` | `Backend/src/services/fefoService.js, replenishmentRecommendationService.js` | `InventoryItem, InventoryLot, PurchaseOrder` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Inventory bulk editing, recipe yield scaling, minimum order quantities, supplier price variances. |
-| **A099** | Suggested ingredient | P05 / P06 / P08 / P11 | `Frontend/src/js/pages/inventory.js, procurement.js` | `Backend/src/services/fefoService.js, replenishmentRecommendationService.js` | `InventoryItem, InventoryLot, PurchaseOrder` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Inventory bulk editing, recipe yield scaling, minimum order quantities, supplier price variances. |
-| **A100** | Suggestion eligibility and | P05 / P06 / P08 / P11 | `Frontend/src/js/pages/inventory.js, procurement.js` | `Backend/src/services/fefoService.js, replenishmentRecommendationService.js` | `InventoryItem, InventoryLot, PurchaseOrder` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Inventory bulk editing, recipe yield scaling, minimum order quantities, supplier price variances. |
-| **A101** | Bulk recipe workbook | P05 / P06 / P08 / P11 | `Frontend/src/js/pages/inventory.js, procurement.js` | `Backend/src/services/fefoService.js, replenishmentRecommendationService.js` | `InventoryItem, InventoryLot, PurchaseOrder` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Inventory bulk editing, recipe yield scaling, minimum order quantities, supplier price variances. |
-| **A102** | Recipe filter scope | P05 / P06 / P08 / P11 | `Frontend/src/js/pages/inventory.js, procurement.js` | `Backend/src/services/fefoService.js, replenishmentRecommendationService.js` | `InventoryItem, InventoryLot, PurchaseOrder` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Inventory bulk editing, recipe yield scaling, minimum order quantities, supplier price variances. |
-| **A103** | Recipe item types | P05 / P06 / P08 / P11 | `Frontend/src/js/pages/inventory.js, procurement.js` | `Backend/src/services/fefoService.js, replenishmentRecommendationService.js` | `InventoryItem, InventoryLot, PurchaseOrder` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Inventory bulk editing, recipe yield scaling, minimum order quantities, supplier price variances. |
-| **A104** | Bulk ingredient removal | P05 / P06 / P08 / P11 | `Frontend/src/js/pages/inventory.js, procurement.js` | `Backend/src/services/fefoService.js, replenishmentRecommendationService.js` | `InventoryItem, InventoryLot, PurchaseOrder` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Inventory bulk editing, recipe yield scaling, minimum order quantities, supplier price variances. |
+| **A099** | Suggested ingredient | P19 | `Frontend/src/js/pages/onboardingMigration.js` | `Backend/src/services/controlledDataMigrationService.js` | `Recipe, GlobalInventoryItem` | `Backend/test/p19_onboardingTemplatesMigration.test.js` | **implemented and verified** | P19 Starter master data suggestions, recipe workbook bulk editing and component removal. |
+| **A100** | Suggestion eligibility and | P19 | `Frontend/src/js/pages/onboardingMigration.js` | `Backend/src/services/controlledDataMigrationService.js` | `Recipe, GlobalInventoryItem` | `Backend/test/p19_onboardingTemplatesMigration.test.js` | **implemented and verified** | P19 Starter master data suggestions, recipe workbook bulk editing and component removal. |
+| **A101** | Bulk recipe workbook | P19 | `Frontend/src/js/pages/onboardingMigration.js` | `Backend/src/services/controlledDataMigrationService.js` | `Recipe, GlobalInventoryItem` | `Backend/test/p19_onboardingTemplatesMigration.test.js` | **implemented and verified** | P19 Starter master data suggestions, recipe workbook bulk editing and component removal. |
+| **A102** | Recipe filter scope | P19 | `Frontend/src/js/pages/onboardingMigration.js` | `Backend/src/services/controlledDataMigrationService.js` | `Recipe, GlobalInventoryItem` | `Backend/test/p19_onboardingTemplatesMigration.test.js` | **implemented and verified** | P19 Starter master data suggestions, recipe workbook bulk editing and component removal. |
+| **A103** | Recipe item types | P19 | `Frontend/src/js/pages/onboardingMigration.js` | `Backend/src/services/controlledDataMigrationService.js` | `Recipe, GlobalInventoryItem` | `Backend/test/p19_onboardingTemplatesMigration.test.js` | **implemented and verified** | P19 Starter master data suggestions, recipe workbook bulk editing and component removal. |
+| **A104** | Bulk ingredient removal | P19 | `Frontend/src/js/pages/onboardingMigration.js` | `Backend/src/services/controlledDataMigrationService.js` | `Recipe, GlobalInventoryItem` | `Backend/test/p19_onboardingTemplatesMigration.test.js` | **implemented and verified** | P19 Starter master data suggestions, recipe workbook bulk editing and component removal. |
 | **A105** | Barcode weight parsing | P05 / P06 / P08 / P11 | `Frontend/src/js/pages/inventory.js, procurement.js` | `Backend/src/services/fefoService.js, replenishmentRecommendationService.js` | `InventoryItem, InventoryLot, PurchaseOrder` | `Backend/test/p0D_p1A_grnIdempotencyDiscrepancy.test.js` | **implemented and verified** | Inventory bulk editing, recipe yield scaling, minimum order quantities, supplier price variances. |
 | **A106** | Per-material scan mode | P09 / P12 | `Frontend/src/js/pages/pos.js, settings.js` | `Backend/src/services/gstTaxService.js` | `Cafe, PosTerminalConfig` | `Backend/test/canonicalAccessMatrix.test.js` | **implemented and verified** | Regional state GST configuration, multi-jurisdiction tax handling. |
 | **A107** | Weight transaction scope | P09 / P12 | `Frontend/src/js/pages/pos.js, settings.js` | `Backend/src/services/gstTaxService.js` | `Cafe, PosTerminalConfig` | `Backend/test/canonicalAccessMatrix.test.js` | **implemented and verified** | Regional state GST configuration, multi-jurisdiction tax handling. |
@@ -648,10 +696,10 @@ Total benchmark records evaluated: **485** (351 Core entries `F001`–`F351` + 1
 
 ---
 
-## 6. Traceable Backlog & Deferred Items (P19–P22)
+## 6. Traceable Backlog & Deferred Items (P20–P22)
 
-Per the governing execution instructions, packages P01–P18 are closed and verified. Future scope items are preserved in the traceable backlog below without destabilising accepted work:
+Per the governing execution instructions, packages P01–P19 are closed and verified. Future scope items are preserved in the traceable backlog below without destabilising accepted work:
 
-1. **Package P19 (Advanced Marketing, Catering & Custom Integrations)**: Institutional quoting, multi-event catering, and customized integrations (remains unstarted).
-2. **Package P20 & P21 (Hardware & External Services)**: 44 conditional entries (payment terminals, soundboxes, Google Business profile, and biometric clocking hardware). Correct adapter boundaries are defined; live operation remains marked conditional until physical hardware is connected.
+1. **Package P20 & P21 (Hardware & External Services)**: 44 conditional entries (payment terminals, soundboxes, Google Business profile, and biometric clocking hardware). Correct adapter boundaries are defined; live operation remains marked conditional until physical hardware is connected.
+2. **Package P22 (Advanced Custom Analytics & Specialized Add-ons)**: Institutional quoting, multi-event catering, and customized integrations.
 
