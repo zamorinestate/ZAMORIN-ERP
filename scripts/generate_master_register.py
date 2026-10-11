@@ -566,7 +566,7 @@ def generate_register():
         out.write('1. **Package P20 & P21 (Hardware & External Services)**: 44 conditional entries (payment terminals, soundboxes, Google Business profile, and biometric clocking hardware). Correct adapter boundaries are defined; live operation remains marked conditional until physical hardware is connected.\n')
         out.write('2. **Package P22 (Advanced Custom Analytics & Specialized Add-ons)**: Institutional quoting, multi-event catering, and customized integrations.\n\n')
 
-    root_path = 'PETPOOJA_BENCHMARK_IMPLEMENTATION_REGISTER.md'
+    root_path = os.path.join('docs', 'PETPOOJA_BENCHMARK_IMPLEMENTATION_REGISTER.md')
     import shutil
     shutil.copy(out_path, root_path)
     print(f'Master register written to {out_path} and {root_path} ({os.path.getsize(out_path)} bytes)')

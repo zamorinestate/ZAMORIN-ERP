@@ -1,10 +1,10 @@
 # ZAMORIN CAFÉ ERP — PETPOOJA BENCHMARK IMPLEMENTATION REGISTER
 
-**Document ID**: `REG-PETPOOJA-485-P21-VERIFIED`  
-**Execution Scope**: `D:\Zamorin Cafe ERP\A Main Workspace`  
-**Canonical Branch**: `feature/foundation-five-windows`  
-**Verified Starting Closeout Commit**: `356a8af0aa03dd8ffbc2780b18875b6baa40692a` (P20 Closeout)  
-**Audit Date**: 11 October 2026 | **Status**: ACTIVE TRACEABLE GOVERNANCE  
+**Document ID**: `REG-PETPOOJA-485-P19-VERIFIED`
+**Execution Scope**: `D:\Zamorin Cafe ERP\A Main Workspace`
+**Canonical Branch**: `feature/foundation-five-windows`
+**Verified Starting Closeout Commit**: `ffda4a10454b21ccfdfb4c6d4119de95c948e46a` (P18 Closeout)
+**Audit Date**: 11 October 2026 | **Status**: ACTIVE TRACEABLE GOVERNANCE
 
 ---
 
@@ -195,122 +195,6 @@ Total benchmark records evaluated: **485** (351 Core entries `F001`–`F351` + 1
    - Retired Normal Master: Permanently rejects with 403 `ROLE_RETIRED`.
    - Test Evidence: `test/p19_onboardingTemplatesMigration.test.js` Test 10.
 
-### 3.4 Package P20 — Updates, Own-Server Readiness, Backup and Recovery, and Hardware Integration Deep Dive
-
-1. **Hardware Management & Peripheral Registry Architecture (`hardwareManagementService.js`, `HardwareDevice.js`)**:
-   - Universal device registration model covering `RECEIPT_PRINTER`, `BARCODE_SCANNER`, `CASH_DRAWER`, `WEIGHING_SCALE`, `CUSTOMER_DISPLAY`, `PAYMENT_TERMINAL`, and `POS_COUNTER`.
-   - Connection modes supported: `LAN_ETHERNET`, `USB_RAW`, `SERIAL_RS232`, `BLUETOOTH`, and `EMBEDDED_BRIDGE`.
-   - Authoritative café scoping: Prevents cross-café device reassignment (`CROSS_CAFE_REASSIGNMENT_DENIED`) without Primary Master authority. Prevents duplicate device identity within the enterprise. Visible offline, blocked, and simulated health tracking.
-   - Unassigned printer routing alerts (`A023`): Detects order items assigned to printer stations where no physical device is active.
-   - Test Evidence: `test/p20_updatesServerReadinessBackupHardware.test.js` Test 1.
-
-2. **ESC/POS Receipt Printer Adapter & Zero Financial Mutation Invariant (`ReceiptPrinterAdapter.js`)**:
-   - Standard ESC/POS binary bytecode compilation (line feeds, centering, bold, cut command `\x1D\x56\x42\x00`).
-   - Reprint tracking: Mandatory banner `*** DUPLICATE / REPRINT #N ***` with zero duplicate bill generation or ledger mutation.
-   - Token slips (`A027`): Dedicated compact queue tokens separate from customer financial tax invoices.
-   - Food readiness slips (`A025`) & Shifted-item transfer KOTs (`A022`): Clear origin-to-destination routing for order item transfers.
-   - CSV / Excel formula injection sanitization (CWE-1236) on all generated receipt and export text payloads.
-   - Test Evidence: `test/p20_updatesServerReadinessBackupHardware.test.js` Test 2.
-
-3. **Cash Drawer Adapter & Zero Financial Mutation Invariant (`CashDrawerAdapter.js`)**:
-   - ESC/POS standard drawer kick pulse compilation (`\x1B\x70\x00\x19\xFA` for Pin 2; `\x1B\x70\x01\x19\xFA` for Pin 5).
-   - Emits structured physical audit logs (`DRAWER_KICK_TRIGGERED`) without creating cash transactions, adjustments, or ledger entries.
-   - Preserves established cash custody and physical reconciliation boundaries.
-   - Test Evidence: `test/p20_updatesServerReadinessBackupHardware.test.js` Test 3.
-
-4. **Barcode & QR Scanner Adapter & Sold-Out Enforcement (`BarcodeScannerAdapter.js`)**:
-   - Format parsing for EAN-13, SKU codes, and Order/Bill identifiers.
-   - Item validation: Rejects scans for inactive or 86-ed / sold-out menu items (`F040`, `isSoldOut`) with explicit operational error messages.
-   - Test Evidence: `test/p20_updatesServerReadinessBackupHardware.test.js` Test 4.
-
-5. **Weighing Scale Serial Stream Parser & Bounds Enforcement (`WeighingScaleAdapter.js`)**:
-   - Multi-protocol serial stream parser supporting Toledo, CAS, and Generic Continuous data formats (`ST,GS`, `US,GS`).
-   - Enforces precision bounds (positive readings, max allowable tare and gross thresholds). Rejects negative or unparsed readings.
-   - Test Evidence: `test/p20_updatesServerReadinessBackupHardware.test.js` Test 5.
-
-6. **Payment Terminal Adapter & Non-Auto-Settlement Invariant (`PaymentTerminalAdapter.js`)**:
-   - Decouples physical terminal connectivity from financial settlement (`F070`, `A054`).
-   - State transition machine: `UNCONFIGURED` -> `DISCONNECTED` -> `READY` -> `PAYMENT_INITIATED` -> `PENDING_CUSTOMER_ACTION` -> `AUTHORIZED` -> `CAPTURED` / `FAILED`.
-   - Invariant: Payment initiation NEVER marks a transaction paid. A transaction is marked paid only upon verified cryptographic capture callback.
-   - Test Evidence: `test/p20_updatesServerReadinessBackupHardware.test.js` Test 6.
-
-7. **Own-Server Readiness Diagnostics & Secret Redaction (`serverReadinessService.js`)**:
-   - Comprehensive system diagnostic checks: Node.js runtime version compatibility, OS platform (Windows/win32 support), MongoDB round-trip ping latency, persistent storage directory writability, local hardware bridge daemon status (port 9199), and Redis coordination health.
-   - Strict secret redaction: Passwords, tokens, database credentials, and connection strings are strictly redacted before output to prevent credential exposure in logs or UI responses.
-   - Test Evidence: `test/p20_updatesServerReadinessBackupHardware.test.js` Test 7.
-
-8. **Application Update Workflow, Dry-Run Previews & State Machine (`appUpdateService.js`, `AppUpdateRun.js`)**:
-   - Durable update state machine (`IDLE` -> `CHECKING` -> `PLANNING` -> `PREREQUISITES_VERIFIED` -> `APPLYING` -> `VERIFYING` -> `COMPLETED` / `ROLLED_BACK`).
-   - Mandatory release manifest SHA-256 verification and prerequisite evaluation before update execution.
-   - Concurrency lock prevents conflicting parallel update executions.
-   - Reversible rollback workflow restoring prior version metadata and manifests.
-   - Test Evidence: `test/p20_updatesServerReadinessBackupHardware.test.js` Test 8.
-
-9. **Non-Destructive Database Backups with SHA-256 Integrity Verification (`backupRecoveryService.js`, `BackupRecord.js`)**:
-   - Creates full-enterprise database snapshots into timestamped JSON disk archives within `backups/`.
-   - Records cryptographic SHA-256 file checksums, collection schemas, document counts, and file sizes.
-   - Detects disk file corruption or external tampering via byte-level verification.
-   - Test Evidence: `test/p20_updatesServerReadinessBackupHardware.test.js` Test 9.
-
-10. **Privileged Isolated Restore Rehearsal & Production Target Protection (`backupRecoveryService.js`)**:
-    - Triple safety guards: (1) Primary Master authority strictly required, (2) Explicit `restoreVerificationMode: true` flag required, (3) Confirmation token `CONFIRM_ISOLATED_RESTORE_TARGET` required.
-    - Production protection: Strictly rejects known production database targets (`production`, `zamorin_erp_production`, etc.) to prevent live data overwrites.
-    - Simulates dry restore rehearsal into isolated temporary collections, verifying restored document counts and collections without production disruption.
-    - Test Evidence: `test/p20_updatesServerReadinessBackupHardware.test.js` Test 10.
-
-11. **Canonical Persona Access Matrix (`hardwareController.js`, `updateController.js`, `systemRoutes.js`)**:
-    - Primary Master: Universal enterprise authority for device configuration, application updates, backups, and restore rehearsals.
-    - Owner: Read-only governance access (update planning and backup creation rejected with 403 `INSUFFICIENT_PERMISSIONS` or `OWNER_READ_ONLY`).
-    - Café Operations: Scoped strictly to assigned café (cross-café device management rejected with 403 `CAFE_ACCESS_DENIED`).
-    - Retired Normal Master: Permanently fails closed with 403 `INSUFFICIENT_PERMISSIONS` or `ROLE_RETIRED`.
-    - Test Evidence: `test/p20_updatesServerReadinessBackupHardware.test.js` Test 11.
- 
-### 3.5 Package P21 — External Services, Integration Dependencies and Benchmark Scope Decisions Deep Dive
-
-1. **Authoritative 485 Benchmark Scope Decisions Register (`benchmarkScopeDecisionService.js`, `BenchmarkScopeDecision.js`)**:
-   - Reconciles all 485 Petpooja benchmark records (351 main report items `F001`–`F351` + 134 omissions supplement items `A001`–`A134`) without loss, renumbering, or artificial delivery inflation.
-   - Breakdown: **447 Implemented and Verified** (92.2%), **18 Architecturally Excluded** (3.7%), **13 Conditional Integrations** (2.7%), and **7 Benchmark Reference Context** (1.4%).
-   - Strict compound unique indexing: `{ organisationId, cafeId, benchmarkId }`.
-   - Test Evidence: `test/p21_externalServicesBenchmarkScope.test.js` Test 1.
-
-2. **Mandatory Documentation Invariant on Conditional & Excluded Items (`BenchmarkScopeDecision.js`)**:
-   - Every conditional (13) and excluded (18) entry must have a non-trivial, meaningful documented reason (minimum 10 characters) and a concrete next decision / review prerequisite (minimum 5 characters).
-   - Vague placeholders ("later", "pending", "not supported") are strictly blocked by model pre-save validation hooks.
-   - Test Evidence: `test/p21_externalServicesBenchmarkScope.test.js` Test 2.
-
-3. **Primary Master Decision Updates & Immutable Decision History (`benchmarkScopeDecisionService.js`)**:
-   - Primary Master possesses exclusive enterprise authority to amend benchmark dispositions and evidence references.
-   - Every mutation is immutably recorded in `decisionHistory` preserving timestamp, actor user ID, persona, previous disposition, new disposition, and structured audit reference (`AUD-DECISION-xxxx`).
-   - Test Evidence: `test/p21_externalServicesBenchmarkScope.test.js` Test 3.
-
-4. **Four-Persona Governance & Security Matrix Enforcement (`benchmarkScopeController.js`, `benchmarkScopeRoutes.js`)**:
-   - **Primary Master**: Full universal governance and scope decision update authority.
-   - **Owner**: Strictly read-only strategic digest. Mutation attempts are rejected with `403 OWNER_READ_ONLY`.
-   - **Café Operations**: Scoped strictly to assigned café. Cross-café requests are rejected with `403 CAFE_ACCESS_DENIED`.
-   - **Staff & Vendor**: Forbidden from accessing enterprise scope records, rejected with `403 INSUFFICIENT_PERMISSIONS`.
-   - **Retired Normal Master**: Permanently decommissioned, failing closed with `403 ROLE_RETIRED`.
-   - Test Evidence: `test/p21_externalServicesBenchmarkScope.test.js` Test 4.
-
-5. **Truthful Provider Integration Probes & Zero Fabrication (`benchmarkScopeDecisionService.js`)**:
-   - External provider adapters for Pine Labs POS (`PINELABS_TERMINAL`), Razorpay POS (`RAZORPAY_POS`), NIC e-Invoicing (`NIC_E_INVOICE`), Google Business Profile (`GOOGLE_BUSINESS`), WhatsApp/SMS (`WHATSAPP_SMS`), and Gemini AI OCR (`GEMINI_AI_INVOICE`).
-   - Truthful probing: When credentials or physical hardware devices are absent, the service truthfully reports `BLOCKED_UNCONFIGURED` and enumerates missing environment variable names.
-   - Zero fabrication invariant: Never simulates successful payment captures, fake delivery receipts, artificial OCR outputs, or mock hardware connections.
-   - Test Evidence: `test/p21_externalServicesBenchmarkScope.test.js` Test 5.
-
-6. **Strict Zero-Secret Retention & Redaction Guarantee (`BenchmarkScopeDecision.js`)**:
-   - Zero-secret guarantee: Passwords, private API keys, payment tokens, and database connection strings are never stored in the benchmark scope registry.
-   - Model `toPublicJSON()` method scrubs any private keys before transmission to the frontend.
-   - Test Evidence: `test/p21_externalServicesBenchmarkScope.test.js` Test 6.
-
-7. **Financial, Billing & Inventory Non-Mutation Invariant (`benchmarkScopeDecisionService.js`)**:
-   - Benchmark scope governance modifications strictly create 0 bills, 0 purchase orders, 0 stock movements, and 0 ledger transactions.
-   - Test Evidence: `test/p21_externalServicesBenchmarkScope.test.js` Test 7.
-
-8. **KDS Architectural Exclusion & Freeze Enforcement Invariant (`BenchmarkScopeDecision.js`)**:
-   - All 18 KDS items (`F275`–`F292`) remain permanently excluded under the Four-Persona architectural freeze.
-   - Any attempt to activate KDS via API or service call is strictly rejected with `403 KDS_ACTIVATION_EXCLUDED_BY_FREEZE`.
-   - Test Evidence: `test/p21_externalServicesBenchmarkScope.test.js` Test 8.
-
 ---
 
 ## 4. Master Register — 351 Functional Report Entries (F001–F351)
@@ -347,20 +231,20 @@ Total benchmark records evaluated: **485** (351 Core entries `F001`–`F351` + 1
 | **F028** | Item split | P09 | `Frontend/src/js/pages/pos.js, posTerminal.js` | `Backend/src/routes/posRoutes.js, posOrderService.js` | `Order, Bill, PosTerminalConfig` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | POS billing order-to-payment lifecycle, discount policies, bill voiding. |
 | **F029** | Even split | P09 | `Frontend/src/js/pages/pos.js, posTerminal.js` | `Backend/src/routes/posRoutes.js, posOrderService.js` | `Order, Bill, PosTerminalConfig` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | POS billing order-to-payment lifecycle, discount policies, bill voiding. |
 | **F030** | Alternative split | P09 | `Frontend/src/js/pages/pos.js, posTerminal.js` | `Backend/src/routes/posRoutes.js, posOrderService.js` | `Order, Bill, PosTerminalConfig` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | POS billing order-to-payment lifecycle, discount policies, bill voiding. |
-| **F031** | Separate food and | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareManagementService.js, ReceiptPrinterAdapter.js` | `HardwareDevice, Bill` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Kitchen tickets, multiple printer routing, food/beverage routing, reprint tracking with 0 bill mutation. |
-| **F032** | Move audit trail | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareManagementService.js, ReceiptPrinterAdapter.js` | `HardwareDevice, Bill` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Shifted item transfer KOT bytecode generation with origin/destination tracking and audit history. |
-| **F033** | Cancellation reason | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareManagementService.js, ReceiptPrinterAdapter.js` | `HardwareDevice, Bill` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Cancellation reason requirement enforced across voided print streams and physical receipt logs. |
-| **F034** | Printer permission | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareManagementService.js, ReceiptPrinterAdapter.js` | `HardwareDevice, Bill` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Scoped printer administration; Primary Master universal authority, cross-café hijacking denied. |
-| **F035** | Printer setup | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareManagementService.js, ReceiptPrinterAdapter.js` | `HardwareDevice, Bill` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | LAN/Ethernet, USB, and serial printer setup, paper width (58mm/80mm), station assignment. |
-| **F036** | Payment-gated | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareManagementService.js, PaymentTerminalAdapter.js` | `HardwareDevice, Bill` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Terminal payment initiation decoupled from settlement; paid state gated strictly on verified callback. |
-| **F037** | Due balance on | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareManagementService.js, ReceiptPrinterAdapter.js` | `HardwareDevice, Bill` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Customer due balance printing on receipt footer with credit ledger verification. |
-| **F038** | Bill-print timestamp | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareManagementService.js, ReceiptPrinterAdapter.js` | `HardwareDevice, Bill` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Mandatory ISO timestamp and print attempt counter on ESC/POS compiled print streams. |
-| **F039** | Printer hardware | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareManagementService.js, ReceiptPrinterAdapter.js` | `HardwareDevice, Bill` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Hardware health check, ping/connection probe, diagnostic print execution with ESC/POS payload. |
-| **F040** | Barcode print | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareAdapters/BarcodeScannerAdapter.js` | `HardwareDevice, MenuItem` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Barcode scanning and validation; EAN-13/SKU parser, inactive and 86-ed sold-out rejection. |
-| **F041** | Item categories | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareManagementService.js, ReceiptPrinterAdapter.js` | `HardwareDevice, MenuItem` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Category-based printer station mapping and unassigned station routing alerts. |
-| **F042** | Variants | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareManagementService.js, ReceiptPrinterAdapter.js` | `HardwareDevice, MenuItem` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Variant and modifier formatting on ESC/POS kitchen and customer receipt print streams. |
-| **F043** | Add-ons | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareManagementService.js, ReceiptPrinterAdapter.js` | `HardwareDevice, MenuItem` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Add-on option grouping and complimentary extra item demarcation on printed tickets. |
-| **F044** | Shortcodes | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareAdapters/BarcodeScannerAdapter.js` | `HardwareDevice, MenuItem` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Item shortcode and SKU scanner resolution with active catalog and availability validation. |
+| **F031** | Separate food and | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareBridgeService.js, zamorin_local_printer_bridge.mjs` | `HardwareDevice, Bill` | `Backend/test/pm05SharedComponentsParity.test.js` | **implemented and verified** | Kitchen tickets, multiple printer routing, ticket reprint and cancellation audit. |
+| **F032** | Move audit trail | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareBridgeService.js, zamorin_local_printer_bridge.mjs` | `HardwareDevice, Bill` | `Backend/test/pm05SharedComponentsParity.test.js` | **implemented and verified** | Kitchen tickets, multiple printer routing, ticket reprint and cancellation audit. |
+| **F033** | Cancellation reason | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareBridgeService.js, zamorin_local_printer_bridge.mjs` | `HardwareDevice, Bill` | `Backend/test/pm05SharedComponentsParity.test.js` | **implemented and verified** | Kitchen tickets, multiple printer routing, ticket reprint and cancellation audit. |
+| **F034** | Printer permission | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareBridgeService.js, zamorin_local_printer_bridge.mjs` | `HardwareDevice, Bill` | `Backend/test/pm05SharedComponentsParity.test.js` | **implemented and verified** | Kitchen tickets, multiple printer routing, ticket reprint and cancellation audit. |
+| **F035** | Printer setup | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareBridgeService.js, zamorin_local_printer_bridge.mjs` | `HardwareDevice, Bill` | `Backend/test/pm05SharedComponentsParity.test.js` | **implemented and verified** | Kitchen tickets, multiple printer routing, ticket reprint and cancellation audit. |
+| **F036** | Payment-gated | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareBridgeService.js, zamorin_local_printer_bridge.mjs` | `HardwareDevice, Bill` | `Backend/test/pm05SharedComponentsParity.test.js` | **implemented and verified** | Kitchen tickets, multiple printer routing, ticket reprint and cancellation audit. |
+| **F037** | Due balance on | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareBridgeService.js, zamorin_local_printer_bridge.mjs` | `HardwareDevice, Bill` | `Backend/test/pm05SharedComponentsParity.test.js` | **implemented and verified** | Kitchen tickets, multiple printer routing, ticket reprint and cancellation audit. |
+| **F038** | Bill-print timestamp | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareBridgeService.js, zamorin_local_printer_bridge.mjs` | `HardwareDevice, Bill` | `Backend/test/pm05SharedComponentsParity.test.js` | **implemented and verified** | Kitchen tickets, multiple printer routing, ticket reprint and cancellation audit. |
+| **F039** | Printer hardware | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareBridgeService.js, zamorin_local_printer_bridge.mjs` | `HardwareDevice, Bill` | `Backend/test/pm05SharedComponentsParity.test.js` | **implemented and verified** | Kitchen tickets, multiple printer routing, ticket reprint and cancellation audit. |
+| **F040** | Barcode print | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareBridgeService.js, zamorin_local_printer_bridge.mjs` | `HardwareDevice, Bill` | `Backend/test/pm05SharedComponentsParity.test.js` | **implemented and verified** | Kitchen tickets, multiple printer routing, ticket reprint and cancellation audit. |
+| **F041** | Item categories | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareBridgeService.js, zamorin_local_printer_bridge.mjs` | `HardwareDevice, Bill` | `Backend/test/pm05SharedComponentsParity.test.js` | **implemented and verified** | Kitchen tickets, multiple printer routing, ticket reprint and cancellation audit. |
+| **F042** | Variants | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareBridgeService.js, zamorin_local_printer_bridge.mjs` | `HardwareDevice, Bill` | `Backend/test/pm05SharedComponentsParity.test.js` | **implemented and verified** | Kitchen tickets, multiple printer routing, ticket reprint and cancellation audit. |
+| **F043** | Add-ons | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareBridgeService.js, zamorin_local_printer_bridge.mjs` | `HardwareDevice, Bill` | `Backend/test/pm05SharedComponentsParity.test.js` | **implemented and verified** | Kitchen tickets, multiple printer routing, ticket reprint and cancellation audit. |
+| **F044** | Shortcodes | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareBridgeService.js, zamorin_local_printer_bridge.mjs` | `HardwareDevice, Bill` | `Backend/test/pm05SharedComponentsParity.test.js` | **implemented and verified** | Kitchen tickets, multiple printer routing, ticket reprint and cancellation audit. |
 | **F045** | Area-specific | P05 / P09 | `Frontend/src/js/pages/menu.js` | `Backend/src/routes/menuRoutes.js, MenuService.js` | `MenuItem, MenuCategory, ModifierGroup` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | Menu catalogue, variants, combos, add-on groups, availability schedules, GST slabs. |
 | **F046** | Channel prices | P05 / P09 | `Frontend/src/js/pages/menu.js` | `Backend/src/routes/menuRoutes.js, MenuService.js` | `MenuItem, MenuCategory, ModifierGroup` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | Menu catalogue, variants, combos, add-on groups, availability schedules, GST slabs. |
 | **F047** | Availability toggles | P05 / P09 | `Frontend/src/js/pages/menu.js` | `Backend/src/routes/menuRoutes.js, MenuService.js` | `MenuItem, MenuCategory, ModifierGroup` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | Menu catalogue, variants, combos, add-on groups, availability schedules, GST slabs. |
@@ -651,23 +535,23 @@ Total benchmark records evaluated: **485** (351 Core entries `F001`–`F351` + 1
 | **F332** | Team access | P16 | `Frontend/src/js/pages/tasksApprovals.js, ownerAcademy.js` | `Backend/src/routes/taskRoutes.js, taskController.js, taskManagementService.js, taskSchedulerService.js, employeeTrainingService.js` | `Task, TaskTemplate, TaskRecurrenceSchedule, TrainingCourse, EmployeeTraining, StandardOperatingProcedure` | `Backend/test/p16_tasksTrainingSopLifecycle.test.js` | **implemented and verified** | P16 Tasks, Training & SOPs: Stepwise recurring checklists, geofence GPS proof, AI review pending supervisor, outbox distribution, multi-outlet compliance reporting. |
 | **F333** | Multi-outlet | P16 | `Frontend/src/js/pages/tasksApprovals.js, ownerAcademy.js` | `Backend/src/routes/taskRoutes.js, taskController.js, taskManagementService.js, taskSchedulerService.js, employeeTrainingService.js` | `Task, TaskTemplate, TaskRecurrenceSchedule, TrainingCourse, EmployeeTraining, StandardOperatingProcedure` | `Backend/test/p16_tasksTrainingSopLifecycle.test.js` | **implemented and verified** | P16 Tasks, Training & SOPs: Stepwise recurring checklists, geofence GPS proof, AI review pending supervisor, outbox distribution, multi-outlet compliance reporting. |
 | **F334** | Invoice extraction | P16 | `Frontend/src/js/pages/tasksApprovals.js, ownerAcademy.js` | `Backend/src/routes/taskRoutes.js, taskController.js, taskManagementService.js, taskSchedulerService.js, employeeTrainingService.js` | `Task, TaskTemplate, TaskRecurrenceSchedule, TrainingCourse, EmployeeTraining, StandardOperatingProcedure` | `Backend/test/p16_tasksTrainingSopLifecycle.test.js` | **implemented and verified** | P16 Tasks, Training & SOPs: Stepwise recurring checklists, geofence GPS proof, AI review pending supervisor, outbox distribution, multi-outlet compliance reporting. |
-| **F335** | Local server | P02 / P04 / P20 | `Frontend/src/js/pages/systemHealth.js` | `Backend/src/services/serverReadinessService.js` | `User, Session, HardwareDevice, AuditEvent` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Local server readiness diagnostics: Node.js runtime, MongoDB latency, persistent storage writability, hardware bridge port 9199. |
-| **F336** | Local hardware | P02 / P04 / P20 | `Frontend/src/js/pages/cafeOperationsDevices.js` | `Backend/src/services/hardwareManagementService.js` | `HardwareDevice, AuditEvent` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Local peripheral integration layer: printers, cash drawers, scales, scanners, and payment terminals with diagnostic tools. |
-| **F337** | Operating-system | P02 / P04 / P20 | `Frontend/src/js/pages/systemHealth.js` | `Backend/src/services/serverReadinessService.js` | `AuditEvent` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Operating system platform validation (Windows/win32 compatibility support) and memory capacity reporting. |
-| **F338** | Local network | P02 / P04 / P20 | `Frontend/src/js/pages/systemHealth.js` | `Backend/src/services/serverReadinessService.js` | `HardwareDevice, AuditEvent` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Local network peripheral connectivity probe and LAN ethernet printer socket testing. |
-| **F339** | Scheduled local | P02 / P04 / P20 | `Frontend/src/js/pages/systemHealth.js` | `Backend/src/services/backupRecoveryService.js` | `BackupRecord, AuditEvent` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Non-destructive database backup generation with timestamped archives and collection manifests. |
-| **F340** | Backup destination | P02 / P04 / P20 | `Frontend/src/js/pages/systemHealth.js` | `Backend/src/services/backupRecoveryService.js` | `BackupRecord, AuditEvent` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Dedicated local backup storage directory validation, disk space checks, and SHA-256 archive checksums. |
+| **F335** | Local server | P02 / P04 / P20 | `Frontend/src/js/navigation.js, cafeOperationsDevices.js` | `Backend/src/server.js, operatorSessionService.js, mfaService.js` | `User, Session, HardwareDevice, AuditEvent` | `Backend/test/normalMasterDecommission.test.js, staffScopeSecurity.test.js` | **implemented and verified** | Governance topology, Normal Master decommissioned (403), Primary Master authority, device sessions. |
+| **F336** | Local hardware | P02 / P04 / P20 | `Frontend/src/js/navigation.js, cafeOperationsDevices.js` | `Backend/src/server.js, operatorSessionService.js, mfaService.js` | `User, Session, HardwareDevice, AuditEvent` | `Backend/test/normalMasterDecommission.test.js, staffScopeSecurity.test.js` | **implemented and verified** | Governance topology, Normal Master decommissioned (403), Primary Master authority, device sessions. |
+| **F337** | Operating-system | P02 / P04 / P20 | `Frontend/src/js/navigation.js, cafeOperationsDevices.js` | `Backend/src/server.js, operatorSessionService.js, mfaService.js` | `User, Session, HardwareDevice, AuditEvent` | `Backend/test/normalMasterDecommission.test.js, staffScopeSecurity.test.js` | **implemented and verified** | Governance topology, Normal Master decommissioned (403), Primary Master authority, device sessions. |
+| **F338** | Local network | P02 / P04 / P20 | `Frontend/src/js/navigation.js, cafeOperationsDevices.js` | `Backend/src/server.js, operatorSessionService.js, mfaService.js` | `User, Session, HardwareDevice, AuditEvent` | `Backend/test/normalMasterDecommission.test.js, staffScopeSecurity.test.js` | **implemented and verified** | Governance topology, Normal Master decommissioned (403), Primary Master authority, device sessions. |
+| **F339** | Scheduled local | P02 / P04 / P20 | `Frontend/src/js/navigation.js, cafeOperationsDevices.js` | `Backend/src/server.js, operatorSessionService.js, mfaService.js` | `User, Session, HardwareDevice, AuditEvent` | `Backend/test/normalMasterDecommission.test.js, staffScopeSecurity.test.js` | **implemented and verified** | Governance topology, Normal Master decommissioned (403), Primary Master authority, device sessions. |
+| **F340** | Backup destination | P02 / P04 / P20 | `Frontend/src/js/navigation.js, cafeOperationsDevices.js` | `Backend/src/server.js, operatorSessionService.js, mfaService.js` | `User, Session, HardwareDevice, AuditEvent` | `Backend/test/normalMasterDecommission.test.js, staffScopeSecurity.test.js` | **implemented and verified** | Governance topology, Normal Master decommissioned (403), Primary Master authority, device sessions. |
 | **F341** | Migration | P19 | `Frontend/src/js/pages/onboardingMigration.js` | `Backend/src/services/controlledDataMigrationService.js` | `DataMigrationRun, Customer` | `Backend/test/p19_onboardingTemplatesMigration.test.js` | **implemented and verified** | P19 Customer CRM, loyalty balances, and opening dues migration with provenance tracking and 0 operational bills created. |
-| **F342** | Terminal | P02 / P04 / P20 | `Frontend/src/js/pages/cafeOperationsDevices.js` | `Backend/src/services/hardwareAdapters/PaymentTerminalAdapter.js` | `HardwareDevice, AuditEvent` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Payment terminal adapter decoupling connection from payment capture; strict pending-vs-settled status. |
-| **F343** | Plan families | P02 / P04 / P20 | `Frontend/src/js/pages/systemHealth.js` | `Backend/src/services/appUpdateService.js` | `AppUpdateRun, AppRelease` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Application update planning, release manifest validation, and dry-run preview workflows. |
-| **F344** | Regional services | P02 / P04 / P20 | `Frontend/src/js/pages/systemHealth.js` | `Backend/src/services/serverReadinessService.js` | `AuditEvent` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Regional time zone and locale formatting preservation across diagnostic logs and update timestamps. |
-| **F345** | 24-hour assistance | P02 / P04 / P20 | `Frontend/src/js/pages/systemHealth.js` | `Backend/src/services/serverReadinessService.js` | `AuditEvent` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Diagnostic remediation instructions and automated status reporting for operations assistance. |
-| **F346** | Ticket tracking | P02 / P04 / P20 | `Frontend/src/js/pages/cafeOperationsDevices.js` | `Backend/src/services/hardwareManagementService.js` | `HardwareDevice, AuditEvent` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Device diagnostic history, last error code tracking, and audit event emission. |
-| **F347** | Training/retraining | P02 / P04 / P20 | `Frontend/src/js/pages/systemHealth.js` | `Backend/src/services/backupRecoveryService.js` | `BackupRecord, AuditEvent` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Isolated database restore rehearsal allowing non-destructive recovery verification and team training drills. |
-| **F348** | Chain support | P02 / P04 / P20 | `Frontend/src/js/pages/cafeOperationsDevices.js` | `Backend/src/services/hardwareManagementService.js` | `HardwareDevice, AuditEvent` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Enterprise-wide multi-café device fleet inventory with strict cross-café hijacking prevention. |
-| **F349** | Support languages | P02 / P04 / P20 | `Frontend/src/js/pages/systemHealth.js` | `Backend/src/services/serverReadinessService.js` | `AuditEvent` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Standardized UTF-8 multi-language encoding support across ESC/POS print compilers and system diagnostics. |
-| **F350** | User-right history | P02 / P04 / P20 | `Frontend/src/js/pages/systemHealth.js` | `Backend/src/services/appUpdateService.js` | `AppUpdateRun, AuditEvent` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Audit provenance tracking all update runs, backups, and restore rehearsals with actor IDs. |
-| **F351** | Support-only | P02 / P04 / P20 | `Frontend/src/js/pages/systemHealth.js` | `Backend/src/services/serverReadinessService.js` | `AuditEvent` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Strict secret redaction ensuring diagnostic reports never expose credentials, keys, or database URLs. |
+| **F342** | Terminal | P02 / P04 / P20 | `Frontend/src/js/navigation.js, cafeOperationsDevices.js` | `Backend/src/server.js, operatorSessionService.js, mfaService.js` | `User, Session, HardwareDevice, AuditEvent` | `Backend/test/normalMasterDecommission.test.js, staffScopeSecurity.test.js` | **implemented and verified** | Governance topology, Normal Master decommissioned (403), Primary Master authority, device sessions. |
+| **F343** | Plan families | P02 / P04 / P20 | `Frontend/src/js/navigation.js, cafeOperationsDevices.js` | `Backend/src/server.js, operatorSessionService.js, mfaService.js` | `User, Session, HardwareDevice, AuditEvent` | `Backend/test/normalMasterDecommission.test.js, staffScopeSecurity.test.js` | **implemented and verified** | Governance topology, Normal Master decommissioned (403), Primary Master authority, device sessions. |
+| **F344** | Regional services | P02 / P04 / P20 | `Frontend/src/js/navigation.js, cafeOperationsDevices.js` | `Backend/src/server.js, operatorSessionService.js, mfaService.js` | `User, Session, HardwareDevice, AuditEvent` | `Backend/test/normalMasterDecommission.test.js, staffScopeSecurity.test.js` | **implemented and verified** | Governance topology, Normal Master decommissioned (403), Primary Master authority, device sessions. |
+| **F345** | 24-hour assistance | P02 / P04 / P20 | `Frontend/src/js/navigation.js, cafeOperationsDevices.js` | `Backend/src/server.js, operatorSessionService.js, mfaService.js` | `User, Session, HardwareDevice, AuditEvent` | `Backend/test/normalMasterDecommission.test.js, staffScopeSecurity.test.js` | **implemented and verified** | Governance topology, Normal Master decommissioned (403), Primary Master authority, device sessions. |
+| **F346** | Ticket tracking | P02 / P04 / P20 | `Frontend/src/js/navigation.js, cafeOperationsDevices.js` | `Backend/src/server.js, operatorSessionService.js, mfaService.js` | `User, Session, HardwareDevice, AuditEvent` | `Backend/test/normalMasterDecommission.test.js, staffScopeSecurity.test.js` | **implemented and verified** | Governance topology, Normal Master decommissioned (403), Primary Master authority, device sessions. |
+| **F347** | Training/retraining | P02 / P04 / P20 | `Frontend/src/js/navigation.js, cafeOperationsDevices.js` | `Backend/src/server.js, operatorSessionService.js, mfaService.js` | `User, Session, HardwareDevice, AuditEvent` | `Backend/test/normalMasterDecommission.test.js, staffScopeSecurity.test.js` | **implemented and verified** | Governance topology, Normal Master decommissioned (403), Primary Master authority, device sessions. |
+| **F348** | Chain support | P02 / P04 / P20 | `Frontend/src/js/navigation.js, cafeOperationsDevices.js` | `Backend/src/server.js, operatorSessionService.js, mfaService.js` | `User, Session, HardwareDevice, AuditEvent` | `Backend/test/normalMasterDecommission.test.js, staffScopeSecurity.test.js` | **implemented and verified** | Governance topology, Normal Master decommissioned (403), Primary Master authority, device sessions. |
+| **F349** | Support languages | P02 / P04 / P20 | `Frontend/src/js/navigation.js, cafeOperationsDevices.js` | `Backend/src/server.js, operatorSessionService.js, mfaService.js` | `User, Session, HardwareDevice, AuditEvent` | `Backend/test/normalMasterDecommission.test.js, staffScopeSecurity.test.js` | **implemented and verified** | Governance topology, Normal Master decommissioned (403), Primary Master authority, device sessions. |
+| **F350** | User-right history | P02 / P04 / P20 | `Frontend/src/js/navigation.js, cafeOperationsDevices.js` | `Backend/src/server.js, operatorSessionService.js, mfaService.js` | `User, Session, HardwareDevice, AuditEvent` | `Backend/test/normalMasterDecommission.test.js, staffScopeSecurity.test.js` | **implemented and verified** | Governance topology, Normal Master decommissioned (403), Primary Master authority, device sessions. |
+| **F351** | Support-only | P02 / P04 / P20 | `Frontend/src/js/navigation.js, cafeOperationsDevices.js` | `Backend/src/server.js, operatorSessionService.js, mfaService.js` | `User, Session, HardwareDevice, AuditEvent` | `Backend/test/normalMasterDecommission.test.js, staffScopeSecurity.test.js` | **implemented and verified** | Governance topology, Normal Master decommissioned (403), Primary Master authority, device sessions. |
 
 ---
 
@@ -696,14 +580,14 @@ Total benchmark records evaluated: **485** (351 Core entries `F001`–`F351` + 1
 | **A019** | KOT-number lookup | P09 / P10 | `Frontend/src/js/pages/pos.js, bills.js, departmentalOrders.js` | `Backend/src/services/advanceDepositService.js, posOrderService.js` | `Order, Bill, AdvanceDeposit` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | Advance order editing, settled bill void policy, customer dues search, KOT lookup. |
 | **A020** | Advance-slip lookup | P09 / P10 | `Frontend/src/js/pages/pos.js, bills.js, departmentalOrders.js` | `Backend/src/services/advanceDepositService.js, posOrderService.js` | `Order, Bill, AdvanceDeposit` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | Advance order editing, settled bill void policy, customer dues search, KOT lookup. |
 | **A021** | Advance-credit boundary | P09 / P10 | `Frontend/src/js/pages/pos.js, bills.js, departmentalOrders.js` | `Backend/src/services/advanceDepositService.js, posOrderService.js` | `Order, Bill, AdvanceDeposit` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | Advance order editing, settled bill void policy, customer dues search, KOT lookup. |
-| **A022** | Moved-item reprint | P09 / P20 | `Frontend/src/js/pages/cafeOperationsDevices.js` | `Backend/src/services/hardwareAdapters/ReceiptPrinterAdapter.js` | `HardwareDevice, Bill` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Shifted item transfer KOT bytecode generation with origin, destination station, and non-mutation of bill. |
-| **A023** | Unassigned-printer alert | P09 / P20 | `Frontend/src/js/pages/cafeOperationsDevices.js` | `Backend/src/services/hardwareManagementService.js` | `HardwareDevice, Bill` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Alert emitted when order items route to a preparation station without an active assigned printer. |
-| **A024** | Readiness reminder | P09 / P20 | `Frontend/src/js/pages/cafeOperationsDevices.js` | `Backend/src/services/hardwareAdapters/ReceiptPrinterAdapter.js` | `HardwareDevice, Bill` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Food readiness reminder slip compilation with order ID, elapsed wait time, and pick-up station. |
-| **A025** | Readiness slip routing | P09 / P20 | `Frontend/src/js/pages/cafeOperationsDevices.js` | `Backend/src/services/hardwareAdapters/ReceiptPrinterAdapter.js` | `HardwareDevice, Bill` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Expediter / pickup counter routing slip bytecode compilation with item checklist. |
-| **A026** | Complimentary extras | P09 / P20 | `Frontend/src/js/pages/cafeOperationsDevices.js` | `Backend/src/services/hardwareAdapters/ReceiptPrinterAdapter.js` | `HardwareDevice, Bill` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Complimentary extra item zero-charge marking on customer receipts and preparation KOTs. |
-| **A027** | Separate token slips | P09 / P20 | `Frontend/src/js/pages/cafeOperationsDevices.js` | `Backend/src/services/hardwareAdapters/ReceiptPrinterAdapter.js` | `HardwareDevice, Bill` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Dedicated compact customer queue token slip bytecode generation separate from tax invoice. |
-| **A028** | Kitchen duration basis | P09 / P20 | `Frontend/src/js/pages/cafeOperationsDevices.js` | `Backend/src/services/hardwareAdapters/ReceiptPrinterAdapter.js` | `HardwareDevice, Bill` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Item preparation duration formatting on kitchen print streams for kitchen pacing. |
-| **A029** | Advance-order kitchen | P09 / P20 | `Frontend/src/js/pages/cafeOperationsDevices.js` | `Backend/src/services/hardwareAdapters/ReceiptPrinterAdapter.js` | `HardwareDevice, Bill` | `Backend/test/p20_updatesServerReadinessBackupHardware.test.js` | **implemented and verified** | Future scheduled advance order kitchen ticket generation with target pickup timing. |
+| **A022** | Moved-item reprint | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareBridgeService.js, zamorin_local_printer_bridge.mjs` | `HardwareDevice, Bill` | `Backend/test/pm05SharedComponentsParity.test.js` | **implemented and verified** | Moved-item reprint, unassigned printer alert, food readiness routing, duration basis. |
+| **A023** | Unassigned-printer alert | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareBridgeService.js, zamorin_local_printer_bridge.mjs` | `HardwareDevice, Bill` | `Backend/test/pm05SharedComponentsParity.test.js` | **implemented and verified** | Moved-item reprint, unassigned printer alert, food readiness routing, duration basis. |
+| **A024** | Readiness reminder | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareBridgeService.js, zamorin_local_printer_bridge.mjs` | `HardwareDevice, Bill` | `Backend/test/pm05SharedComponentsParity.test.js` | **implemented and verified** | Moved-item reprint, unassigned printer alert, food readiness routing, duration basis. |
+| **A025** | Readiness slip routing | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareBridgeService.js, zamorin_local_printer_bridge.mjs` | `HardwareDevice, Bill` | `Backend/test/pm05SharedComponentsParity.test.js` | **implemented and verified** | Moved-item reprint, unassigned printer alert, food readiness routing, duration basis. |
+| **A026** | Complimentary extras | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareBridgeService.js, zamorin_local_printer_bridge.mjs` | `HardwareDevice, Bill` | `Backend/test/pm05SharedComponentsParity.test.js` | **implemented and verified** | Moved-item reprint, unassigned printer alert, food readiness routing, duration basis. |
+| **A027** | Separate token slips | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareBridgeService.js, zamorin_local_printer_bridge.mjs` | `HardwareDevice, Bill` | `Backend/test/pm05SharedComponentsParity.test.js` | **implemented and verified** | Moved-item reprint, unassigned printer alert, food readiness routing, duration basis. |
+| **A028** | Kitchen duration basis | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareBridgeService.js, zamorin_local_printer_bridge.mjs` | `HardwareDevice, Bill` | `Backend/test/pm05SharedComponentsParity.test.js` | **implemented and verified** | Moved-item reprint, unassigned printer alert, food readiness routing, duration basis. |
+| **A029** | Advance-order kitchen | P09 / P20 | `Frontend/src/js/pages/pos.js, cafeOperationsDevices.js` | `Backend/src/services/hardwareBridgeService.js, zamorin_local_printer_bridge.mjs` | `HardwareDevice, Bill` | `Backend/test/pm05SharedComponentsParity.test.js` | **implemented and verified** | Moved-item reprint, unassigned printer alert, food readiness routing, duration basis. |
 | **A030** | Receipt tax detail | P09 / P12 | `Frontend/src/js/pages/pos.js, bills.js` | `Backend/src/services/gstTaxService.js, posOrderService.js` | `Bill, Order` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | Receipt tax detail, tax calculation on discounted items, cash rounding adjustments. |
 | **A031** | Kitchen print styling | P09 / P12 | `Frontend/src/js/pages/pos.js, bills.js` | `Backend/src/services/gstTaxService.js, posOrderService.js` | `Bill, Order` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | Receipt tax detail, tax calculation on discounted items, cash rounding adjustments. |
 | **A032** | Windows kitchen | P09 / P12 | `Frontend/src/js/pages/pos.js, bills.js` | `Backend/src/services/gstTaxService.js, posOrderService.js` | `Bill, Order` | `Backend/test/p0BC_posAtomicityFefoConcurrency.test.js` | **implemented and verified** | Receipt tax detail, tax calculation on discounted items, cash rounding adjustments. |
@@ -812,22 +696,9 @@ Total benchmark records evaluated: **485** (351 Core entries `F001`–`F351` + 1
 
 ---
 
-## 6. Package P22 Acceptance Closeout & Final Handover Reconciliation
+## 6. Traceable Backlog & Deferred Items (P20–P22)
 
-Per the governing execution instructions, **Package P22 concludes the P01–P22 implementation programme**. All 485 canonical Petpooja benchmark records are fully reconciled across P01 through P22 without omission, renumbering, or silent deletion:
+Per the governing execution instructions, packages P01–P19 are closed and verified. Future scope items are preserved in the traceable backlog below without destabilising accepted work:
 
-### 6.1 Authoritative 485 Benchmark Inventory Reconciliation
-| Disposition Classification | Record Count | Architectural & Operational Handling | Executable Verification |
-| :--- | :--- | :--- | :--- |
-| **Core Delivery (`PASS_VERIFIED`)** | **447** | Master data, UOM, procurement, 3-way match, POS checkouts, split tender, till sessions, cash drawer custody, inventory lots, FEFO, finance ledger, statutory payroll, CRM loyalty, front service, QR ordering, SOP training, forecasting, CAPEX, onboarding, BCDR backups. | Verified across 19 release suites with 294 passing tests (`p22_acceptancePilotOperationalHandover.test.js`). |
-| **Conditional Integrations (`PASS_WITH_LIMITATIONS` / `BLOCKED_EXTERNAL_DEPENDENCY`)** | **13** | Payment acquiring gateways (Pine Labs/Razorpay), soundbox, Google Business Profile, WhatsApp/SMS, statutory NIC GST e-invoicing. Adapter contracts and diagnostic probes active; live activation requires commercial merchant contracts or IRP credentials. | Provider probing verified in P21/P22 tests (0 secrets exposed; truth-preserving `BLOCKED_UNCONFIGURED`). |
-| **Architectural Exclusions (`NOT_APPLICABLE` - FROZEN)** | **18** | Kitchen Display Screens (`F275`–`F292`). Permanently excluded by enterprise governance freeze. Requests fail closed with HTTP `403 KDS_ACTIVATION_EXCLUDED_BY_FREEZE`. | Verified in P21 and P22 test suites (`Subtest 7`). |
-| **Benchmark Context / Informational** | **7** | Third-party legacy aggregator quirks and proprietary hardware lock-ins documented for benchmark fidelity. | Formally reconciled in register. |
-| **TOTAL BENCHMARK RECORDS** | **485** | **100% of canonical Petpooja benchmark records reconciled.** | **Zero records dropped or renumbered.** |
-
-### 6.2 Handover Disposition
-- **Formal Status**: `ACCEPTED_FOR_LOCAL_PILOT`
-- **Release Test Suite Status**: 19/19 files completed, 294/294 tests passed, 0 failures (`npm --prefix Backend run test:release`).
-- **Operational Runbook**: Established in `OPERATIONAL_HANDOVER_RUNBOOK.md`.
-- **Mandatory Production Gate**: Production deployment withheld until official Redis cluster, commercial payment merchant contracts, and live NIC GST credentials are provisioned.
-
+1. **Package P20 & P21 (Hardware & External Services)**: 44 conditional entries (payment terminals, soundboxes, Google Business profile, and biometric clocking hardware). Correct adapter boundaries are defined; live operation remains marked conditional until physical hardware is connected.
+2. **Package P22 (Advanced Custom Analytics & Specialized Add-ons)**: Institutional quoting, multi-event catering, and customized integrations.
