@@ -1432,6 +1432,205 @@ async function auditExistingInvoices({ organisationId, cafeId } = {}) {
   };
 }
 
+/**
+ * Validate tax jurisdiction compatibility (A121 Regional / Tax boundary rules)
+ * Enforces mutual exclusivity between GST (India) and VAT (International/regional).
+ */
+function validateTaxJurisdictionCompatibility({ taxRegime, sellerGstin = null, vatNumber = null, lineItems = [] }) {
+  const regime = String(taxRegime || '').toUpperCase().trim();
+  if (regime !== 'GST' && regime !== 'VAT') {
+    throw new ApiError(400, 'INVALID_TAX_REGIME', `Tax regime must be either 'GST' or 'VAT'. Received: ${taxRegime}`);
+  }
+
+  if (regime === 'GST') {
+    if (vatNumber) {
+      throw new ApiError(
+        400,
+        'TAX_REGIME_CONFLICT',
+        'Mutual exclusivity violation: Cannot attach VAT TRN under Indian GST regime.'
+      );
+    }
+  } else if (regime === 'VAT') {
+    if (sellerGstin) {
+      throw new ApiError(
+        400,
+        'TAX_REGIME_CONFLICT',
+        'Mutual exclusivity violation: Cannot attach Indian GSTIN under VAT regime.'
+      );
+    }
+    // Verify no line items specify dual CGST/SGST/IGST splits
+    for (const item of lineItems) {
+      if (item.cgstRatePercent || item.sgstRatePercent || item.igstRatePercent) {
+        throw new ApiError(
+          400,
+          'TAX_REGIME_CONFLICT',
+          'Mutual exclusivity violation: GST splits (CGST/SGST/IGST) cannot be applied under VAT regime.'
+        );
+      }
+    }
+  }
+
+  return {
+    valid: true,
+    regime,
+  };
+}
+
+/**
+ * Generate NIC/CBIC Schema INV-01 compliant E-Invoice payload (A003)
+ */
+function generateEInvoicePayload({ taxInvoice }) {
+  if (!taxInvoice || !taxInvoice.invoiceNumber) {
+    throw new ApiError(400, 'INVALID_TAX_INVOICE', 'Valid tax invoice is required for E-Invoice payload generation.');
+  }
+
+  const invDate = new Date(taxInvoice.invoiceDate || Date.now());
+  const day = String(invDate.getDate()).padStart(2, '0');
+  const month = String(invDate.getMonth() + 1).padStart(2, '0');
+  const year = invDate.getFullYear();
+  const formattedDate = `${day}/${month}/${year}`;
+
+  const supplier = taxInvoice.supplierDetails || {};
+  const recipient = taxInvoice.recipientDetails || {};
+  const taxSummary = taxInvoice.taxSummary || {};
+
+  const itemList = (taxInvoice.lineItems || []).map((item, index) => {
+    const isService = item.hsnCode && String(item.hsnCode).startsWith('99');
+    return {
+      SlNo: String(index + 1),
+      PrdDesc: item.description || 'Food & Beverage Service',
+      IsServc: isService ? 'Y' : 'N',
+      HsnCd: String(item.hsnCode || '996331'),
+      Qty: Number(item.quantity) || 1,
+      Unit: item.uqc || 'NOS',
+      UnitPrice: Number(fromPaisa(item.ratePaisa || 0)),
+      TotAmt: Number(fromPaisa(item.grossAmountPaisa || 0)),
+      Discount: Number(fromPaisa(item.discountPaisa || 0)),
+      AssAmt: Number(fromPaisa(item.taxableAmountPaisa || 0)),
+      GstRt: Number(item.gstRatePercent || 0),
+      CgstAmt: Number(fromPaisa(item.cgstAmountPaisa || 0)),
+      SgstAmt: Number(fromPaisa(item.sgstAmountPaisa || 0)),
+      IgstAmt: Number(fromPaisa(item.igstAmountPaisa || 0)),
+      CesRt: 0,
+      CesAmt: 0,
+      TotItemVal: Number(fromPaisa(item.totalItemAmountPaisa || 0)),
+    };
+  });
+
+  return {
+    Version: '1.1',
+    TranDtls: {
+      TaxSch: 'GST',
+      SupTyp: recipient.isB2B ? 'B2B' : 'B2C',
+      RegRev: taxInvoice.reverseCharge ? 'Y' : 'N',
+      EcmGstin: null,
+      IgstOnIntra: 'N',
+    },
+    DocDtls: {
+      Typ: 'INV',
+      No: taxInvoice.invoiceNumber,
+      Dt: formattedDate,
+    },
+    SellerDtls: {
+      Gstin: supplier.gstin || '',
+      LglNm: supplier.legalName || 'Zamorin Cafe',
+      TrdNm: supplier.tradeName || supplier.legalName || 'Zamorin Cafe',
+      Addr1: supplier.address || 'Calicut',
+      Loc: supplier.stateName || 'Kerala',
+      Pin: Number(supplier.pin || 673001),
+      Stcd: String(supplier.stateCode || '32'),
+    },
+    BuyerDtls: {
+      Gstin: recipient.gstin || 'URP',
+      LglNm: recipient.legalName || 'Counter Customer',
+      Pos: taxInvoice.placeOfSupply ? String(taxInvoice.placeOfSupply).split('-')[0] : '32',
+      Addr1: recipient.address || 'Counter POS',
+      Loc: recipient.stateName || 'Kerala',
+      Pin: Number(recipient.pin || 673001),
+      Stcd: String(recipient.stateCode || '32'),
+    },
+    ItemList: itemList,
+    ValDtls: {
+      AssVal: Number(fromPaisa(taxSummary.totalTaxablePaisa || 0)),
+      CgstVal: Number(fromPaisa(taxSummary.totalCgstPaisa || 0)),
+      SgstVal: Number(fromPaisa(taxSummary.totalSgstPaisa || 0)),
+      IgstVal: Number(fromPaisa(taxSummary.totalIgstPaisa || 0)),
+      CesVal: 0,
+      RndOffAmt: Number(fromPaisa(taxSummary.roundOffPaisa || 0)),
+      TotInvVal: Number(fromPaisa(taxSummary.grandTotalPaisa || 0)),
+    },
+  };
+}
+
+/**
+ * Generate NIC Form GST EWB-01 compliant E-Way Bill payload (A003)
+ */
+function generateEWayBillPayload({ taxInvoice, transporterDetails = {} }) {
+  if (!taxInvoice || !taxInvoice.invoiceNumber) {
+    throw new ApiError(400, 'INVALID_TAX_INVOICE', 'Valid tax invoice is required for E-Way Bill payload generation.');
+  }
+
+  const invDate = new Date(taxInvoice.invoiceDate || Date.now());
+  const day = String(invDate.getDate()).padStart(2, '0');
+  const month = String(invDate.getMonth() + 1).padStart(2, '0');
+  const year = invDate.getFullYear();
+  const formattedDate = `${day}/${month}/${year}`;
+
+  const supplier = taxInvoice.supplierDetails || {};
+  const recipient = taxInvoice.recipientDetails || {};
+  const taxSummary = taxInvoice.taxSummary || {};
+
+  const itemList = (taxInvoice.lineItems || []).map((item) => ({
+    productName: item.description || 'Food & Beverage',
+    productDesc: item.description || 'Food & Beverage',
+    hsnCode: Number(item.hsnCode) || 996331,
+    quantity: Number(item.quantity) || 1,
+    qtyUnit: item.uqc || 'NOS',
+    taxableAmount: Number(fromPaisa(item.taxableAmountPaisa || 0)),
+    cgstRate: Number(item.cgstRatePercent || 0),
+    sgstRate: Number(item.sgstRatePercent || 0),
+    igstRate: Number(item.igstRatePercent || 0),
+    cessRate: 0,
+  }));
+
+  return {
+    supplyType: 'O',
+    subSupplyType: '1',
+    subSupplyDesc: 'Supply',
+    docType: 'INV',
+    docNo: taxInvoice.invoiceNumber,
+    docDate: formattedDate,
+    fromGstin: supplier.gstin || '',
+    fromTrdName: supplier.tradeName || supplier.legalName || 'Zamorin Cafe',
+    fromAddr1: supplier.address || 'Calicut',
+    fromPlace: supplier.stateName || 'Calicut',
+    fromPincode: Number(supplier.pin || 673001),
+    fromStateCode: Number(supplier.stateCode || 32),
+    actualFromStateCode: Number(supplier.stateCode || 32),
+    toGstin: recipient.gstin || 'URP',
+    toTrdName: recipient.legalName || 'Customer',
+    toAddr1: recipient.address || 'Delivery Address',
+    toPlace: recipient.stateName || 'Calicut',
+    toPincode: Number(recipient.pin || 673001),
+    toStateCode: Number(recipient.stateCode || 32),
+    actualToStateCode: Number(recipient.stateCode || 32),
+    totalValue: Number(fromPaisa(taxSummary.totalTaxablePaisa || 0)),
+    cgstValue: Number(fromPaisa(taxSummary.totalCgstPaisa || 0)),
+    sgstValue: Number(fromPaisa(taxSummary.totalSgstPaisa || 0)),
+    igstValue: Number(fromPaisa(taxSummary.totalIgstPaisa || 0)),
+    cessValue: 0,
+    totInvValue: Number(fromPaisa(taxSummary.grandTotalPaisa || 0)),
+    transDistance: Number(transporterDetails.distanceKm || 10),
+    transporterId: transporterDetails.transporterId || '',
+    transporterName: transporterDetails.transporterName || '',
+    transDocNo: transporterDetails.transDocNo || '',
+    transDocDate: transporterDetails.transDocDate || '',
+    vehicleNo: transporterDetails.vehicleNo || '',
+    vehicleType: transporterDetails.vehicleType || 'R',
+    itemList,
+  };
+}
+
 module.exports = {
   getIndianFinancialYear,
   numberToIndianRupeeWords,
@@ -1457,4 +1656,8 @@ module.exports = {
   auditExistingInvoices,
   _clearStatutoryRegistries,
   syncTaxInvoiceIndexes,
+  validateTaxJurisdictionCompatibility,
+  generateEInvoicePayload,
+  generateEWayBillPayload,
 };
+

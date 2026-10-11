@@ -1485,6 +1485,71 @@ async function postBillFromPurchaseOrder(args) {
   };
 }
 
+/**
+ * Bulk import supplier-material mappings into vendor item catalog (Benchmark A093-A095)
+ */
+async function importSupplierMaterialMappings({
+  organisationId,
+  vendorId,
+  mappings = [],
+  performedByUserId = 'SYSTEM',
+}) {
+  if (!organisationId || !vendorId) {
+    throw new ApiError(400, 'MISSING_PARAMETERS', 'organisationId and vendorId are required.');
+  }
+  const normVendorId = normalizeId(vendorId);
+  const vendor = await Vendor.findOne({ organisationId, vendorId: normVendorId });
+  if (!vendor) {
+    throw new ApiError(404, 'VENDOR_NOT_FOUND', `Vendor ${vendorId} not found.`);
+  }
+
+  vendor.itemCatalogue = vendor.itemCatalogue || [];
+  const existingMap = new Map(vendor.itemCatalogue.map((it) => [normalizeId(it.itemId), it]));
+
+  let importedCount = 0;
+  for (const m of mappings) {
+    const itemId = normalizeId(m.itemId || m.materialId);
+    if (!itemId) continue;
+
+    const price = Math.max(0, Math.round(Number(m.currentPricePaisa ?? m.unitPricePaisa ?? 0)));
+    const supplierItemCode = String(m.supplierItemCode || '').trim();
+    const itemName = String(m.itemName || itemId).trim();
+    const moq = Math.max(1, Number(m.moq || 1));
+    const leadTimeDays = Math.max(0, Number(m.leadTimeDays || 2));
+    const sourcePriority = m.sourcePriority || 'APPROVED';
+
+    const existing = existingMap.get(itemId);
+    if (existing) {
+      existing.supplierItemCode = supplierItemCode || existing.supplierItemCode;
+      existing.currentPricePaisa = price;
+      existing.moq = moq;
+      existing.leadTimeDays = leadTimeDays;
+      existing.sourcePriority = sourcePriority;
+    } else {
+      vendor.itemCatalogue.push({
+        itemId,
+        supplierItemCode,
+        itemName,
+        currentPricePaisa: price,
+        moq,
+        leadTimeDays,
+        sourcePriority,
+        status: 'ACTIVE',
+      });
+    }
+    importedCount++;
+  }
+
+  await vendor.save();
+
+  return {
+    success: true,
+    vendorId: normVendorId,
+    importedCount,
+    totalCatalogueItems: vendor.itemCatalogue.length,
+  };
+}
+
 module.exports = {
   getVendorRunningBalance,
   syncVendorFinancialSummary,
@@ -1501,4 +1566,6 @@ module.exports = {
   getAccountsPayableAging,
   getGst180DayMonitoring,
   releasePaymentHold,
+  importSupplierMaterialMappings,
 };
+

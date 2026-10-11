@@ -165,9 +165,22 @@ class PosOrderService {
 
     const processedLineItems = lineItems.map((item, index) => {
       const quantity = Math.max(1, Math.floor(Number(item.quantity) || 1));
-      const baseUnitPrice = Math.max(0, Math.round(Number(item.unitPricePaisa ?? item.pricePaisa ?? (item.price != null ? item.price * 100 : 0))));
-      const modifierPrice = Math.max(0, Math.round(Number(item.modifiers?.modifierPricePaisa || 0)));
-      const effectiveUnitPrice = baseUnitPrice + modifierPrice;
+      const isOpenPrice = Boolean(item.isOpenPrice);
+      let effectiveUnitPrice = 0;
+
+      if (isOpenPrice) {
+        const openPrice = Math.max(0, Math.round(Number(item.openPricePaisa ?? item.unitPricePaisa ?? (item.price != null ? item.price * 100 : 0))));
+        const minPricePaisa = Math.max(0, Math.round(Number(item.minPricePaisa || 0)));
+        const maxPricePaisa = Math.round(Number(item.maxPricePaisa || 5000000));
+        if (openPrice < minPricePaisa || openPrice > maxPricePaisa) {
+          throw new ApiError(400, 'INVALID_OPEN_PRICE', 'Open price ' + openPrice + ' paisa is outside allowable range [' + minPricePaisa + ', ' + maxPricePaisa + '].');
+        }
+        effectiveUnitPrice = openPrice;
+      } else {
+        const baseUnitPrice = Math.max(0, Math.round(Number(item.unitPricePaisa ?? item.pricePaisa ?? (item.price != null ? item.price * 100 : 0))));
+        const modifierPrice = Math.max(0, Math.round(Number(item.modifiers?.modifierPricePaisa || 0)));
+        effectiveUnitPrice = baseUnitPrice + modifierPrice;
+      }
 
       const lineSubtotalPaisa = effectiveUnitPrice * quantity;
       calculatedSubtotalPaisa += lineSubtotalPaisa;
@@ -201,6 +214,8 @@ class PosOrderService {
         itemNameSnapshot: String(item.itemNameSnapshot || item.name || `Item ${index + 1}`).trim(),
         quantity,
         unitPricePaisa: effectiveUnitPrice,
+        isOpenPrice,
+        openPriceAuthorizedByUserId: item.openPriceAuthorizedByUserId || null,
         modifiers: item.modifiers || {},
         itemNotes: String(item.itemNotes || item.notes || '').trim(),
         hsnSacCode: item.hsnSacCode || '996331',

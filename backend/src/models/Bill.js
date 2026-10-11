@@ -174,6 +174,17 @@ const billLineItemSchema = new mongoose.Schema(
       default: null,
     },
 
+    isOpenPrice: {
+      type: Boolean,
+      default: false,
+    },
+
+    openPriceAuthorizedByUserId: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+
     consumedLots: [
       {
         lotId: {
@@ -519,6 +530,13 @@ const billSchema = new mongoose.Schema(
       type: String,
       enum: ORDER_TYPES,
       default: 'QUICK_SALE',
+    },
+
+    orderChannel: {
+      type: String,
+      enum: ['POS', 'ONLINE', 'ZOMATO', 'SWIGGY', 'TOING', 'DIRECT_CALL', 'PORTAL'],
+      default: 'POS',
+      index: true,
     },
 
     serviceMode: {

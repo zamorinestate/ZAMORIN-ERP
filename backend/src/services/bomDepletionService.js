@@ -378,6 +378,161 @@ class BomDepletionService {
       reversedCount,
     };
   }
+
+  /**
+   * Export all recipes in a tabular workbook structure (Benchmark A101)
+   */
+  static async exportRecipeWorkbook({ organisationId }) {
+    const recipes = await Recipe.find({ organisationId }).lean();
+    const rows = [];
+
+    for (const r of recipes) {
+      if (!r.ingredients || r.ingredients.length === 0) {
+        rows.push({
+          recipeId: r.recipeId,
+          recipeName: r.name,
+          version: r.version,
+          status: r.status,
+          ingredientName: '',
+          inventoryItemId: '',
+          quantity: 0,
+          uom: '',
+          lossFactorPercent: 0,
+        });
+      } else {
+        for (const ing of r.ingredients) {
+          rows.push({
+            recipeId: r.recipeId,
+            recipeName: r.name,
+            version: r.version,
+            status: r.status,
+            ingredientName: ing.ingredientName,
+            inventoryItemId: ing.inventoryItemId || ing.subRecipeId || '',
+            quantity: ing.quantity,
+            uom: ing.uom,
+            lossFactorPercent: ing.lossFactorPercent || 0,
+          });
+        }
+      }
+    }
+
+    return {
+      success: true,
+      totalRows: rows.length,
+      workbookRows: rows,
+    };
+  }
+
+  /**
+   * Import or bulk update recipes from workbook rows (Benchmark A101)
+   */
+  static async importRecipeWorkbook({ organisationId, workbookRows = [] }) {
+    if (!Array.isArray(workbookRows) || workbookRows.length === 0) {
+      throw new ApiError(400, 'EMPTY_WORKBOOK', 'Workbook rows must be a non-empty array.');
+    }
+
+    const grouped = new Map();
+    for (const row of workbookRows) {
+      const rId = String(row.recipeId || '').trim().toUpperCase();
+      if (!rId) continue;
+      if (!grouped.has(rId)) {
+        grouped.set(rId, {
+          recipeId: rId,
+          name: row.recipeName || `Recipe ${rId}`,
+          version: Number(row.version) || 1,
+          status: row.status || 'APPROVED',
+          ingredients: [],
+        });
+      }
+      if (row.ingredientName && row.quantity) {
+        grouped.get(rId).ingredients.push({
+          ingredientName: String(row.ingredientName).trim(),
+          inventoryItemId: row.inventoryItemId ? String(row.inventoryItemId).trim().toUpperCase() : null,
+          quantity: Number(row.quantity) || 1,
+          uom: String(row.uom || 'UNIT').trim().toUpperCase(),
+          lossFactorPercent: Number(row.lossFactorPercent) || 0,
+        });
+      }
+    }
+
+    let importedCount = 0;
+    for (const [recipeId, data] of grouped.entries()) {
+      await Recipe.findOneAndUpdate(
+        { recipeId, organisationId },
+        {
+          $set: {
+            name: data.name,
+            version: data.version,
+            status: data.status,
+            ingredients: data.ingredients,
+          },
+        },
+        { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
+      );
+      importedCount++;
+    }
+
+    return {
+      success: true,
+      importedCount,
+    };
+  }
+
+  /**
+   * Bulk remove or replace an ingredient across all recipes (Benchmark A104)
+   */
+  static async bulkRemoveIngredientFromRecipes({
+    organisationId,
+    inventoryItemId,
+    replacementItemId = null,
+    replacementName = null,
+  }) {
+    if (!organisationId || !inventoryItemId) {
+      throw new ApiError(400, 'MISSING_PARAMETERS', 'organisationId and inventoryItemId are required.');
+    }
+
+    const normItem = normalizeId(inventoryItemId);
+    const recipes = await Recipe.find({
+      organisationId,
+      'ingredients.inventoryItemId': normItem,
+    });
+
+    let modifiedCount = 0;
+    const modifiedRecipeIds = [];
+
+    for (const recipe of recipes) {
+      let changed = false;
+      if (replacementItemId) {
+        const normRep = normalizeId(replacementItemId);
+        recipe.ingredients = recipe.ingredients.map((ing) => {
+          if (normalizeId(ing.inventoryItemId) === normItem) {
+            changed = true;
+            ing.inventoryItemId = normRep;
+            if (replacementName) ing.ingredientName = replacementName;
+          }
+          return ing;
+        });
+      } else {
+        const origLen = recipe.ingredients.length;
+        recipe.ingredients = recipe.ingredients.filter((ing) => normalizeId(ing.inventoryItemId) !== normItem);
+        if (recipe.ingredients.length !== origLen) {
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        await recipe.save();
+        modifiedCount++;
+        modifiedRecipeIds.push(recipe.recipeId);
+      }
+    }
+
+    return {
+      success: true,
+      modifiedCount,
+      modifiedRecipeIds,
+    };
+  }
 }
 
 module.exports = {

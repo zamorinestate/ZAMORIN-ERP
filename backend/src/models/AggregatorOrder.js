@@ -12,7 +12,7 @@
 
 const mongoose = require('mongoose');
 
-const AGGREGATOR_PROVIDERS = ['ZOMATO', 'SWIGGY'];
+const AGGREGATOR_PROVIDERS = ['ZOMATO', 'SWIGGY', 'TOING'];
 
 const AGGREGATOR_ORDER_STATUSES = [
   'RECEIVED',

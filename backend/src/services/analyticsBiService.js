@@ -441,6 +441,70 @@ async function getConsolidatedBenchmarks({ organisationId, period = 'THIS_MONTH'
   };
 }
 
+/**
+ * Calculate Section 194-O E-Commerce TDS (Benchmark A090)
+ * 1% statutory TDS deducted on gross e-commerce sales.
+ */
+function calculateSection194OTds({ grossSalesPaisa, ecomTdsRatePercent = 1.0 }) {
+  const gross = Math.max(0, Math.round(Number(grossSalesPaisa || 0)));
+  const rate = Number(ecomTdsRatePercent) || 1.0;
+  const tdsDeductedPaisa = Math.round((gross * rate) / 100);
+  const netDisbursedPaisa = gross - tdsDeductedPaisa;
+
+  return {
+    grossSalesPaisa: gross,
+    ecomTdsRatePercent: rate,
+    tdsDeductedPaisa,
+    netDisbursedPaisa,
+  };
+}
+
+/**
+ * 6. Action-Needed Dashboard & Integrity Anomalies (Benchmark A090)
+ */
+async function getActionNeededSummary({ organisationId, cafeId = null }) {
+  const menuFilter = { organisationId, status: 'ACTIVE' };
+  const menuItems = await MenuItem.find(menuFilter).lean();
+
+  const missingTaxOrHsnItems = [];
+  for (const item of menuItems) {
+    const hasHsn = Boolean(item.hsnSacCode && String(item.hsnSacCode).trim().length >= 4);
+    const hasTax = item.taxRatePercent !== undefined && item.taxRatePercent !== null;
+    if (!hasHsn || !hasTax) {
+      missingTaxOrHsnItems.push({
+        menuItemId: item.menuItemId,
+        name: item.name,
+        missingHsn: !hasHsn,
+        missingTax: !hasTax,
+      });
+    }
+  }
+
+  // Check bills with aggregator sales for Section 194-O TDS
+  const billFilter = { organisationId, status: 'COMPLETED' };
+  if (cafeId && cafeId !== 'ALL') billFilter.cafeId = cafeId;
+
+  const recentBills = await Bill.find(billFilter).sort({ createdAt: -1 }).limit(100).lean();
+  let ecomGrossSalesPaisa = 0;
+  for (const b of recentBills) {
+    if (['ZOMATO', 'SWIGGY', 'TOING'].includes(b.orderChannel)) {
+      ecomGrossSalesPaisa += Number(b.totalPaisa || 0);
+    }
+  }
+
+  const ecomTdsSummary = calculateSection194OTds({ grossSalesPaisa: ecomGrossSalesPaisa });
+
+  return {
+    organisationId,
+    cafeId: cafeId || 'ALL',
+    generatedAt: new Date(),
+    actionItemsCount: missingTaxOrHsnItems.length,
+    missingTaxOrHsnCount: missingTaxOrHsnItems.length,
+    missingTaxOrHsnItems,
+    ecomTdsSummary,
+  };
+}
+
 module.exports = {
   resolveAnalyticsDateRange,
   getExecutiveSummary,
@@ -448,4 +512,7 @@ module.exports = {
   getHourlyHeatmap,
   getFoodCostAndWastage,
   getConsolidatedBenchmarks,
+  calculateSection194OTds,
+  getActionNeededSummary,
 };
+

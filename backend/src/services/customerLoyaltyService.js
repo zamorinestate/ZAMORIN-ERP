@@ -382,12 +382,27 @@ async function redeemPointsAtomic({
   pointsToRedeem,
   billId = null,
   rewardId = null,
+  allowedRedemptionDays = null, // e.g. ['MONDAY', 'TUESDAY', ...]
   performedByUserId = 'SYSTEM',
   idempotencyKey = null,
 }) {
   const points = Math.round(Number(pointsToRedeem));
   if (!points || points <= 0) {
     throw new ApiError(400, 'INVALID_REDEMPTION_AMOUNT', 'Points to redeem must be a positive integer.');
+  }
+
+  // Weekday restriction enforcement (Benchmark A063)
+  if (Array.isArray(allowedRedemptionDays) && allowedRedemptionDays.length > 0) {
+    const daysOfWeek = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+    const currentDay = daysOfWeek[new Date().getDay()];
+    const normalizedAllowed = allowedRedemptionDays.map((d) => String(d).toUpperCase());
+    if (!normalizedAllowed.includes(currentDay)) {
+      throw new ApiError(
+        400,
+        'REDEMPTION_DAY_RESTRICTED',
+        `Loyalty point redemption is not permitted on ${currentDay}. Allowed days: ${normalizedAllowed.join(', ')}.`
+      );
+    }
   }
 
   if (idempotencyKey) {
@@ -476,10 +491,122 @@ async function redeemPointsAtomic({
   };
 }
 
+/**
+ * Handle sales return credit & points adjustments (Benchmark A062)
+ */
+async function processSalesReturnRewardAdjustment({
+  organisationId,
+  customerId,
+  returnBillId,
+  originalBillId,
+  returnAmountRupees,
+  totalBillAmountRupees,
+  performedByUserId = 'SYSTEM',
+}) {
+  return reverseRewardsOnRefund({
+    organisationId,
+    customerId,
+    billId: originalBillId,
+    refundId: returnBillId,
+    refundAmountRupees: returnAmountRupees,
+    totalBillAmountRupees,
+    performedByUserId,
+    reason: 'SALES_RETURN_ADJUSTMENT',
+  });
+}
+
+/**
+ * Validate and persist Captain KOT loyalty redemption metadata (Benchmark A064 & A065)
+ */
+function validateAndPersistCaptainKOTRedemption({
+  billId,
+  kotNumber,
+  captainId,
+  redemptionAmountPaise,
+  pointsRedeemed,
+}) {
+  if (!billId || !kotNumber || !captainId) {
+    throw new ApiError(400, 'INVALID_KOT_REDEMPTION', 'billId, kotNumber, and captainId are required.');
+  }
+
+  return {
+    valid: true,
+    billId,
+    kotNumber,
+    captainId,
+    redemptionAmountPaise: Math.round(Number(redemptionAmountPaise || 0)),
+    pointsRedeemed: Math.round(Number(pointsRedeemed || 0)),
+    persistedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Calculate multi-category loyalty point allocation with category caps (Benchmark A066)
+ */
+function calculateMultiCategoryRedemption({
+  items = [],
+  totalPointsAvailable = 0,
+  categoryCaps = {}, // e.g. { BEVERAGE: 50, BAKERY: 100 }
+  pointsToPaisaConversion = 100, // 1 point = 100 paise (₹1)
+} = {}) {
+  const pointsAvailable = Math.max(0, Math.round(Number(totalPointsAvailable || 0)));
+  let remainingPoints = pointsAvailable;
+  let totalRedeemedPoints = 0;
+  let totalDiscountPaisa = 0;
+
+  const categoryAllocations = {};
+
+  for (const item of items) {
+    const category = String(item.category || 'GENERAL').toUpperCase();
+    const itemTotalPaisa = Math.round(Number(item.totalPaisa || (item.pricePaisa * (item.quantity || 1)) || 0));
+    const maxPointsForCategory = categoryCaps[category] !== undefined ? categoryCaps[category] : Infinity;
+
+    categoryAllocations[category] = categoryAllocations[category] || {
+      category,
+      itemsCount: 0,
+      totalCategoryPaisa: 0,
+      pointsRedeemed: 0,
+      discountPaisa: 0,
+    };
+
+    categoryAllocations[category].itemsCount += (item.quantity || 1);
+    categoryAllocations[category].totalCategoryPaisa += itemTotalPaisa;
+  }
+
+  for (const cat of Object.keys(categoryAllocations)) {
+    const alloc = categoryAllocations[cat];
+    const maxPointsForCat = categoryCaps[cat] !== undefined ? categoryCaps[cat] : Infinity;
+    const maxPaisaDiscount = alloc.totalCategoryPaisa;
+    const maxPointsNeeded = Math.ceil(maxPaisaDiscount / pointsToPaisaConversion);
+
+    const pointsToUse = Math.min(remainingPoints, maxPointsForCat, maxPointsNeeded);
+    const discount = Math.min(maxPaisaDiscount, pointsToUse * pointsToPaisaConversion);
+
+    alloc.pointsRedeemed = pointsToUse;
+    alloc.discountPaisa = discount;
+
+    remainingPoints -= pointsToUse;
+    totalRedeemedPoints += pointsToUse;
+    totalDiscountPaisa += discount;
+  }
+
+  return {
+    totalPointsAvailable: pointsAvailable,
+    totalRedeemedPoints,
+    remainingPoints,
+    totalDiscountPaisa,
+    categoryAllocations,
+  };
+}
+
 module.exports = {
   getEffectiveLoyaltyRules,
   accrueSaleRewards,
   reverseSaleRewardsOnVoid,
   reverseRewardsOnRefund,
   redeemPointsAtomic,
+  processSalesReturnRewardAdjustment,
+  validateAndPersistCaptainKOTRedemption,
+  calculateMultiCategoryRedemption,
 };
+

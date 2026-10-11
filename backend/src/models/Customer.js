@@ -217,6 +217,26 @@ const customerSchema = new mongoose.Schema(
       },
     },
 
+    purchasedWalletBalancePaise: {
+      type: Number,
+      min: 0,
+      default: 0,
+      validate: {
+        validator: (v) => Number.isInteger(v) && v >= 0,
+        message: 'purchasedWalletBalancePaise must be a non-negative integer in paise.',
+      },
+    },
+
+    promotionalWalletBalancePaise: {
+      type: Number,
+      min: 0,
+      default: 0,
+      validate: {
+        validator: (v) => Number.isInteger(v) && v >= 0,
+        message: 'promotionalWalletBalancePaise must be a non-negative integer in paise.',
+      },
+    },
+
     groups: {
       type: [String],
       default: [],

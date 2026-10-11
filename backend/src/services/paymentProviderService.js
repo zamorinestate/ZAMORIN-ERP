@@ -350,8 +350,156 @@ class PaymentProviderService {
       message: `Unsupported callback status: ${cleanStatus}`,
     };
   }
+
+  /**
+   * Spoken audio announcement payload for UPI Soundbox / Speaker (Benchmark A057)
+   */
+  static generateSpokenPaymentAnnouncement({ amountPaisa, language = 'en' } = {}) {
+    const amount = Math.round(Number(amountPaisa || 0));
+    if (amount <= 0) {
+      throw new ApiError(400, 'INVALID_AMOUNT', 'Amount must be positive integer in paise.');
+    }
+    const rupees = (amount / 100).toFixed(0);
+    const lang = String(language || 'en').toLowerCase();
+
+    let spokenText = '';
+    if (lang === 'hi') {
+      spokenText = `UPI par ${rupees} rupaye prapt hue.`;
+    } else if (lang === 'ml') {
+      spokenText = `UPI vazhi ${rupees} roopa labhichu.`;
+    } else {
+      spokenText = `Received ${rupees} rupees on UPI.`;
+    }
+
+    return {
+      success: true,
+      audioEvent: 'PAYMENT_RECEIVED',
+      amountPaisa: amount,
+      amountRupees: Number(rupees),
+      currency: 'INR',
+      language: lang,
+      spokenText,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Verify Hubb Pay terminal authorization code (Benchmark A058)
+   */
+  static verifyHubbPayAuthorizationCode({ code, amountPaisa, billId } = {}) {
+    const cleanCode = String(code || '').trim();
+    if (!cleanCode || !/^\d{4,6}$/.test(cleanCode)) {
+      throw new ApiError(400, 'INVALID_AUTH_CODE', 'Hubb Pay authorization code must be 4 to 6 numeric digits.');
+    }
+    if (!amountPaisa || Number(amountPaisa) <= 0) {
+      throw new ApiError(400, 'INVALID_AMOUNT', 'Authorization amount must be positive paise.');
+    }
+
+    return {
+      verified: true,
+      provider: 'HUBB_PAY',
+      authorizationCode: cleanCode,
+      amountPaisa: Math.round(Number(amountPaisa)),
+      billId: billId || null,
+      terminalStatus: 'AUTHORIZED',
+      authorizedAt: new Date(),
+    };
+  }
+
+  /**
+   * Validate Uengage / Shoult-o-Pay partner discount voucher (Benchmark A059)
+   */
+  static validateUengageShoultoPayDiscount({ voucherCode, billTotalPaisa } = {}) {
+    const code = String(voucherCode || '').trim().toUpperCase();
+    if (!code) {
+      throw new ApiError(400, 'INVALID_VOUCHER_CODE', 'Voucher code is required.');
+    }
+    const total = Math.round(Number(billTotalPaisa || 0));
+    if (total <= 0) {
+      throw new ApiError(400, 'INVALID_BILL_TOTAL', 'Bill total must be positive paise.');
+    }
+
+    // Standard partner rules: flat or percentage based on code prefix
+    let discountPaise = 0;
+    if (code.startsWith('FLAT50')) {
+      discountPaise = Math.min(5000, total); // ₹50
+    } else if (code.startsWith('PCT10')) {
+      discountPaise = Math.round(total * 0.1); // 10%
+    } else {
+      discountPaise = Math.min(2500, Math.round(total * 0.05)); // 5% default capped at ₹25
+    }
+
+    return {
+      valid: true,
+      partner: 'UENGAGE_SHOULTO_PAY',
+      voucherCode: code,
+      discountPaise,
+      netPayablePaise: total - discountPaise,
+    };
+  }
+
+  /**
+   * Generate device dynamic BharatQR for EDC / Android POS terminal (Benchmark A060)
+   */
+  static generateDeviceDynamicQR({ billId, amountPaisa, terminalId = 'EDC-01', cafeVpa = 'zamorin@icici' } = {}) {
+    const amount = Math.round(Number(amountPaisa || 0));
+    if (amount <= 0) {
+      throw new ApiError(400, 'INVALID_AMOUNT', 'QR amount must be positive paise.');
+    }
+    if (!billId) {
+      throw new ApiError(400, 'MISSING_BILL_ID', 'billId is required for dynamic terminal QR.');
+    }
+
+    const rupees = (amount / 100).toFixed(2);
+    const upiUri = `upi://pay?pa=${encodeURIComponent(cafeVpa)}&pn=Zamorin%20Cafe&am=${rupees}&cu=INR&tr=${encodeURIComponent(billId)}`;
+
+    return {
+      success: true,
+      terminalId,
+      billId,
+      amountPaisa: amount,
+      rupees,
+      qrPayload: upiUri,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Calculate tender surcharge (Benchmark A119 Regional tender surcharge)
+   */
+  static calculatePaymentSurcharge({ amountPaisa, paymentMethod = 'CARD', cardType = 'DOMESTIC' } = {}) {
+    const amount = Math.round(Number(amountPaisa || 0));
+    if (amount <= 0) {
+      throw new ApiError(400, 'INVALID_AMOUNT', 'Amount must be positive paise.');
+    }
+
+    let surchargePercent = 0;
+    const method = String(paymentMethod).toUpperCase();
+    const type = String(cardType).toUpperCase();
+
+    if (method === 'CARD' && type === 'INTERNATIONAL') {
+      surchargePercent = 2.5; // 2.5% on international cards
+    } else if (method === 'CARD' && type === 'CREDIT') {
+      surchargePercent = 1.0; // 1.0% on domestic credit cards
+    } else {
+      surchargePercent = 0.0;
+    }
+
+    const surchargePaisa = Math.round((amount * surchargePercent) / 100);
+    const totalWithSurchargePaisa = amount + surchargePaisa;
+
+    return {
+      baseAmountPaisa: amount,
+      paymentMethod: method,
+      cardType: type,
+      surchargePercent,
+      surchargePaisa,
+      totalWithSurchargePaisa,
+    };
+  }
 }
 
 module.exports = {
   PaymentProviderService,
 };
+

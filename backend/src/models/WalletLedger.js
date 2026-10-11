@@ -133,6 +133,13 @@ const walletLedgerSchema = new mongoose.Schema(
       index: true,
     },
 
+    creditType: {
+      type: String,
+      enum: ['PURCHASED', 'PROMOTIONAL'],
+      default: 'PURCHASED',
+      index: true,
+    },
+
     reasonCode: {
       type: String,
       trim: true,

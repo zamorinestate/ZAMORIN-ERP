@@ -40,6 +40,7 @@ async function topUpWallet({
   sourcePaymentId = null,
   sourcePaymentMethod = 'CASH',
   paymentStatus = 'CONFIRMED',
+  creditType = 'PURCHASED',
   performedByUserId,
   idempotencyKey = null,
   note = '',
@@ -48,6 +49,8 @@ async function topUpWallet({
   if (!amount || amount <= 0) {
     throw new ApiError(400, 'INVALID_AMOUNT', 'Top-up amount must be a positive integer in paise.');
   }
+
+  const validCreditType = creditType === 'PROMOTIONAL' ? 'PROMOTIONAL' : 'PURCHASED';
 
   // Authoritative payment check: pending or failed payments must not increase spendable balance
   if (paymentStatus !== 'CONFIRMED') {
@@ -86,8 +89,12 @@ async function topUpWallet({
   }
 
   const prevBalance = customer.walletBalancePaise || 0;
-  const newBalance = prevBalance + amount;
-
+  if (validCreditType === 'PROMOTIONAL') {
+    customer.promotionalWalletBalancePaise = (customer.promotionalWalletBalancePaise || 0) + amount;
+  } else {
+    customer.purchasedWalletBalancePaise = (customer.purchasedWalletBalancePaise || 0) + amount;
+  }
+  const newBalance = (customer.purchasedWalletBalancePaise || 0) + (customer.promotionalWalletBalancePaise || 0);
   customer.walletBalancePaise = newBalance;
   await customer.save();
 
@@ -104,6 +111,7 @@ async function topUpWallet({
     cafeId,
     customerId,
     transactionType: 'TOPUP',
+    creditType: validCreditType,
     amountPaise: amount,
     balanceBeforePaise: prevBalance,
     balanceAfterPaise: newBalance,
@@ -111,7 +119,7 @@ async function topUpWallet({
     sourcePaymentMethod,
     paymentStatus: 'CONFIRMED',
     idempotencyKey,
-    description: note || `Wallet top-up via ${sourcePaymentMethod}`,
+    description: note || `Wallet top-up (${validCreditType}) via ${sourcePaymentMethod}`,
     performedByUserId,
     serverTimestamp: new Date(),
   });
@@ -121,7 +129,10 @@ async function topUpWallet({
   return {
     success: true,
     amountCreditedPaise: amount,
+    creditType: validCreditType,
     newBalancePaise: newBalance,
+    purchasedBalancePaise: customer.purchasedWalletBalancePaise || 0,
+    promotionalBalancePaise: customer.promotionalWalletBalancePaise || 0,
     ledger: ledgerEntry.toObject(),
   };
 }
@@ -161,34 +172,60 @@ async function redeemWallet({
     }
   }
 
-  // Atomic deduction with balance guard to prevent negative balance / concurrent overspending
-  const updatedCustomer = await Customer.findOneAndUpdate(
-    {
+  // Deduct promotional balance first, then purchased balance
+  let updatedCustomer = null;
+  let promoDeduct = 0;
+  let purchasedDeduct = 0;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const cust = await Customer.findOne({ customerId, organisationId }).lean();
+    if (!cust) {
+      throw new ApiError(404, 'CUSTOMER_NOT_FOUND', `Customer ${customerId} not found.`);
+    }
+    if (cust.status !== 'ACTIVE') {
+      throw new ApiError(400, 'CUSTOMER_INACTIVE', 'Customer account is not active.');
+    }
+    if ((cust.walletBalancePaise || 0) < amount) {
+      throw new ApiError(
+        400,
+        'INSUFFICIENT_WALLET_BALANCE',
+        `Insufficient wallet balance. Requested: ${amount} paise, Available: ${cust.walletBalancePaise || 0} paise.`
+      );
+    }
+
+    const promoAvail = cust.promotionalWalletBalancePaise || 0;
+    promoDeduct = Math.min(amount, promoAvail);
+    purchasedDeduct = amount - promoDeduct;
+
+    const query = {
       customerId,
       organisationId,
       status: 'ACTIVE',
       walletBalancePaise: { $gte: amount },
-    },
-    {
-      $inc: { walletBalancePaise: -amount },
-    },
-    {
-      returnDocument: 'after',
-    }
-  );
+    };
+    if (promoDeduct > 0) query.promotionalWalletBalancePaise = { $gte: promoDeduct };
+    if (purchasedDeduct > 0) query.purchasedWalletBalancePaise = { $gte: purchasedDeduct };
+
+    updatedCustomer = await Customer.findOneAndUpdate(
+      query,
+      {
+        $inc: {
+          walletBalancePaise: -amount,
+          promotionalWalletBalancePaise: -promoDeduct,
+          purchasedWalletBalancePaise: -purchasedDeduct,
+        },
+      },
+      { returnDocument: 'after' }
+    );
+
+    if (updatedCustomer) break;
+  }
 
   if (!updatedCustomer) {
-    const checkCust = await Customer.findOne({ customerId, organisationId }).lean();
-    if (!checkCust) {
-      throw new ApiError(404, 'CUSTOMER_NOT_FOUND', `Customer ${customerId} not found.`);
-    }
-    if (checkCust.status !== 'ACTIVE') {
-      throw new ApiError(400, 'CUSTOMER_INACTIVE', 'Customer account is not active.');
-    }
     throw new ApiError(
       400,
       'INSUFFICIENT_WALLET_BALANCE',
-      `Insufficient wallet balance. Requested: ${amount} paise, Available: ${checkCust.walletBalancePaise || 0} paise.`
+      'Insufficient wallet balance or concurrent update conflict.'
     );
   }
 
@@ -208,12 +245,13 @@ async function redeemWallet({
     cafeId,
     customerId,
     transactionType: 'REDEMPTION',
+    creditType: promoDeduct > 0 && purchasedDeduct === 0 ? 'PROMOTIONAL' : 'PURCHASED',
     amountPaise: -amount,
     balanceBeforePaise: prevBalance,
     balanceAfterPaise: newBalance,
     referenceBillId,
     idempotencyKey,
-    description: note || `Wallet payment for bill ${referenceBillId || 'POS'}`,
+    description: note || `Wallet payment for bill ${referenceBillId || 'POS'} (Promo: ${promoDeduct}, Purchased: ${purchasedDeduct})`,
     performedByUserId,
     serverTimestamp: new Date(),
   });
@@ -223,7 +261,11 @@ async function redeemWallet({
   return {
     success: true,
     amountRedeemedPaise: amount,
+    promotionalRedeemedPaise: promoDeduct,
+    purchasedRedeemedPaise: purchasedDeduct,
     newBalancePaise: newBalance,
+    purchasedBalancePaise: updatedCustomer.purchasedWalletBalancePaise || 0,
+    promotionalBalancePaise: updatedCustomer.promotionalWalletBalancePaise || 0,
     ledger: ledgerEntry.toObject(),
   };
 }
@@ -368,9 +410,25 @@ async function redeemGiftCard({
   };
 }
 
+/**
+ * Get customer wallet balance breakdown (purchased vs promotional)
+ */
+async function getWalletBalanceBreakdown({ organisationId, customerId }) {
+  const customer = await Customer.findOne({ customerId, organisationId }).lean();
+  if (!customer) {
+    throw new ApiError(404, 'CUSTOMER_NOT_FOUND', `Customer ${customerId} not found.`);
+  }
+  return {
+    totalBalancePaise: customer.walletBalancePaise || 0,
+    purchasedBalancePaise: customer.purchasedWalletBalancePaise || 0,
+    promotionalBalancePaise: customer.promotionalWalletBalancePaise || 0,
+  };
+}
+
 module.exports = {
   topUpWallet,
   redeemWallet,
   issueGiftCard,
   redeemGiftCard,
+  getWalletBalanceBreakdown,
 };

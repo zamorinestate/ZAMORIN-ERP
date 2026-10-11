@@ -32,6 +32,11 @@ function computeEligibleRevenue(salesInput, basis = 'GROSS_SALES') {
     toIntPaisa(salesInput.refundsPaisa) -
     toIntPaisa(salesInput.excludedTransactionsPaisa);
 
+  // Benchmark A049: Exclude add-ons / extras from commission if configured
+  if (salesInput.includeAddonsInCommission === false && salesInput.addonSalesPaisa) {
+    eligible -= toIntPaisa(salesInput.addonSalesPaisa);
+  }
+
   if (basis === 'NET_SALES_EXCLUDING_GST' || basis === 'COLLECTED_REVENUE') {
     eligible -= toIntPaisa(salesInput.gstPaisa);
   }

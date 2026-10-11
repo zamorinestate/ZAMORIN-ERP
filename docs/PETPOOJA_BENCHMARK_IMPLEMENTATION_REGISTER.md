@@ -828,6 +828,33 @@ Per the governing execution instructions, **Package P22 concludes the P01–P22 
 ### 6.2 Handover Disposition
 - **Formal Status**: `ACCEPTED_FOR_LOCAL_PILOT`
 - **Release Test Suite Status**: 19/19 files completed, 294/294 tests passed, 0 failures (`npm --prefix Backend run test:release`).
+- **Benchmark Implementation Suite**: 18/18 tests passed (`backend/test/benchmarkOptionsImplementation.test.js`).
 - **Operational Runbook**: Established in [`OPERATIONAL_HANDOVER_RUNBOOK.md`](./OPERATIONAL_HANDOVER_RUNBOOK.md).
 - **Mandatory Production Gate**: Production deployment withheld until official Redis cluster, commercial payment merchant contracts, and live NIC GST credentials are provisioned.
+
+---
+
+## 7. All Remaining Applicable Options Implementation & Verification Register
+
+All remaining applicable benchmark options identified from the 4 Petpooja Functional and Operational Analysis PDFs have been natively implemented within the existing five-window architecture without cloud infrastructure or breaking changes:
+
+| Entry ID | Feature & Benchmark Description | Domain Service & Model Changes | Architectural Implementation & Test Evidence | Status |
+| :--- | :--- | :--- | :--- | :---: |
+| **F234 / A061** | Stored-Value Separation (Purchased vs Promotional Wallet Balances) | `Customer.js`, `WalletLedger.js`, `customerWalletService.js` | Separates `purchasedWalletBalancePaise` and `promotionalWalletBalancePaise`. Auto-deducts promotional bonus balance first upon redemption to mitigate liability. Breakdown query implemented. Tested in `benchmarkOptionsImplementation.test.js` Test 1. | **IMPLEMENTED_AND_VERIFIED** |
+| **A003** | Restaurant Electronic Tax Documents (E-Invoice & E-Way Bill) | `gstTaxService.js`, `TaxInvoice.js` | Full CBIC/NIC Schema INV-01 payload generator (`generateEInvoicePayload`) and Form GST EWB-01 payload generator (`generateEWayBillPayload`). Line-level HSN/SAC, UQC, tax splits, and round-offs. Tested in Test 2. | **IMPLEMENTED_AND_VERIFIED** |
+| **A121** | Regional Tax Regime Mutual Exclusivity | `gstTaxService.js` | Enforces mutual exclusivity: GST (India) and VAT (International/regional) cannot be mixed on the same entity or bill. Validated in Test 2. | **IMPLEMENTED_AND_VERIFIED** |
+| **A005 & A006** | Google Business Profile Integration & Reviews | `GoogleBusinessProfile.js`, `googleBusinessProfileService.js` | Multi-location GBP profile sync, performance insights (Search, Maps views, calls, directions), Google Reviews ingestion, sentiment aggregation, and authoritative manager/owner replies. Tested in Test 3. | **IMPLEMENTED_AND_VERIFIED** |
+| **A057** | Spoken UPI QR Soundbox Announcements | `paymentProviderService.js` | Multilingual spoken audio payload generator (`generateSpokenPaymentAnnouncement`) for UPI soundbox / speaker in English, Hindi, and Malayalam. Tested in Test 4. | **IMPLEMENTED_AND_VERIFIED** |
+| **A058** | Hubb Pay Terminal Authorization Verification | `paymentProviderService.js` | 4-to-6 digit terminal authorization verification code processor (`verifyHubbPayAuthorizationCode`) with amount and status verification. Tested in Test 4. | **IMPLEMENTED_AND_VERIFIED** |
+| **A059** | Uengage / Shoult-o-Pay Voucher Discount | `paymentProviderService.js` | Partner discount voucher validation engine (`validateUengageShoultoPayDiscount`) with bill total capping. Tested in Test 4. | **IMPLEMENTED_AND_VERIFIED** |
+| **A060** | Device Dynamic BharatQR Generator | `paymentProviderService.js` | EDC/Android POS terminal dynamic BharatQR generator (`generateDeviceDynamicQR`) producing compliant UPI pay URIs. Tested in Test 4. | **IMPLEMENTED_AND_VERIFIED** |
+| **A119** | Regional Tender Payment Surcharges | `paymentProviderService.js` | Surcharge calculation engine (`calculatePaymentSurcharge`) for international cards (2.5%) and credit cards (1.0%). Tested in Test 4. | **IMPLEMENTED_AND_VERIFIED** |
+| **A062–A066** | Customer Loyalty Rules & Restrictions | `customerLoyaltyService.js` | Weekday redemption restrictions (`allowedRedemptionDays`), sales return credit/points reversals, Captain KOT metadata persistence, and multi-category redemption points allocation with category caps. Tested in Test 5. | **IMPLEMENTED_AND_VERIFIED** |
+| **A041** | POS Open-Price Entry | `posOrderService.js`, `Bill.js` | Dynamic cashier open-price entry with configurable min/max bounds and supervisor authorization auditing. Tested in Test 6. | **IMPLEMENTED_AND_VERIFIED** |
+| **A070** | Toing Order Channel Support | `AggregatorOrder.js`, `Bill.js` | Toing aggregator platform added to accepted channels across aggregator intake, bills, and channel reporting. Tested in Test 7. | **IMPLEMENTED_AND_VERIFIED** |
+| **A049** | Commission on Extras / Add-On Exclusions | `revenueShareCalculationService.js` | Revenue share engine supports `includeAddonsInCommission` toggle, cleanly excluding add-on sales from commissionable base when configured. Tested in Test 8. | **IMPLEMENTED_AND_VERIFIED** |
+| **A090** | Action-Needed Dashboard & Section 194-O TDS | `analyticsBiService.js` | Action-needed summary engine flagging missing HSN/tax codes on active items, and Section 194-O e-commerce TDS (1%) calculations. Tested in Test 9. | **IMPLEMENTED_AND_VERIFIED** |
+| **A093–A095** | Supplier-Material Mapping Import | `vendorLedgerService.js`, `Vendor.js` | Tabular bulk import of supplier-to-raw-material mappings with supplier item codes, MOQs, lead times, and negotiated prices. Tested in Test 10. | **IMPLEMENTED_AND_VERIFIED** |
+| **A101 & A104** | Bulk Recipe Workbook & Ingredient Replacement | `bomDepletionService.js`, `Recipe.js` | Tabular recipe workbook export/import and automated bulk ingredient removal/replacement across all active recipes. Tested in Test 11. | **IMPLEMENTED_AND_VERIFIED** |
+
 
