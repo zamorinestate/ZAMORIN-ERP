@@ -22,6 +22,10 @@ Backend/uploads/
 backups/zamorin_backup_*.json
 backend/backups/zamorin_backup_*.json
 Backend/backups/zamorin_backup_*.json
+backend/backups/pre_handover_sanitisation_*
+Backend/backups/pre_handover_sanitisation_*
+/settings.json
+
 logs/
 *.log
 *.tmp
