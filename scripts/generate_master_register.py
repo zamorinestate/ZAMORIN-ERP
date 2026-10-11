@@ -54,13 +54,13 @@ def generate_register():
             status = 'implemented and verified'
             notes = 'Cash open/close, split tenders, cash drops, customer dues tracking, shift handover.'
         elif 93 <= num <= 107:
-            pkg = 'P15 / P21'
-            frontend = 'Frontend/src/js/pages/pos.js'
-            backend = 'Backend/src/services/channelReconciliationService.js, aggregatorService.js'
-            model = 'AggregatorOrder, PayoutReconciliation'
-            test = 'Backend/test/canonicalAccessMatrix.test.js'
-            status = 'conditional on an external dependency'
-            notes = 'Online aggregators (Zomato/Swiggy API contracts and merchant credentials required).'
+            pkg = 'P15'
+            frontend = 'Frontend/src/js/pages/channelsFrontService.js'
+            backend = 'Backend/src/services/aggregatorIntakeService.js, channelOperationsController.js'
+            model = 'AggregatorOrder, ChannelOrder'
+            test = 'Backend/test/p15_channelsQrOrderingFrontService.test.js'
+            status = 'implemented and verified'
+            notes = 'P15 Aggregator intake: HMAC signature verification, duplicate webhook idempotency, expected payout calculation & P12 reconciliation.'
         elif 108 <= num <= 119:
             pkg = 'P10'
             frontend = 'Frontend/src/js/pages/departmentalOrders.js, bills.js'
@@ -119,12 +119,12 @@ def generate_register():
             notes = 'Customer profiles, unified history, consent & preferences, loyalty rules & ledger, wallet & gift cards, campaigns.'
         elif 253 <= num <= 274:
             pkg = 'P15'
-            frontend = 'Frontend/src/js/pages/kioskAttendance.js, posTerminal.js'
-            backend = 'Backend/src/services/universalQrService.js, universalQrRoutes.js'
-            model = 'UniversalQrToken, PosTerminalConfig'
-            test = 'Backend/test/canonicalAccessMatrix.test.js'
-            status = 'partially implemented'
-            notes = 'Universal QR tokens, captain tableside flow; kiosk/self-ordering planned in P15.'
+            frontend = 'Frontend/src/js/pages/channelsFrontService.js'
+            backend = 'Backend/src/services/qrOrderingService.js, tableService.js'
+            model = 'DiningTable, TableSession, GuestVerificationChallenge'
+            test = 'Backend/test/p15_channelsQrOrderingFrontService.test.js'
+            status = 'implemented and verified'
+            notes = 'P15 Universal QR tokens, mobile guest menu, multi-round table sessions, OTP verification challenge, captain tableside flow.'
         elif 275 <= num <= 292:
             pkg = 'P15 / P21'
             frontend = 'N/A (KDS Persona Deactivated)'
@@ -134,13 +134,13 @@ def generate_register():
             status = 'explicitly excluded'
             notes = 'Explicitly excluded: KDS persona deactivated per Zamorin 4-persona architectural freeze.'
         elif 293 <= num <= 308:
-            pkg = 'P15 / P21'
-            frontend = 'Frontend/src/js/pages/notBuilt.js'
-            backend = 'Backend/src/services/reservationService.js'
-            model = 'Reservation, WebOrder'
-            test = 'Backend/test/canonicalAccessMatrix.test.js'
-            status = 'conditional on an external dependency'
-            notes = 'Table reservations and direct web ordering (gateway and website hosting dependencies).'
+            pkg = 'P15'
+            frontend = 'Frontend/src/js/pages/channelsFrontService.js'
+            backend = 'Backend/src/services/tableReservationService.js, directOrderingService.js, frontServiceTools.js'
+            model = 'Reservation, WaitlistEntry, PickupToken, OnlineChannelConfig'
+            test = 'Backend/test/p15_channelsQrOrderingFrontService.test.js'
+            status = 'implemented and verified'
+            notes = 'P15 Host desk reservations & conflict check, waitlist queue atomic seating, direct web ordering, packaging fees, pickup tokens.'
         elif 309 <= num <= 315:
             pkg = 'P12 / P21'
             frontend = 'Frontend/src/js/pages/finance.js'
@@ -332,10 +332,10 @@ def generate_register():
 
     with open(out_path, 'w', encoding='utf-8') as out:
         out.write('# ZAMORIN CAFÉ ERP — PETPOOJA BENCHMARK IMPLEMENTATION REGISTER\n\n')
-        out.write('**Document ID**: `REG-PETPOOJA-485-P14-VERIFIED`  \n')
+        out.write('**Document ID**: `REG-PETPOOJA-485-P15-VERIFIED`  \n')
         out.write('**Execution Scope**: `D:\\Zamorin Cafe ERP\\A Main Workspace`  \n')
         out.write('**Canonical Branch**: `feature/foundation-five-windows`  \n')
-        out.write('**Verified Starting Closeout Commit**: `7db21a6` (P13 Closeout)  \n')
+        out.write('**Verified Starting Closeout Commit**: `b06a667` (P14 Closeout)  \n')
         out.write('**Audit Date**: 11 October 2026 | **Status**: ACTIVE TRACEABLE GOVERNANCE  \n\n')
         out.write('---\n\n')
 
@@ -444,14 +444,15 @@ def generate_register():
             out.write(f'| **{e["id"]}** | {e["title"]} | {e["package"]} | `{e["frontend"]}` | `{e["backend"]}` | `{e["model"]}` | `{e["test"]}` | **{e["status"]}** | {e["notes"]} |\n')
 
         out.write('\n---\n\n')
-        out.write('## 6. Traceable Backlog & Deferred Items (P14–P22)\n\n')
-        out.write('Per the governing execution instructions, packages P01–P13 are closed or verified. Future scope items are preserved in the traceable backlog below without destabilising accepted work:\n\n')
-        out.write('1. **Package P14 (Customers, Loyalty & Campaigns)**: 38 entries (`F226`–`F252`, `A067`–`A077`). Core customer records and consent are active; multi-tier points expiry, wallet liabilities, and external campaign dispatches will be completed in P14.\n')
-        out.write('2. **Package P15 (Channels, QR & Front Service)**: 49 entries (`F093`–`F107`, `F253`–`F274`, `A078`–`A089`). Universal QR foundation is complete; direct web ordering and third-party aggregator webhooks are conditional on merchant partner API agreements.\n')
-        out.write('3. **Package P16 (Tasks, Training SOPs & Recurring Checklists)**: 9 entries (`F326`–`F334`). Action Centre tasks and owner academy are active; recurring automated checklists will be enhanced in P16.\n')
-        out.write('4. **Package P20 & P21 (Hardware & External Services)**: 44 conditional entries (payment terminals, soundboxes, Google Business profile, and biometric clocking hardware). Correct adapter boundaries are defined; live operation remains marked conditional until physical hardware is connected.\n\n')
+        out.write('## 6. Traceable Backlog & Deferred Items (P16–P22)\n\n')
+        out.write('Per the governing execution instructions, packages P01–P15 are closed or verified. Future scope items are preserved in the traceable backlog below without destabilising accepted work:\n\n')
+        out.write('1. **Package P16 (Tasks, Training SOPs & Recurring Checklists)**: 9 entries (`F326`–`F334`). Action Centre tasks and owner academy are active; recurring automated checklists will be enhanced in P16.\n')
+        out.write('2. **Package P20 & P21 (Hardware & External Services)**: 44 conditional entries (payment terminals, soundboxes, Google Business profile, and biometric clocking hardware). Correct adapter boundaries are defined; live operation remains marked conditional until physical hardware is connected.\n\n')
 
-    print(f'Master register written to {out_path} ({os.path.getsize(out_path)} bytes)')
+    root_path = 'PETPOOJA_BENCHMARK_IMPLEMENTATION_REGISTER.md'
+    import shutil
+    shutil.copy(out_path, root_path)
+    print(f'Master register written to {out_path} and {root_path} ({os.path.getsize(out_path)} bytes)')
 
 if __name__ == '__main__':
     generate_register()

@@ -575,6 +575,14 @@ router.use(
   analyticsRoutes
 );
 
+const channelRoutes =
+  require('./channelRoutes');
+
+router.use(
+  '/channels',
+  channelRoutes
+);
+
 const sharedInfrastructureRoutes =
   require('./sharedInfrastructureRoutes');
 

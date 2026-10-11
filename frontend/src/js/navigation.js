@@ -34,6 +34,7 @@ const PRIMARY_MASTER_ITEMS = [
 
   // ── OPERATIONS ──────────────────────────────────────────────────────────────
   { id: 'pos',           label: 'POS & Billing',          icon: 'pos',          route: 'pos',               group: 'OPERATIONS' },
+  { id: 'channels',      label: 'Channels & Front Service', icon: 'pos',        route: 'channels',          group: 'OPERATIONS' },
   { id: 'approvals',     label: 'Tasks & Oversight',      icon: 'tasks',        route: 'approvals',         group: 'OPERATIONS' },
   { id: 'attendance',    label: 'Attendance & Shifts',    icon: 'attendance',   route: 'attendance',        group: 'OPERATIONS' },
   { id: 'dept-orders',   label: 'Department Orders',      icon: 'deptOrders',   route: 'dept-orders',       group: 'OPERATIONS' },
@@ -109,6 +110,7 @@ export const NAVIGATION = {
       { id: 'owner-drilldown-procurement', label: 'Procurement (Read-Only)',       icon: 'procurement',route: 'procurement', group: 'OPERATIONS (READ-ONLY)' },
       { id: 'owner-drilldown-expenses',    label: 'Expenses (Read-Only)',          icon: 'expenses',   route: 'expenses',    group: 'OPERATIONS (READ-ONLY)' },
       { id: 'owner-drilldown-customers',   label: 'Customers (Read-Only)',         icon: 'customers',  route: 'customers',   group: 'OPERATIONS (READ-ONLY)' },
+      { id: 'owner-channels',              label: 'Channels & Tables (Read-Only)', icon: 'pos',        route: 'channels',    group: 'COMMERCIAL' },
       { id: 'bills',        label: 'Bills & Receipts',        icon: 'bills',        route: 'bills',           group: 'FINANCE' },
       { id: 'sales-cash',   label: 'Sales & Cash Book',       icon: 'finance',      route: 'sales-cash',      group: 'FINANCE' },
       { id: 'performance',  label: 'Café Performance',        icon: 'performance',  route: 'performance',     group: 'INSIGHTS' },
@@ -132,6 +134,7 @@ export const NAVIGATION = {
     items: [
       { id: 'dashboard',    label: 'Cafe Operations Dashboard', icon: 'home',       route: 'dashboard',       group: 'COMMAND' },
       { id: 'pos',          label: 'POS & Billing',           icon: 'pos',          route: 'pos',             group: 'OPERATIONS' },
+      { id: 'channels',     label: 'Channels & Front Service', icon: 'pos',         route: 'channels',        group: 'OPERATIONS' },
       { id: 'attendance',   label: 'Attendance & Shifts',     icon: 'attendance',   route: 'attendance',      group: 'OPERATIONS' },
       { id: 'dept-orders',  label: 'Department Orders',       icon: 'deptOrders',   route: 'dept-orders',     group: 'OPERATIONS' },
       { id: 'inventory',    label: 'Inventory',               icon: 'inventory',    route: 'inventory',       group: 'OPERATIONS' },

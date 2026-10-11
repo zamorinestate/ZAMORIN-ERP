@@ -81,6 +81,7 @@ import { renderOwnerMenuPricing, initOwnerMenuPricingEvents, setOwnerMenuPricing
 import { renderOwnerCustomerLoyalty, initOwnerCustomerLoyaltyEvents, setOwnerCustomerLoyaltySection } from "./pages/ownerCustomerLoyalty.js";
 import { renderOwnerUtilitiesWaste, initOwnerUtilitiesWasteEvents, setOwnerUtilitiesWasteSection } from "./pages/ownerUtilitiesWaste.js";
 import { renderOwnerGovernanceDelegation, initOwnerGovernanceDelegationEvents, setOwnerGovernanceDelegationSection } from "./pages/ownerGovernanceDelegation.js";
+import { renderChannelsFrontService, wireChannelsFrontService, setChannelsActiveTab } from "./pages/channelsFrontService.js";
 
 // ROLE_LABELS: display-safe generic labels used only for topbar scope chip
 // until /auth/me bootstrap provides the real user's display name.
@@ -374,6 +375,15 @@ async function renderPage() {
     case "pos":
       content.innerHTML = renderPOS();
       await wirePOS(content);
+      break;
+
+    case "channels":
+    case "channels-front-service":
+    case "tables":
+    case "reservations":
+      setChannelsActiveTab?.(subroute || (route === "reservations" ? "reservations" : (route === "tables" ? "tables" : "tables")));
+      content.innerHTML = renderChannelsFrontService(subroute);
+      wireChannelsFrontService();
       break;
 
     case "bills":
