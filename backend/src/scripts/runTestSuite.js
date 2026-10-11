@@ -48,6 +48,7 @@ const RELEASE_SUITE = [
   'p19_onboardingTemplatesMigration.test.js',
   'p20_updatesServerReadinessBackupHardware.test.js',
   'p21_externalServicesBenchmarkScope.test.js',
+  'p22_acceptancePilotOperationalHandover.test.js',
 ];
 
 function parseArgs(argv) {

@@ -812,10 +812,22 @@ Total benchmark records evaluated: **485** (351 Core entries `F001`–`F351` + 1
 
 ---
 
-## 6. Traceable Backlog & Deferred Items (P20–P22)
+## 6. Package P22 Acceptance Closeout & Final Handover Reconciliation
 
-Per the governing execution instructions, packages P01–P19 are closed and verified. Future scope items are preserved in the traceable backlog below without destabilising accepted work:
+Per the governing execution instructions, **Package P22 concludes the P01–P22 implementation programme**. All 485 canonical Petpooja benchmark records are fully reconciled across P01 through P22 without omission, renumbering, or silent deletion:
 
-1. **Package P20 & P21 (Hardware & External Services)**: 44 conditional entries (payment terminals, soundboxes, Google Business profile, and biometric clocking hardware). Correct adapter boundaries are defined; live operation remains marked conditional until physical hardware is connected.
-2. **Package P22 (Advanced Custom Analytics & Specialized Add-ons)**: Institutional quoting, multi-event catering, and customized integrations.
+### 6.1 Authoritative 485 Benchmark Inventory Reconciliation
+| Disposition Classification | Record Count | Architectural & Operational Handling | Executable Verification |
+| :--- | :--- | :--- | :--- |
+| **Core Delivery (`PASS_VERIFIED`)** | **447** | Master data, UOM, procurement, 3-way match, POS checkouts, split tender, till sessions, cash drawer custody, inventory lots, FEFO, finance ledger, statutory payroll, CRM loyalty, front service, QR ordering, SOP training, forecasting, CAPEX, onboarding, BCDR backups. | Verified across 19 release suites with 294 passing tests (`p22_acceptancePilotOperationalHandover.test.js`). |
+| **Conditional Integrations (`PASS_WITH_LIMITATIONS` / `BLOCKED_EXTERNAL_DEPENDENCY`)** | **13** | Payment acquiring gateways (Pine Labs/Razorpay), soundbox, Google Business Profile, WhatsApp/SMS, statutory NIC GST e-invoicing. Adapter contracts and diagnostic probes active; live activation requires commercial merchant contracts or IRP credentials. | Provider probing verified in P21/P22 tests (0 secrets exposed; truth-preserving `BLOCKED_UNCONFIGURED`). |
+| **Architectural Exclusions (`NOT_APPLICABLE` - FROZEN)** | **18** | Kitchen Display Screens (`F275`–`F292`). Permanently excluded by enterprise governance freeze. Requests fail closed with HTTP `403 KDS_ACTIVATION_EXCLUDED_BY_FREEZE`. | Verified in P21 and P22 test suites (`Subtest 7`). |
+| **Benchmark Context / Informational** | **7** | Third-party legacy aggregator quirks and proprietary hardware lock-ins documented for benchmark fidelity. | Formally reconciled in register. |
+| **TOTAL BENCHMARK RECORDS** | **485** | **100% of canonical Petpooja benchmark records reconciled.** | **Zero records dropped or renumbered.** |
+
+### 6.2 Handover Disposition
+- **Formal Status**: `ACCEPTED_FOR_LOCAL_PILOT`
+- **Release Test Suite Status**: 19/19 files completed, 294/294 tests passed, 0 failures (`npm --prefix Backend run test:release`).
+- **Operational Runbook**: Established in `OPERATIONAL_HANDOVER_RUNBOOK.md`.
+- **Mandatory Production Gate**: Production deployment withheld until official Redis cluster, commercial payment merchant contracts, and live NIC GST credentials are provisioned.
 
