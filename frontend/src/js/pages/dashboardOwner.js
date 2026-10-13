@@ -706,6 +706,28 @@ async function loadDashboardData(isBackground = false) {
       renderDashboardBody(contentEl, res.data);
       const freshness = document.getElementById("occ-freshness");
       if (freshness) freshness.textContent = `Updated: ${new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit" })} IST`;
+
+      // A090: Load Action-Needed Compliance & Section 194-O TDS Summary
+      try {
+        const actRes = await apiGet('/analytics/action-needed');
+        const actData = actRes?.data || actRes;
+        if (actData) {
+          const hsnEl = container.querySelector('#occ-compliance-missing-hsn-count');
+          const ecomEl = container.querySelector('#occ-compliance-gross-ecom-sales');
+          const tdsEl = container.querySelector('#occ-compliance-tds-liability');
+          if (hsnEl) {
+            const count = actData.missingTaxOrHsnCount || 0;
+            hsnEl.textContent = `${count} Items`;
+            hsnEl.style.color = count > 0 ? 'var(--danger)' : 'var(--success)';
+          }
+          if (ecomEl && actData.ecomTdsSummary) {
+            ecomEl.textContent = `₹${(Number(actData.ecomTdsSummary.grossSalesPaisa || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+          }
+          if (tdsEl && actData.ecomTdsSummary) {
+            tdsEl.textContent = `₹${(Number(actData.ecomTdsSummary.tdsAmountPaisa || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+          }
+        }
+      } catch (_) {}
     } else {
       const fallback = JSON.parse(JSON.stringify(DEFAULT_OWNER_DASHBOARD_DATA));
       ownerDashboardState.data = fallback;
@@ -946,6 +968,40 @@ export function renderDashboardBodyHtml(data) {
       </div>
       <div id="occ-trend-container" class="occ-trend-content">
         ${ownerDashboardState.trendViewMode === 'chart' ? renderTrendChart(trend) : renderTrendTable(trend)}
+      </div>
+    </div>
+
+    <!-- Statutory Compliance & Section 194-O TDS Action Card (A090) -->
+    <div class="card occ-section-card mt-6" id="occ-compliance-action-mount" style="padding:18px 22px;border:1px solid #e2e8f0;background:linear-gradient(135deg, rgba(212,175,55,0.04) 0%, rgba(255,255,255,1) 100%);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:18px;">⚖️</span>
+          <div>
+            <h2 style="font-size:15px;font-weight:700;margin:0;color:var(--ink);">
+              Statutory Compliance &amp; Section 194-O TDS Oversight (A090)
+            </h2>
+            <p style="font-size:11.5px;color:var(--muted);margin:0;">
+              E-Commerce Operator TDS liability (1.0%) across aggregators and menu catalogue GST HSN classification.
+            </p>
+          </div>
+        </div>
+      </div>
+      <div id="occ-compliance-action-content" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));gap:12px;">
+        <div style="padding:12px;background:var(--surface);border-radius:8px;border:1px solid var(--line);">
+          <div style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;">Missing HSN / Tax Items</div>
+          <div style="font-size:20px;font-weight:800;color:var(--danger);font-family:var(--font-mono);margin:4px 0;" id="occ-compliance-missing-hsn-count">0 Items</div>
+          <div style="font-size:11px;color:var(--muted);">All active menu items verified.</div>
+        </div>
+        <div style="padding:12px;background:var(--surface);border-radius:8px;border:1px solid var(--line);">
+          <div style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;">Aggregator Gross E-Com Sales</div>
+          <div style="font-size:20px;font-weight:800;color:var(--ink);font-family:var(--font-mono);margin:4px 0;" id="occ-compliance-gross-ecom-sales">₹0.00</div>
+          <div style="font-size:11px;color:var(--muted);">Turnover via Zomato, Swiggy &amp; Toing.</div>
+        </div>
+        <div style="padding:12px;background:rgba(212,175,55,0.08);border-radius:8px;border:1px solid rgba(212,175,55,0.3);">
+          <div style="font-size:11px;color:#8C6D1F;font-weight:700;text-transform:uppercase;">Section 194-O TDS Liability (1.0%)</div>
+          <div style="font-size:20px;font-weight:800;color:#8C6D1F;font-family:var(--font-mono);margin:4px 0;" id="occ-compliance-tds-liability">₹0.00</div>
+          <div style="font-size:11px;color:var(--muted);">E-commerce operator statutory deduction pool.</div>
+        </div>
       </div>
     </div>
 

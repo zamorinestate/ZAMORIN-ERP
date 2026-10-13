@@ -394,11 +394,12 @@ class AggregatorIntakeService {
         aggregators: {
           zomato: { isEnabled: true, storeStatus: 'ONLINE' },
           swiggy: { isEnabled: true, storeStatus: 'ONLINE' },
+          toing: { isEnabled: true, storeStatus: 'ONLINE' },
         },
       });
     }
 
-    const providersToUpdate = normProvider === 'ALL' ? ['zomato', 'swiggy'] : [normProvider.toLowerCase()];
+    const providersToUpdate = normProvider === 'ALL' ? ['zomato', 'swiggy', 'toing'] : [normProvider.toLowerCase()];
     for (const p of providersToUpdate) {
       if (config.aggregators && config.aggregators[p]) {
         config.aggregators[p].storeStatus = 'PAUSED';
@@ -459,7 +460,7 @@ class AggregatorIntakeService {
       return { cafeId, provider: normProvider, storeStatus: 'ONLINE' };
     }
 
-    const providersToUpdate = normProvider === 'ALL' ? ['zomato', 'swiggy'] : [normProvider.toLowerCase()];
+    const providersToUpdate = normProvider === 'ALL' ? ['zomato', 'swiggy', 'toing'] : [normProvider.toLowerCase()];
     for (const p of providersToUpdate) {
       if (config.aggregators && config.aggregators[p]) {
         config.aggregators[p].storeStatus = 'ONLINE';
@@ -503,14 +504,14 @@ class AggregatorIntakeService {
 
     let config = await OnlineChannelConfig.findOne({ organisationId, cafeId });
     if (!config) {
-      return { zomato: { storeStatus: 'ONLINE' }, swiggy: { storeStatus: 'ONLINE' } };
+      return { zomato: { storeStatus: 'ONLINE' }, swiggy: { storeStatus: 'ONLINE' }, toing: { storeStatus: 'ONLINE' } };
     }
 
     const now = new Date();
     let modified = false;
     const result = {};
 
-    for (const p of ['zomato', 'swiggy']) {
+    for (const p of ['zomato', 'swiggy', 'toing']) {
       const agg = config.aggregators?.[p];
       if (agg) {
         if (agg.storeStatus === 'PAUSED' && agg.autoResume && agg.pausedUntil && new Date(agg.pausedUntil) <= now) {

@@ -32,4 +32,8 @@ router.get('/hourly-heatmap/:cafeId', analyticsController.getHourlyHeatmap);
 router.get('/food-cost', analyticsController.getFoodCostAndWastage);
 router.get('/food-cost/:cafeId', analyticsController.getFoodCostAndWastage);
 
+// Action-Needed Summary & Section 194-O TDS (A090)
+router.get('/action-needed', analyticsController.getActionNeeded);
+router.get('/action-needed/:cafeId', analyticsController.getActionNeeded);
+
 module.exports = router;

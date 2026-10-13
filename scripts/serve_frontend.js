@@ -22,8 +22,8 @@ const mimeTypes = {
 const server = http.createServer(async (req, res) => {
   const parsedUrl = new URL(req.url, `http://${req.headers.host || "localhost"}`);
 
-  // Reverse proxy /api/* requests to local backend or Render
-  if (parsedUrl.pathname.startsWith("/api/")) {
+  // Reverse proxy /api/*, /qr/*, /invoice/*, /c/* requests to local backend or Render
+  if (parsedUrl.pathname.startsWith("/api/") || parsedUrl.pathname.startsWith("/qr/") || parsedUrl.pathname.startsWith("/invoice/") || parsedUrl.pathname.startsWith("/c/")) {
     const backendHost = process.env.BACKEND_URL || "http://localhost:4000";
     async function tryProxy(host) {
       const targetUrl = `${host}${parsedUrl.pathname}${parsedUrl.search}`;

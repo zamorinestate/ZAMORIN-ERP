@@ -277,10 +277,31 @@ const getConsolidatedBenchmarks = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * 6. Compliance & Executive Action-Needed Summary (A090)
+ */
+const getActionNeeded = asyncHandler(async (req, res) => {
+  const auth = req.auth || req.user;
+  const cafeId = req.params.cafeId || req.query.cafeId;
+  assertCafeAccess(auth, cafeId, false);
+
+  const organisationId = auth.organisationId;
+  const result = await analyticsBiService.getActionNeededSummary({
+    organisationId,
+    cafeId,
+  });
+
+  return res.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
 module.exports = {
   getExecutiveSummary,
   getMenuEngineering,
   getHourlyHeatmap,
   getFoodCostAndWastage,
   getConsolidatedBenchmarks,
+  getActionNeeded,
 };

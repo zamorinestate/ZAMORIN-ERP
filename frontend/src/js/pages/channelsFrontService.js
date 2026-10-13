@@ -44,20 +44,32 @@ export function renderChannelsFrontService(subroute) {
           </p>
         </div>
 
-        <div style="display:flex; align-items:center; gap:10px;">
-          <button id="btn-refresh-channels" class="btn" style="background:var(--surface, #FFFFFF); border:1px solid var(--line, #E2E8F0); padding:8px 14px; font-size:12px; border-radius:8px; cursor:pointer; display:flex; align-items:center; gap:6px;">
-            <span>🔄</span> Refresh Data
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <button id="btn-launch-captain-app" class="btn" style="background:#0F766E; color:#FFFFFF; border:none; padding:7px 12px; font-size:11.5px; font-weight:700; border-radius:6px; cursor:pointer; display:flex; align-items:center; gap:5px;" title="Launch Mobile Waiter / Captain Floor Web App (F253-F259, A131)">
+            <span>📱</span> Captain App
+          </button>
+          <button id="btn-launch-token-display" class="btn" style="background:#1E293B; color:#FFFFFF; border:none; padding:7px 12px; font-size:11.5px; font-weight:700; border-radius:6px; cursor:pointer; display:flex; align-items:center; gap:5px;" title="Launch Takeaway Fullscreen TV Token Display (F276-F280)">
+            <span>📺</span> TV Tokens
+          </button>
+          <button id="btn-launch-call-center" class="btn" style="background:var(--surface, #FFFFFF); border:1px solid var(--line, #E2E8F0); padding:7px 12px; font-size:11.5px; font-weight:700; border-radius:6px; cursor:pointer; display:flex; align-items:center; gap:5px;" title="Central Multi-Outlet Phone Order Call Center Desk (F111)">
+            <span>📞</span> Call Center
+          </button>
+          <button id="btn-launch-emergency-terminal" class="btn" style="background:rgba(239,68,68,0.1); color:#DC2626; border:1px solid rgba(239,68,68,0.3); padding:7px 12px; font-size:11.5px; font-weight:700; border-radius:6px; cursor:pointer; display:flex; align-items:center; gap:5px;" title="Emergency Offline Order Acceptance Terminal (A007 / F086)">
+            <span>⚡</span> Emergency Terminal
+          </button>
+          <button id="btn-refresh-channels" class="btn" style="background:var(--surface, #FFFFFF); border:1px solid var(--line, #E2E8F0); padding:7px 12px; font-size:11.5px; border-radius:6px; cursor:pointer; display:flex; align-items:center; gap:5px;">
+            <span>🔄</span> Refresh
           </button>
           ${!isOwner ? `
-            <button id="btn-quick-new-res" class="btn" style="background:#16223F; color:#FFFFFF; border:none; padding:8px 14px; font-size:12px; font-weight:600; border-radius:8px; cursor:pointer; display:flex; align-items:center; gap:6px;">
+            <button id="btn-quick-new-res" class="btn" style="background:#16223F; color:#FFFFFF; border:none; padding:7px 12px; font-size:11.5px; font-weight:600; border-radius:6px; cursor:pointer; display:flex; align-items:center; gap:5px;">
               <span>📅</span> New Booking
             </button>
-            <button id="btn-quick-waitlist" class="btn" style="background:#D4AF37; color:#16223F; border:none; padding:8px 14px; font-size:12px; font-weight:700; border-radius:8px; cursor:pointer; display:flex; align-items:center; gap:6px;">
-              <span>⏱️</span> Add to Waitlist
+            <button id="btn-quick-waitlist" class="btn" style="background:#D4AF37; color:#16223F; border:none; padding:7px 12px; font-size:11.5px; font-weight:700; border-radius:6px; cursor:pointer; display:flex; align-items:center; gap:5px;">
+              <span>⏱️</span> Waitlist
             </button>
           ` : `
-            <span style="font-size:12px; color:var(--ink-muted, #64748B); background:rgba(0,0,0,0.04); padding:6px 12px; border-radius:6px; font-weight:500;">
-              👁️ Owner Portal (Read-Only)
+            <span style="font-size:11.5px; color:var(--ink-muted, #64748B); background:rgba(0,0,0,0.04); padding:6px 10px; border-radius:6px; font-weight:500;">
+              👁️ Owner (Read-Only)
             </span>
           `}
         </div>
@@ -116,11 +128,16 @@ function renderTablesTab() {
           <h3 style="margin:0 0 4px 0; font-size:16px; font-weight:700; color:#16223F;">Café Dining Tables & Live Sessions</h3>
           <p style="margin:0; font-size:12px; color:#64748B;">Floor status, active guest QR sessions, multi-round ordering rounds, and instant billing.</p>
         </div>
-        ${!isOwner ? `
-          <button id="btn-add-table" class="btn" style="background:#16223F; color:#FFFFFF; border:none; padding:7px 12px; font-size:12px; font-weight:600; border-radius:6px; cursor:pointer;">
-            ➕ Add Dining Table
+        <div style="display:flex; gap:8px;">
+          <button id="btn-captain-app-dining" class="btn" style="background:#0F766E; color:#FFFFFF; border:none; padding:7px 12px; font-size:12px; font-weight:700; border-radius:6px; cursor:pointer;" title="Launch Mobile Waiter Captain Web App (A131)">
+            📱 Floor Captain App
           </button>
-        ` : ''}
+          ${!isOwner ? `
+            <button id="btn-add-table" class="btn" style="background:#16223F; color:#FFFFFF; border:none; padding:7px 12px; font-size:12px; font-weight:600; border-radius:6px; cursor:pointer;">
+              ➕ Add Dining Table
+            </button>
+          ` : ''}
+        </div>
       </div>
 
       <div id="tables-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:16px;">
@@ -210,7 +227,8 @@ function renderOrdersTab() {
             <option value="">All Channels</option>
             <option value="QR_ORDER">QR Table</option>
             <option value="DIRECT_WEB">Direct Web</option>
-            <option value="AGGREGATOR">Aggregators (Zomato/Swiggy)</option>
+            <option value="AGGREGATOR">Aggregators (Zomato/Swiggy/Toing)</option>
+            <option value="TOING">Toing Direct (A070)</option>
           </select>
         </div>
       </div>
@@ -243,9 +261,14 @@ function renderPickupTab() {
             <h3 style="margin:0 0 4px 0; font-size:16px; font-weight:700; color:#D4AF37;">Customer Order Status Screen</h3>
             <span style="font-size:11px; color:#94A3B8;">Public Projection Preview (Zero PII Guaranteed)</span>
           </div>
-          <span style="background:rgba(212,175,55,0.2); color:#D4AF37; font-size:11px; font-weight:700; padding:3px 8px; border-radius:8px;">
-            PUBLIC DISPLAY
-          </span>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button id="btn-launch-fullscreen-tv" class="btn" style="background:#D4AF37; color:#16223F; border:none; padding:5px 12px; font-size:11.5px; font-weight:800; border-radius:6px; cursor:pointer;" title="Launch Fullscreen Takeaway TV Token Screen (F276-F280)">
+              📺 Launch TV Display
+            </button>
+            <span style="background:rgba(212,175,55,0.2); color:#D4AF37; font-size:11px; font-weight:700; padding:3px 8px; border-radius:8px;">
+              PUBLIC DISPLAY
+            </span>
+          </div>
         </div>
 
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:20px;">
@@ -377,9 +400,10 @@ function renderConfigTab() {
           </button>
         </div>
 
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+        <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px;">
           ${renderAggregatorCard("ZOMATO", "Zomato", "#E23744", cachedAggregatorStatus?.zomato)}
           ${renderAggregatorCard("SWIGGY", "Swiggy", "#FC8019", cachedAggregatorStatus?.swiggy)}
+          ${renderAggregatorCard("TOING", "Toing", "#8B5CF6", cachedAggregatorStatus?.toing)}
         </div>
       </div>
 
@@ -444,6 +468,28 @@ export function wireChannelsFrontService() {
   if (waitlistBtn) {
     waitlistBtn.addEventListener("click", openAddWaitlistModal);
   }
+
+  // Cross-screen launcher links
+  document.querySelectorAll("#btn-launch-captain-app, #btn-captain-app-dining").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      window.location.hash = "#captain";
+    });
+  });
+
+  document.querySelectorAll("#btn-launch-token-display, #btn-launch-fullscreen-tv").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      window.open("#token-display", "TVTokenDisplay", "width=1920,height=1080,menubar=no,toolbar=no");
+      showToast("Takeaway TV Token Display launched.", "info");
+    });
+  });
+
+  document.getElementById("btn-launch-call-center")?.addEventListener("click", () => {
+    window.location.hash = "#call-center";
+  });
+
+  document.getElementById("btn-launch-emergency-terminal")?.addEventListener("click", () => {
+    window.location.hash = "#emergency-terminal";
+  });
 
   loadActiveTabData();
 }

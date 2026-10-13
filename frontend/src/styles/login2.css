@@ -346,12 +346,20 @@ body:has(#app.auth-screen) {
   position: relative;
   width: 34px;
   height: 18px;
+  display: inline-block;
+  vertical-align: middle;
 }
 
 .toggle-switch input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
   opacity: 0;
-  width: 0;
-  height: 0;
+  cursor: pointer;
+  z-index: 2;
 }
 
 .light-slider {
@@ -359,8 +367,10 @@ body:has(#app.auth-screen) {
   inset: 0;
   background-color: rgba(15, 23, 42, 0.15);
   border-radius: 20px;
-  transition: 0.3s;
+  transition: 0.25s ease;
   border: 1px solid rgba(255, 255, 255, 0.6);
+  pointer-events: none;
+  z-index: 1;
 }
 
 .light-slider:before {
@@ -839,58 +849,150 @@ body:has(#app.auth-screen) {
   display: none !important;
 }
 
-/* Biometrics Modal */
+/* Biometrics & PIN Chooser Modal — Glassmorphic Design matching Login 2.0 */
+#l2-biometrics-modal .light-modal-content.bio-chooser-modal-content {
+  background: rgba(255, 255, 255, 0.84);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.95);
+  border-radius: 28px;
+  box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.6) inset;
+  padding: 30px 32px 26px 32px;
+  max-width: 440px;
+  width: min(calc(100vw - 32px), 440px);
+  color: #0f172a;
+}
+
+#l2-biometrics-modal .light-close-btn {
+  top: 18px;
+  right: 18px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+#l2-biometrics-modal .light-close-btn:hover {
+  background: rgba(0, 0, 0, 0.1);
+  color: #0f172a;
+  transform: scale(1.06);
+}
+
+.bio-modal-icon-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  background: rgba(177, 125, 56, 0.12);
+  border: 1px solid rgba(177, 125, 56, 0.3);
+  margin-bottom: 10px;
+  box-shadow: 0 4px 12px rgba(177, 125, 56, 0.15);
+}
+
 .biometric-options {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
   margin-top: 18px;
-}
-
-.l2-pin-input-box {
-  width: 44px;
-  height: 50px;
-  text-align: center;
-  font-size: 22px;
-  font-weight: 700;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  background: rgba(0, 0, 0, 0.35);
-  color: #fff;
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
-
-.l2-pin-input-box:focus {
-  border-color: #d4a359;
-  box-shadow: 0 0 0 2px rgba(212, 163, 89, 0.25);
-  outline: none;
+  margin-bottom: 4px;
 }
 
 .light-bio-option {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  border-radius: 14px;
-  padding: 20px 12px;
+  background: rgba(255, 255, 255, 0.68);
+  border: 1.5px solid rgba(255, 255, 255, 0.95);
+  border-radius: 20px;
+  padding: 22px 14px 18px 14px;
   display: flex;
   flex-direction: column;
   align-items: center;
+  text-align: center;
   gap: 10px;
-  color: #fff;
+  color: #0f172a;
   cursor: pointer;
-  transition: var(--l2-transition);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04), 0 0 0 1px rgba(255, 255, 255, 0.5) inset;
   font-family: inherit;
 }
 
 .light-bio-option:hover {
-  background: rgba(255, 255, 255, 0.18);
-  border-color: #d4a359;
+  background: #ffffff;
+  border-color: #b17d38;
   transform: translateY(-2px);
+  box-shadow: 0 12px 28px -6px rgba(177, 125, 56, 0.24), 0 0 0 1px rgba(177, 125, 56, 0.35) inset;
+}
+
+.bio-option-icon-wrap {
+  width: 50px;
+  height: 50px;
+  border-radius: 16px;
+  background: rgba(177, 125, 56, 0.1);
+  border: 1px solid rgba(177, 125, 56, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #b17d38;
+  transition: all 0.25s ease;
+}
+
+.light-bio-option:hover .bio-option-icon-wrap {
+  background: #b17d38;
+  border-color: #9a6a2c;
+  color: #ffffff;
+  transform: scale(1.06);
 }
 
 .bio-icon {
-  width: 36px;
-  height: 36px;
-  color: #d4a359;
+  width: 26px;
+  height: 26px;
+}
+
+.bio-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bio-option-title {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.2px;
+}
+
+.bio-option-subtitle {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #64748b;
+}
+
+.l2-pin-input-box {
+  width: 46px;
+  height: 52px;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 800;
+  border-radius: 12px;
+  border: 1.5px solid rgba(0, 0, 0, 0.12);
+  background: rgba(255, 255, 255, 0.85);
+  color: #0f172a;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+}
+
+.l2-pin-input-box:focus {
+  border-color: #b17d38;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(177, 125, 56, 0.25), 0 2px 8px rgba(0, 0, 0, 0.06);
+  outline: none;
 }
 
 /* Glass Alert */

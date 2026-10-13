@@ -335,6 +335,7 @@ function renderDirectoryTab(vendors, isMaster) {
                           <td>${statusBadge}</td>
                           <td style="text-align:right;white-space:nowrap;">
                             <button class="btn btn-sm btn-ghost vnd-view-360-btn" data-id="${v.vendorId}" type="button" title="View 360 Profile">360° Profile</button>
+                            <button class="btn btn-sm btn-ghost vnd-import-cat-btn" data-id="${v.vendorId}" type="button" title="Import Supplier Material Mappings (A093-A095)">📥 Catalog</button>
                             ${
                               isMaster
                                 ? `
@@ -1644,7 +1645,12 @@ export function wireVendors(container, subroute) {
           </div>
 
           <div>
-            <h4 style="font-size:14px;font-weight:700;margin:0 0 8px;">Approved Item Catalogue (${vendor.itemCatalogue?.length || 0})</h4>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin:0 0 8px;">
+              <h4 style="font-size:14px;font-weight:700;margin:0;">Approved Item Catalogue (${vendor.itemCatalogue?.length || 0})</h4>
+              <button class="btn btn-sm btn-secondary vnd-import-cat-modal-btn" data-id="${vendor.vendorId}" type="button">
+                📥 Import Mappings (A093)
+              </button>
+            </div>
             <div style="max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;">
               <table class="table" style="width:100%;font-size:12px;">
                 <thead>
@@ -1672,6 +1678,22 @@ export function wireVendors(container, subroute) {
           </div>
         </div>
       `);
+
+      setTimeout(() => {
+        document.querySelector(".vnd-import-cat-modal-btn")?.addEventListener("click", () => {
+          closeModal();
+          openImportMaterialMappingsModal(vendor);
+        });
+      }, 50);
+    });
+  });
+
+  // Import Supplier Material Mappings
+  document.querySelectorAll(".vnd-import-cat-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const vendorId = btn.dataset.id;
+      const vendor = (liveVendors || SAMPLE_VENDORS).find((v) => v.vendorId === vendorId);
+      if (vendor) openImportMaterialMappingsModal(vendor);
     });
   });
 
@@ -2716,6 +2738,56 @@ export function wireVendors(container, subroute) {
       }
     });
   });
+}
+
+function openImportMaterialMappingsModal(vendor) {
+  openModal(`Import Material Mappings: ${vendor.name} (A093-A095)`, `
+    <div style="font-size:13px;padding:6px 0;">
+      <p style="margin:0 0 12px;color:var(--muted);font-size:12px;">
+        Bulk map supplier SKUs, negotiated unit prices, pack sizes, and GST tax classifications to internal inventory item IDs.
+      </p>
+      <div style="margin-bottom:12px;">
+        <label style="font-weight:700;display:block;margin-bottom:4px;">Paste Mapping Rows (JSON format) *</label>
+        <textarea id="import-mappings-json" class="input" style="width:100%;height:140px;font-family:var(--font-mono);font-size:11.5px;" placeholder='[
+  {
+    "itemId": "INV-0001",
+    "itemCode": "MILK-FULL-CREAM",
+    "itemName": "Dairy Fresh Milk 500ml",
+    "supplierSku": "SUP-DFM-500",
+    "unitOfMeasure": "LITRE",
+    "negotiatedUnitPricePaisa": 6200,
+    "gstRate": 0
+  }
+]'></textarea>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;">
+        <button class="btn btn-secondary" onclick="closeModal()" type="button">Cancel</button>
+        <button class="btn btn-primary" id="btn-submit-mappings-import" type="button">Import Mappings</button>
+      </div>
+    </div>
+  `);
+
+  setTimeout(() => {
+    document.getElementById("btn-submit-mappings-import")?.addEventListener("click", async () => {
+      const raw = document.getElementById("import-mappings-json")?.value?.trim();
+      if (!raw) {
+        showToast("Please paste JSON mappings array.", "warning");
+        return;
+      }
+      try {
+        const mappings = JSON.parse(raw);
+        if (!Array.isArray(mappings)) {
+          showToast("Mappings must be a JSON array.", "warning");
+          return;
+        }
+        const res = await apiPost(`/vendors/${vendor.vendorId}/supplier-materials/import`, { mappings });
+        showToast(`Successfully imported ${res.data?.importedCount || mappings.length} material mappings!`, "success");
+        closeModal();
+      } catch (err) {
+        showToast(err.message || "Failed to parse or import mappings.", "error");
+      }
+    });
+  }, 50);
 }
 
 export const attachVendorListeners = wireVendors;

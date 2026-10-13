@@ -834,6 +834,43 @@ export function renderMasterDashboard({ roleLabel = "Master Administrator" } = {
         </div>
       </div>
 
+      <!-- Statutory Compliance & Section 194-O TDS Action Card (A090) -->
+      <div class="card" id="cc-compliance-action-mount" style="padding:18px 22px;margin-bottom:24px;border:1px solid #e2e8f0;background:linear-gradient(135deg, rgba(212,175,55,0.04) 0%, rgba(255,255,255,1) 100%);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:18px;">⚖️</span>
+            <div>
+              <h2 style="font-size:15px;font-weight:700;margin:0;color:var(--ink);">
+                Executive Action-Needed: Statutory GST &amp; Section 194-O TDS Compliance (A090)
+              </h2>
+              <p style="font-size:11.5px;color:var(--muted);margin:0;">
+                E-Commerce Operator withholding audit, missing HSN/SAC menu items, and statutory withholding liabilities.
+              </p>
+            </div>
+          </div>
+          <button class="btn btn-sm btn-ghost" id="btn-refresh-compliance-actions" type="button" style="font-size:11px;font-weight:700;">
+            🔄 Audit Compliance
+          </button>
+        </div>
+        <div id="compliance-action-content" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));gap:12px;">
+          <div style="padding:12px;background:var(--surface);border-radius:8px;border:1px solid var(--line);">
+            <div style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;">Missing HSN / Tax Items</div>
+            <div style="font-size:20px;font-weight:800;color:var(--danger);font-family:var(--font-mono);margin:4px 0;" id="compliance-missing-hsn-count">0 Items</div>
+            <div style="font-size:11px;color:var(--muted);">Active menu catalogue classification check.</div>
+          </div>
+          <div style="padding:12px;background:var(--surface);border-radius:8px;border:1px solid var(--line);">
+            <div style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;">Aggregator Gross E-Com Sales</div>
+            <div style="font-size:20px;font-weight:800;color:var(--ink);font-family:var(--font-mono);margin:4px 0;" id="compliance-gross-ecom-sales">₹0.00</div>
+            <div style="font-size:11px;color:var(--muted);">Zomato, Swiggy &amp; Toing gross turnover.</div>
+          </div>
+          <div style="padding:12px;background:rgba(212,175,55,0.08);border-radius:8px;border:1px solid rgba(212,175,55,0.3);">
+            <div style="font-size:11px;color:#8C6D1F;font-weight:700;text-transform:uppercase;">Section 194-O TDS Liability (1.0%)</div>
+            <div style="font-size:20px;font-weight:800;color:#8C6D1F;font-family:var(--font-mono);margin:4px 0;" id="compliance-tds-liability">₹0.00</div>
+            <div style="font-size:11px;color:var(--muted);">Statutory marketplace withholding pool.</div>
+          </div>
+        </div>
+      </div>
+
       <!-- Tier 7: Multi-Café Performance Breakdown Grid (with Pace to Target) -->
       <div class="card" style="padding:22px;margin-bottom:24px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:gap;gap:10px;">
@@ -1073,6 +1110,35 @@ export async function hydrateMasterDashboard(root) {
   // Initial fetch of Saved Views and Dashboard Data
   await loadSavedViews(root);
   await loadDashboardData(root);
+
+  // A090: Load Action-Needed Compliance & Section 194-O TDS Summary
+  async function loadComplianceActionSummary() {
+    try {
+      const res = await apiGet('/analytics/action-needed');
+      const data = res?.data || res;
+      if (data) {
+        const hsnEl = root.querySelector('#compliance-missing-hsn-count');
+        const ecomEl = root.querySelector('#compliance-gross-ecom-sales');
+        const tdsEl = root.querySelector('#compliance-tds-liability');
+        if (hsnEl) {
+          const count = data.missingTaxOrHsnCount || 0;
+          hsnEl.textContent = `${count} Items`;
+          hsnEl.style.color = count > 0 ? 'var(--danger)' : 'var(--success)';
+        }
+        if (ecomEl && data.ecomTdsSummary) {
+          ecomEl.textContent = `₹${(Number(data.ecomTdsSummary.grossSalesPaisa || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+        }
+        if (tdsEl && data.ecomTdsSummary) {
+          tdsEl.textContent = `₹${(Number(data.ecomTdsSummary.tdsAmountPaisa || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+        }
+      }
+    } catch (_) {}
+  }
+  loadComplianceActionSummary();
+  root.querySelector('#btn-refresh-compliance-actions')?.addEventListener('click', () => {
+    loadComplianceActionSummary();
+    showToast('Compliance audit refreshed.', 'info');
+  });
 }
 
 // ─── API Data Loader ─────────────────────────────────────────────────────────

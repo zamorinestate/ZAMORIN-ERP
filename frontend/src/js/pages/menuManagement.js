@@ -76,6 +76,10 @@ export function renderMenuManagement(subroute) {
             <button class="btn btn-sm btn-concept ${activeConcept === 'RESTAURANT' ? 'btn-primary' : 'btn-ghost'}" data-concept="RESTAURANT" style="font-size:12px; padding:4px 10px;">Zamorin Restaurant</button>
           </div>
 
+          <button id="btn-launch-menu-board" class="btn btn-secondary" style="display:flex; align-items:center; gap:6px; font-weight:700; background:#16223F; color:#D4AF37; border:none;" title="Launch Dynamic Digital Menu Board (F320)">
+            <span>🖥️</span> Menu Board
+          </button>
+
           <button id="btn-refresh-catalog" class="btn btn-secondary" style="display:flex; align-items:center; gap:6px; font-weight:600;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
             Refresh Catalog
@@ -97,6 +101,11 @@ export async function wireMenuManagement(root, subroute) {
   if (subroute !== undefined) {
     activeTab = subroute || "overview";
   }
+  root.querySelector("#btn-launch-menu-board")?.addEventListener("click", () => {
+    window.open("#menu-board", "DigitalMenuBoard", "width=1920,height=1080,menubar=no,toolbar=no");
+    showToast("Launched Digital Signage Menu Board.", "info");
+  });
+
   const workspaceWrap = root.querySelector("#menu-workspace-wrap");
   const refreshBtn = root.querySelector("#btn-refresh-catalog");
 
@@ -674,6 +683,7 @@ async function renderRecipesTab(wrap) {
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
           <button id="btn-export-recipe-workbook" class="btn btn-sm btn-secondary" title="Export BOM Master Workbook (A101–A104)">📥 Export Workbook</button>
           <button id="btn-import-recipe-workbook" class="btn btn-sm btn-secondary" title="Import BOM Master Spreadsheet (A101–A104)">📤 Import Workbook</button>
+          <button id="btn-substitute-ingredient" class="btn btn-sm btn-secondary" title="Bulk Recipe Ingredient Substitution (A104)">🔄 Substitute Ingredient</button>
           <button id="btn-ai-recipe-helper" class="btn btn-sm btn-warning" style="background:#F59E0B; color:#0B0F19; font-weight:700;" title="AI Culinary Recipe Suggestion (A099)">✨ AI Suggest</button>
           <button id="btn-create-recipe" class="btn btn-sm btn-primary">+ Add Recipe</button>
         </div>
@@ -720,6 +730,10 @@ async function renderRecipesTab(wrap) {
 
   const createRecipeBtn = wrap.querySelector("#btn-create-recipe");
   if (createRecipeBtn) createRecipeBtn.addEventListener("click", () => openCreateRecipeModal(wrap));
+
+  wrap.querySelector("#btn-substitute-ingredient")?.addEventListener("click", () => {
+    openBulkIngredientSubstitutionModal(wrap);
+  });
 
   wrap.querySelector("#btn-export-recipe-workbook")?.addEventListener("click", async () => {
     try {
@@ -1463,6 +1477,62 @@ async function openItem360Modal(menuItemId) {
   `;
 
   openModal(modalHtml);
+}
+
+function openBulkIngredientSubstitutionModal(wrap) {
+  openModal({
+    title: "Bulk Recipe Ingredient Substitution (A104)",
+    maxWidth: "500px",
+    body: `
+      <div style="display:flex;flex-direction:column;gap:12px;font-size:12.5px;">
+        <p style="margin:0;color:var(--muted);font-size:12px;">
+          Replace a supply ingredient across all active recipe bills of materials (BOMs) globally or for a specific café with automatic yield conversion.
+        </p>
+        <div>
+          <label style="font-weight:700;display:block;margin-bottom:3px;">Source Ingredient ID to Replace *</label>
+          <input type="text" id="sub-from-id" class="input" placeholder="e.g. ING-0001 (Cow Milk 3% Fat)" required style="width:100%;" />
+        </div>
+        <div>
+          <label style="font-weight:700;display:block;margin-bottom:3px;">Replacement Ingredient ID *</label>
+          <input type="text" id="sub-to-id" class="input" placeholder="e.g. ING-0024 (Oat Milk Barista Edition)" required style="width:100%;" />
+        </div>
+        <div>
+          <label style="font-weight:700;display:block;margin-bottom:3px;">Replacement Ingredient Name *</label>
+          <input type="text" id="sub-to-name" class="input" placeholder="e.g. Oat Milk Barista Edition" required style="width:100%;" />
+        </div>
+        <div>
+          <label style="font-weight:700;display:block;margin-bottom:3px;">Ratio / Multiplier (Default 1.0 = 1:1 replacement) *</label>
+          <input type="number" step="0.05" id="sub-ratio" class="input" value="1.0" min="0.1" style="width:100%;" />
+        </div>
+      </div>
+    `,
+    saveLabel: "Execute Global Substitution",
+    onSave: async () => {
+      const fromIngredientId = document.getElementById("sub-from-id")?.value?.trim();
+      const toIngredientId = document.getElementById("sub-to-id")?.value?.trim();
+      const toIngredientName = document.getElementById("sub-to-name")?.value?.trim();
+      const ratioMultiplier = parseFloat(document.getElementById("sub-ratio")?.value) || 1.0;
+
+      if (!fromIngredientId || !toIngredientId || !toIngredientName) {
+        showToast("Please provide all required ingredient fields.", "warning");
+        return;
+      }
+
+      try {
+        const res = await apiPost("/api/v1/menu/recipes/substitute-ingredient", {
+          fromIngredientId,
+          toIngredientId,
+          toIngredientName,
+          ratioMultiplier,
+          cafeId: activeConcept === "ALL" ? null : activeConcept,
+        });
+        showToast(`Ingredient substituted successfully in ${res.data?.recipesUpdatedCount || res.recipesUpdatedCount || 1} recipes!`, "success");
+        renderRecipesTab(wrap);
+      } catch (err) {
+        showToast(err.message || "Failed to execute substitution.", "error");
+      }
+    },
+  });
 }
 
 function openCreateRecipeModal(wrap) {

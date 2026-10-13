@@ -63,6 +63,8 @@ const {
   SupplierActionPlan,
 } = require('../models/SupplierActionPlan');
 
+const vendorLedgerService = require('../services/vendorLedgerService');
+
 const {
   MasterDuplicateCandidate,
 } = require('../models/MasterDuplicateCandidate');
@@ -1643,12 +1645,31 @@ const getVendorZurfPdf = asyncHandler(async (request, response) => {
   });
 });
 
+const importSupplierMaterialsHandler = asyncHandler(async (request, response) => {
+  const { vendorId } = request.params;
+  const { mappings } = request.body || {};
+
+  const result = await vendorLedgerService.importSupplierMaterialMappings({
+    organisationId: request.auth.organisationId,
+    vendorId,
+    mappings: Array.isArray(mappings) ? mappings : [],
+    performedByUserId: request.auth.userId,
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: result,
+    correlationId: request.correlationId || null,
+  });
+});
+
 module.exports = {
   listVendors,
   getVendor,
   getVendor360,
   createVendor,
   updateVendor,
+  importSupplierMaterialsHandler,
   changeVendorStatus,
   placeVendorOrder,
   acknowledgeVendorOrder,

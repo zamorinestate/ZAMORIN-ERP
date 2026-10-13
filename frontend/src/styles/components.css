@@ -2353,10 +2353,24 @@
     visibility: hidden;
   }
 
-  /* Make receipt container and all its descendants strictly visible */
+  /* Make receipt container and corporate invoice descendants strictly visible */
   .pos-thermal-receipt,
-  .pos-thermal-receipt * {
+  .pos-thermal-receipt *,
+  .zamorin-corporate-invoice,
+  .zamorin-corporate-invoice * {
     visibility: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .zamorin-corporate-invoice {
+    position: static !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    box-shadow: none !important;
+    border: none !important;
+    padding: 10mm !important;
+    margin: 0 !important;
   }
 
   /* Ensure modal ancestor hierarchy does not collapse or hide content */
@@ -2447,3 +2461,51 @@
     border-top: 1px solid #000 !important;
   }
 }
+
+/* ============================================================
+   CORPORATE INVOICE TEMPLATE (8K ULTRA-HD NORMAL PROMINENT QR)
+   ============================================================ */
+.zamorin-corporate-invoice .zamorin-qr-card svg,
+.zamorin-corporate-invoice svg[data-scannable="true"] {
+  width: 104px !important;
+  height: 104px !important;
+  min-width: 104px !important;
+  min-height: 104px !important;
+  display: block !important;
+}
+
+/* ============================================================
+   POS THERMAL RECEIPT (MONOCHROME LOGO & VECTOR SOFT COPY QR)
+   ============================================================ */
+.pos-thermal-receipt .receipt-brand-logo svg {
+  height: 38px !important;
+  width: auto !important;
+  max-width: 165px !important;
+  margin: 0 auto !important;
+  display: block !important;
+}
+
+.pos-thermal-receipt.paper-58mm .receipt-brand-logo svg,
+.pos-thermal-receipt[data-paper-width="58"] .receipt-brand-logo svg {
+  height: 30px !important;
+  max-width: 135px !important;
+}
+
+.pos-thermal-receipt .receipt-qr-container svg {
+  width: 96px !important;
+  height: 96px !important;
+  min-width: 96px !important;
+  min-height: 96px !important;
+  display: block !important;
+  margin: 0 auto !important;
+}
+
+.pos-thermal-receipt.paper-58mm .receipt-qr-container svg,
+.pos-thermal-receipt[data-paper-width="58"] .receipt-qr-container svg {
+  width: 76px !important;
+  height: 76px !important;
+  min-width: 76px !important;
+  min-height: 76px !important;
+}
+
+

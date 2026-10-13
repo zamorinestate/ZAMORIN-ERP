@@ -50,6 +50,8 @@ const {
   getCustodyBalances,
   getDailyPayoutSummary,
   getAdvanceDepositBySlip,
+  getEInvoicePayloadHandler,
+  getEWayBillPayloadHandler,
 } = require('../controllers/financeController');
 
 const router = express.Router();
@@ -327,6 +329,18 @@ router.get(
   '/invoices/:id/pdf',
   authorize('FINANCE:READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
   downloadGstInvoicePdf
+);
+
+router.get(
+  '/invoices/:id/einvoice-json',
+  authorize('FINANCE:READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  getEInvoicePayloadHandler
+);
+
+router.post(
+  '/invoices/:id/ewaybill-json',
+  authorize('FINANCE:READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  getEWayBillPayloadHandler
 );
 
 router.get(

@@ -106,6 +106,15 @@ const onlineChannelConfigSchema = new mongoose.Schema(
         autoResume: { type: Boolean, default: true },
         webhookSecret: { type: String, default: null },
       },
+      toing: {
+        isEnabled: { type: Boolean, default: true },
+        autoAccept: { type: Boolean, default: false },
+        storeStatus: { type: String, enum: ['ONLINE', 'OFFLINE', 'PAUSED'], default: 'ONLINE' },
+        pausedUntil: { type: Date, default: null },
+        pauseReason: { type: String, default: null },
+        autoResume: { type: Boolean, default: true },
+        webhookSecret: { type: String, default: null },
+      },
     },
   },
   {

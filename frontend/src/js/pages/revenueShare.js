@@ -1077,7 +1077,7 @@ function showCreateAgreementModal() {
             <input type="date" id="agr-expiry" class="form-input" required value="${new Date(Date.now() + 86400000 * 365).toISOString().split('T')[0]}" style="width:100%; font-family:var(--font-mono, monospace);" />
           </div>
         </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:18px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px;">
           <div>
             <label style="display:block; font-size:12px; font-weight:700; margin-bottom:5px; color:var(--ink);">Share Percentage (%) *</label>
             <input type="number" step="0.1" id="agr-share" class="form-input" required value="12.0" style="width:100%; font-family:var(--font-mono, monospace);" />
@@ -1086,6 +1086,13 @@ function showCreateAgreementModal() {
             <label style="display:block; font-size:12px; font-weight:700; margin-bottom:5px; color:var(--ink);">Monthly MG (₹)</label>
             <input type="number" step="100" id="agr-mg" class="form-input" value="45000" style="width:100%; font-family:var(--font-mono, monospace);" />
           </div>
+        </div>
+        <div style="margin-bottom:18px;">
+          <label style="display:flex; align-items:center; gap:8px; font-size:12px; font-weight:700; color:var(--ink); cursor:pointer;">
+            <input type="checkbox" id="agr-exclude-addons" style="accent-color:var(--color-accent-amber);" />
+            <span>Exclude Item Add-Ons &amp; Modifiers from Commission Calculation (A049)</span>
+          </label>
+          <span style="font-size:11px; color:var(--muted); display:block; margin-left:24px;">Excludes customer customizations and paid add-ons from revenue share calculation base.</span>
         </div>
         <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; padding-top:14px; border-top:1px solid var(--line);">
           <button type="button" class="btn btn-secondary" id="btn-cancel-modal">Cancel</button>
@@ -1099,6 +1106,7 @@ function showCreateAgreementModal() {
         e.preventDefault();
         const shareVal = parseFloat(document.getElementById('agr-share').value) || 12;
         const mgVal = parseFloat(document.getElementById('agr-mg').value) || 0;
+        const excludeAddons = document.getElementById('agr-exclude-addons')?.checked;
         const payload = {
           outletId: document.getElementById('agr-outlet').value,
           operatorId: document.getElementById('agr-operator').value,
@@ -1106,6 +1114,7 @@ function showCreateAgreementModal() {
           expiryDate: document.getElementById('agr-expiry').value,
           sharePercentage: shareVal,
           minimumGuaranteeMonthlyPaisa: Math.round(mgVal * 100),
+          includeAddonsInCommission: !excludeAddons,
           status: 'ACTIVE',
         };
 

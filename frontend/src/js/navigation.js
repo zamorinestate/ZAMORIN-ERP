@@ -166,13 +166,16 @@ export const NAVIGATION = {
   [ROLES.STAFF]: {
     scopeLabel: null,
     items: [
-      { id: 'home',          label: 'Home',           icon: 'home',       route: 'staff-home',       group: 'COMMAND' },
-      { id: 'announcements', label: 'Announcements',  icon: 'announce',   route: 'announcements',    group: 'COMMAND' },
-      { id: 'attendance',    label: 'My Attendance',  icon: 'attendance', route: 'staff-attendance', group: 'SELF' },
-      { id: 'leave',         label: 'My Leave',       icon: 'calendar',   route: 'staff-leave',      group: 'SELF' },
-      { id: 'settings',      label: 'Settings',       icon: 'settings',   route: 'staff-settings',   group: 'SYSTEM' },
+      { id: 'home',          label: 'Home',                icon: 'home',       route: 'staff-home',           group: 'COMMAND' },
+      { id: 'announcements', label: 'Announcements',       icon: 'announce',   route: 'announcements',        group: 'COMMAND' },
+      { id: 'attendance',    label: 'My Attendance',       icon: 'attendance', route: 'staff-attendance',     group: 'SELF' },
+      { id: 'leave',         label: 'My Leave',            icon: 'calendar',   route: 'staff-leave',          group: 'SELF' },
+      { id: 'payslips',      label: 'My Payslips',         icon: 'payslip',    route: 'staff-payslips',       group: 'SELF' },
+      { id: 'loans',         label: 'My Loans & Advances', icon: 'finance',    route: 'staff-loans-advances', group: 'SELF' },
+      { id: 'documents',     label: 'My Documents',        icon: 'quality',    route: 'staff-documents',      group: 'SELF' },
+      { id: 'settings',      label: 'Settings',            icon: 'settings',   route: 'staff-settings',       group: 'SYSTEM' },
     ],
-    footnote: 'Self-service only. Payslips & Loans are inside Settings.',
+    footnote: 'Staff Self-Service Portal — Governed personal attendance, leave, payslips, and advances.',
   },
 
   // ── VENDOR (SUPPLIER PARTNER) ────────────────────────────────────────────────

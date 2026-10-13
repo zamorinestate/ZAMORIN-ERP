@@ -1469,6 +1469,195 @@ const downloadGstInvoicePdf = asyncHandler(async (request, response) => {
 });
 
 /**
+ * GET /api/v1/finance/invoices/:id/einvoice-json
+ * Generate NIC E-Invoice (INV-01) JSON Schema Payload (A003)
+ */
+const getEInvoicePayloadHandler = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const invoiceIdentifier = request.params.id;
+
+  let invoice = await TaxInvoice.findOne({
+    organisationId,
+    $or: [
+      { invoiceId: invoiceIdentifier },
+      { invoiceNumber: invoiceIdentifier },
+      { billId: invoiceIdentifier },
+      ...(mongoose.isValidObjectId(invoiceIdentifier) ? [{ _id: invoiceIdentifier }] : []),
+    ],
+  }).lean();
+
+  if (!invoice) {
+    const bill = await Bill.findOne({
+      organisationId,
+      $or: [
+        { billId: invoiceIdentifier },
+        { invoiceNumber: invoiceIdentifier },
+        ...(mongoose.isValidObjectId(invoiceIdentifier) ? [{ _id: invoiceIdentifier }] : []),
+      ],
+    }).lean();
+
+    if (!bill) {
+      throw new ApiError(404, 'INVOICE_NOT_FOUND', 'Invoice or Bill not found.');
+    }
+
+    invoice = {
+      invoiceId: bill.billId,
+      invoiceNumber: bill.invoiceNumber || bill.billId,
+      invoiceDate: bill.businessDate ? new Date(bill.businessDate) : bill.createdAt,
+      cafeId: bill.cafeId,
+      supplierDetails: {
+        legalName: 'ZAMORIN CAFE PRIVATE LIMITED',
+        tradeName: 'Zamorin Café',
+        gstin: bill.gstRegistrationNumber || '32AABCU9603R1ZM',
+        addressLine1: 'Ground Floor, Cyberpark, Kozhikode',
+        city: 'Kozhikode',
+        stateCode: '32',
+        stateName: 'Kerala',
+        pincode: '673016',
+      },
+      recipientDetails: {
+        legalName: bill.customerName || 'Registered Enterprise Guest',
+        gstin: bill.b2bCustomerGstin || '32AABCT1332L1ZV',
+        addressLine1: 'Commercial Delivery Address',
+        city: 'Kozhikode',
+        stateCode: '32',
+        stateName: 'Kerala',
+        pincode: '673001',
+      },
+      taxSummary: {
+        taxableAmountPaisa: bill.taxableAmountPaisa || bill.subtotalPaisa || 0,
+        cgstPaisa: bill.cgstPaisa || (bill.taxPaisa ? Math.round(bill.taxPaisa / 2) : 0),
+        sgstPaisa: bill.sgstPaisa || (bill.taxPaisa ? Math.round(bill.taxPaisa / 2) : 0),
+        totalTaxPaisa: bill.taxPaisa || 0,
+        grandTotalPaisa: bill.totalPaisa || 0,
+      },
+      lineItems: (bill.lineItems || []).map((li, idx) => ({
+        itemNumber: idx + 1,
+        itemName: li.itemNameSnapshot || 'Food & Beverage Item',
+        hsnSacCode: li.hsnSacCode || '996331',
+        quantity: li.quantity || 1,
+        unitOfMeasure: 'OTH',
+        unitPricePaisa: li.unitPricePaisa || 0,
+        lineTaxablePaisa: li.lineSubtotalPaisa || (li.unitPricePaisa * (li.quantity || 1)),
+        gstRatePercent: 5,
+        cgstPaisa: Math.round(((li.lineSubtotalPaisa || 0) * 0.025)),
+        sgstPaisa: Math.round(((li.lineSubtotalPaisa || 0) * 0.025)),
+        totalLineAmountPaisa: Math.round((li.lineSubtotalPaisa || 0) * 1.05),
+      })),
+    };
+  }
+
+  ensureCafeAccess(request, invoice.cafeId);
+
+  const payload = gstTaxService.generateEInvoicePayload({ taxInvoice: invoice });
+  return response.status(200).json({
+    success: true,
+    data: payload,
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * POST /api/v1/finance/invoices/:id/ewaybill-json
+ * Generate NIC E-Way Bill (EWB-01) JSON Payload (A003)
+ */
+const getEWayBillPayloadHandler = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const invoiceIdentifier = request.params.id;
+  const { transporterDetails } = request.body || {};
+
+  let invoice = await TaxInvoice.findOne({
+    organisationId,
+    $or: [
+      { invoiceId: invoiceIdentifier },
+      { invoiceNumber: invoiceIdentifier },
+      { billId: invoiceIdentifier },
+      ...(mongoose.isValidObjectId(invoiceIdentifier) ? [{ _id: invoiceIdentifier }] : []),
+    ],
+  }).lean();
+
+  if (!invoice) {
+    const bill = await Bill.findOne({
+      organisationId,
+      $or: [
+        { billId: invoiceIdentifier },
+        { invoiceNumber: invoiceIdentifier },
+        ...(mongoose.isValidObjectId(invoiceIdentifier) ? [{ _id: invoiceIdentifier }] : []),
+      ],
+    }).lean();
+
+    if (!bill) {
+      throw new ApiError(404, 'INVOICE_NOT_FOUND', 'Invoice or Bill not found.');
+    }
+
+    invoice = {
+      invoiceId: bill.billId,
+      invoiceNumber: bill.invoiceNumber || bill.billId,
+      invoiceDate: bill.businessDate ? new Date(bill.businessDate) : bill.createdAt,
+      cafeId: bill.cafeId,
+      supplierDetails: {
+        legalName: 'ZAMORIN CAFE PRIVATE LIMITED',
+        tradeName: 'Zamorin Café',
+        gstin: bill.gstRegistrationNumber || '32AABCU9603R1ZM',
+        addressLine1: 'Ground Floor, Cyberpark, Kozhikode',
+        city: 'Kozhikode',
+        stateCode: '32',
+        stateName: 'Kerala',
+        pincode: '673016',
+      },
+      recipientDetails: {
+        legalName: bill.customerName || 'Registered Enterprise Guest',
+        gstin: bill.b2bCustomerGstin || '32AABCT1332L1ZV',
+        addressLine1: 'Commercial Delivery Address',
+        city: 'Kozhikode',
+        stateCode: '32',
+        stateName: 'Kerala',
+        pincode: '673001',
+      },
+      taxSummary: {
+        taxableAmountPaisa: bill.taxableAmountPaisa || bill.subtotalPaisa || 0,
+        cgstPaisa: bill.cgstPaisa || (bill.taxPaisa ? Math.round(bill.taxPaisa / 2) : 0),
+        sgstPaisa: bill.sgstPaisa || (bill.taxPaisa ? Math.round(bill.taxPaisa / 2) : 0),
+        totalTaxPaisa: bill.taxPaisa || 0,
+        grandTotalPaisa: bill.totalPaisa || 0,
+      },
+      lineItems: (bill.lineItems || []).map((li, idx) => ({
+        itemNumber: idx + 1,
+        itemName: li.itemNameSnapshot || 'Food & Beverage Item',
+        hsnSacCode: li.hsnSacCode || '996331',
+        quantity: li.quantity || 1,
+        unitOfMeasure: 'OTH',
+        unitPricePaisa: li.unitPricePaisa || 0,
+        lineTaxablePaisa: li.lineSubtotalPaisa || (li.unitPricePaisa * (li.quantity || 1)),
+        gstRatePercent: 5,
+        cgstPaisa: Math.round(((li.lineSubtotalPaisa || 0) * 0.025)),
+        sgstPaisa: Math.round(((li.lineSubtotalPaisa || 0) * 0.025)),
+        totalLineAmountPaisa: Math.round((li.lineSubtotalPaisa || 0) * 1.05),
+      })),
+    };
+  }
+
+  ensureCafeAccess(request, invoice.cafeId);
+
+  const payload = gstTaxService.generateEWayBillPayload({
+    taxInvoice: invoice,
+    transporterDetails: transporterDetails || {
+      transporterId: '32AAACT0123M1ZX',
+      transporterName: 'Kerala Express Logistics',
+      transportDocNo: `LR-${Date.now().toString().slice(-6)}`,
+      approximateDistanceKm: 15,
+      vehicleNumber: 'KL-11-CG-4491',
+    },
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: payload,
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
  * GET /api/v1/finance/reports/gstr1/:cafeId
  * Generate GSTR-1 outward tax return summary
  */
@@ -1924,6 +2113,8 @@ module.exports = {
   getFinanceIntegrity,
   generateGstTaxInvoice,
   downloadGstInvoicePdf,
+  getEInvoicePayloadHandler,
+  getEWayBillPayloadHandler,
   getGstr1Report,
   commitZReport,
   createAdvanceDeposit,

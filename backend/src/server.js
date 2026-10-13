@@ -470,6 +470,13 @@ function createApp(environment) {
   app.get('/cafe-access/qr/:token', getPublicQrContext);
   app.get('/c/:token', getPublicQrContext);
 
+  // Public Invoice Soft Copy Endpoints (Accessed upon scanning invoice QR code)
+  const { handlePublicInvoiceSoftCopy } = require('./controllers/publicInvoiceController');
+  app.get('/qr/v1/inv/:invoiceNum', handlePublicInvoiceSoftCopy);
+  app.get('/invoice/:invoiceNum', handlePublicInvoiceSoftCopy);
+  app.get('/c/inv/:invoiceNum', handlePublicInvoiceSoftCopy);
+  app.get('/api/v1/bills/public/:invoiceNum', handlePublicInvoiceSoftCopy);
+
   app.use(notFound);
   app.use(errorHandler);
 

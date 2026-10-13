@@ -361,6 +361,9 @@ function renderDirectorySubpanel() {
                       <button class="btn btn-ghost view-cust-360-btn" data-cust="${c.customerId}" type="button" style="font-size:12px; padding:4px 10px;">
                         Customer 360
                       </button>
+                      <button class="btn btn-ghost view-wallet-btn" data-cust="${c.customerId}" type="button" style="font-size:12px; padding:4px 10px; color:var(--color-accent-amber); font-weight:700;" title="View Stored-Value Wallet Balance Breakdown & Top-Up (F234 / A061)">
+                        👛 Wallet
+                      </button>
                       <button class="btn btn-ghost adjust-points-btn" data-cust="${c.customerId}" type="button" style="font-size:12px; padding:4px 10px;">
                         Adjust Pts
                       </button>
@@ -613,7 +616,16 @@ export async function wireCustomers(root, subroute) {
     btn.addEventListener("click", () => {
       const custId = btn.dataset.cust;
       const cust = cachedCustomers.find((c) => c.customerId === custId);
-      if (cust) openCustomer360Modal(cust);
+      if (cust) openCustomer360Modal(cust, root);
+    });
+  });
+
+  // Customer Wallet button (F234 / A061)
+  root.querySelectorAll(".view-wallet-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const custId = btn.dataset.cust;
+      const cust = cachedCustomers.find((c) => c.customerId === custId);
+      if (cust) openCustomerWalletModal(cust, root);
     });
   });
 
@@ -798,7 +810,10 @@ function openCustomer360Modal(cust) {
         <div>Consent: <strong>Transactional Receipts (Active) · Loyalty Communications (Active)</strong></div>
       </div>
 
-      <div style="display:flex; justify-content:flex-end; gap:10px; border-top:1px solid var(--border-subtle); padding-top:14px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid var(--border-subtle); padding-top:14px;">
+        <button class="btn btn-secondary" id="c360-view-wallet-btn" type="button" style="color:var(--color-accent-amber); font-weight:700;">
+          👛 Manage Wallet (F234)
+        </button>
         <button class="btn btn-primary" id="c360-close-btn" type="button">Close</button>
       </div>
     </div>
@@ -806,6 +821,152 @@ function openCustomer360Modal(cust) {
 
   const modal = openModal(content);
   modal.querySelector("#c360-close-btn")?.addEventListener("click", () => modal.close());
+  modal.querySelector("#c360-view-wallet-btn")?.addEventListener("click", () => {
+    modal.close();
+    openCustomerWalletModal(cust, root);
+  });
+}
+
+async function openCustomerWalletModal(cust, root) {
+  let walletData = null;
+  try {
+    const res = await apiGet(`/customers/${cust.customerId}/wallet`);
+    walletData = res.data;
+  } catch (err) {
+    console.warn("Failed to load customer wallet:", err);
+  }
+
+  const purchasedRupees = Number(((walletData?.purchasedBalancePaise || 0) / 100).toFixed(2));
+  const promoRupees = Number(((walletData?.promotionalBalancePaise || 0) / 100).toFixed(2));
+  const totalRupees = Number(((walletData?.walletBalancePaise || 0) / 100).toFixed(2));
+  const ledger = walletData?.ledger || [];
+
+  const content = `
+    <div style="max-width:580px; margin:0 auto; padding:6px 0;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px; border-bottom:1px solid var(--border-subtle); padding-bottom:10px;">
+        <div>
+          <h3 style="font-size:18px; font-weight:800; margin:0; color:var(--ink);">Customer Stored-Value Wallet (F234 / A061)</h3>
+          <div style="font-size:12px; color:var(--muted); font-family:var(--font-mono);">${escapeHtml(cust.name)} · ${escapeHtml(cust.phone)}</div>
+        </div>
+        <span class="badge" style="background:var(--color-accent-amber); color:#000; font-weight:700;">STORED VALUE</span>
+      </div>
+
+      <!-- Balance Separation Cards (F234 / A061) -->
+      <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; margin-bottom:16px;">
+        <div style="padding:12px; background:var(--bg-subtle, #faf8f5); border-radius:8px; border:1px solid var(--line);">
+          <div style="font-size:11px; color:var(--muted); font-weight:700;">Total Stored Value</div>
+          <strong style="font-size:20px; color:var(--ink); font-family:var(--font-mono);">₹${totalRupees.toFixed(2)}</strong>
+          <div style="font-size:10px; color:var(--muted); margin-top:2px;">Combined Balance</div>
+        </div>
+        <div style="padding:12px; background:rgba(16,185,129,0.08); border-radius:8px; border:1px solid rgba(16,185,129,0.2);">
+          <div style="font-size:11px; color:#059669; font-weight:700;">Purchased Balance</div>
+          <strong style="font-size:20px; color:#059669; font-family:var(--font-mono);">₹${purchasedRupees.toFixed(2)}</strong>
+          <div style="font-size:10px; color:var(--muted); margin-top:2px;">Real Money (No Expiry)</div>
+        </div>
+        <div style="padding:12px; background:rgba(245,158,11,0.08); border-radius:8px; border:1px solid rgba(245,158,11,0.2);">
+          <div style="font-size:11px; color:#b45309; font-weight:700;">Promotional Balance</div>
+          <strong style="font-size:20px; color:#b45309; font-family:var(--font-mono);">₹${promoRupees.toFixed(2)}</strong>
+          <div style="font-size:10px; color:var(--muted); margin-top:2px;">Marketing Credits</div>
+        </div>
+      </div>
+
+      <!-- Top Up Section -->
+      <div style="background:var(--surface-sunken); padding:12px 14px; border-radius:8px; border:1px solid var(--line); margin-bottom:16px;">
+        <strong style="font-size:12.5px; color:var(--ink); display:block; margin-bottom:8px;">➕ Stored-Value Top-Up</strong>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr auto; gap:8px; align-items:flex-end;">
+          <div>
+            <label style="font-size:10.5px; font-weight:700; color:var(--muted); display:block; margin-bottom:2px;">Amount (₹)*</label>
+            <input type="number" id="wallet-topup-amount" class="input" placeholder="e.g. 500" min="1" style="font-size:12px; padding:5px 8px; width:100%;" />
+          </div>
+          <div>
+            <label style="font-size:10.5px; font-weight:700; color:var(--muted); display:block; margin-bottom:2px;">Credit Type</label>
+            <select id="wallet-topup-type" class="select" style="font-size:12px; padding:5px 8px; width:100%;">
+              <option value="PURCHASED">Purchased (Real Money)</option>
+              <option value="PROMOTIONAL">Promotional (Credit)</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:10.5px; font-weight:700; color:var(--muted); display:block; margin-bottom:2px;">Payment / Tender</label>
+            <select id="wallet-topup-method" class="select" style="font-size:12px; padding:5px 8px; width:100%;">
+              <option value="CASH">Cash</option>
+              <option value="UPI">UPI</option>
+              <option value="CARD">Card</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" id="wallet-submit-topup-btn" type="button" style="font-size:12px; padding:6px 14px; font-weight:700;">
+            Top Up
+          </button>
+        </div>
+      </div>
+
+      <!-- Recent Ledger Transactions -->
+      <div style="margin-bottom:14px;">
+        <strong style="font-size:12.5px; color:var(--ink); display:block; margin-bottom:6px;">Recent Wallet Transactions</strong>
+        <div style="max-height:160px; overflow-y:auto; border:1px solid var(--line); border-radius:6px;">
+          <table style="width:100%; border-collapse:collapse; font-size:11.5px;">
+            <thead>
+              <tr style="background:var(--surface-sunken); text-align:left; border-bottom:1px solid var(--line);">
+                <th style="padding:6px 8px;">Date</th>
+                <th style="padding:6px 8px;">Type</th>
+                <th style="padding:6px 8px;">Description</th>
+                <th style="padding:6px 8px; text-align:right;">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${ledger.length === 0 ? `
+                <tr><td colspan="4" style="padding:16px; text-align:center; color:var(--muted);">No wallet transactions recorded.</td></tr>
+              ` : ledger.map((tx) => {
+                const isCredit = tx.entryType === "CREDIT" || tx.amountPaise > 0;
+                const amt = Math.abs(tx.amountPaise || 0) / 100;
+                return `
+                  <tr style="border-bottom:1px solid var(--line);">
+                    <td style="padding:5px 8px; font-family:var(--font-mono); color:var(--muted);">${new Date(tx.createdAt || Date.now()).toLocaleDateString("en-IN")}</td>
+                    <td style="padding:5px 8px;"><span class="badge" style="font-size:9.5px; background:${tx.creditType === "PROMOTIONAL" ? "#fef3c7" : "#dcfce7"}; color:${tx.creditType === "PROMOTIONAL" ? "#92400e" : "#166534"};">${tx.creditType || "PURCHASED"}</span></td>
+                    <td style="padding:5px 8px; color:var(--ink);">${escapeHtml(tx.description || tx.reason || "Wallet transaction")}</td>
+                    <td style="padding:5px 8px; text-align:right; font-family:var(--font-mono); font-weight:700; color:${isCredit ? "#059669" : "#dc2626"};">
+                      ${isCredit ? "+" : "-"}₹${amt.toFixed(2)}
+                    </td>
+                  </tr>
+                `;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:flex-end; gap:10px; border-top:1px solid var(--border-subtle); padding-top:10px;">
+        <button class="btn btn-secondary" id="wallet-modal-close-btn" type="button">Close</button>
+      </div>
+    </div>
+  `;
+
+  const modal = openModal(content);
+  modal.querySelector("#wallet-modal-close-btn")?.addEventListener("click", () => modal.close());
+  modal.querySelector("#wallet-submit-topup-btn")?.addEventListener("click", async () => {
+    const amt = parseFloat(modal.querySelector("#wallet-topup-amount")?.value);
+    const creditType = modal.querySelector("#wallet-topup-type")?.value || "PURCHASED";
+    const paymentMethod = modal.querySelector("#wallet-topup-method")?.value || "CASH";
+
+    if (!amt || amt <= 0) {
+      showToast("Please enter a valid top-up amount.", "warning");
+      return;
+    }
+
+    try {
+      await apiPost(`/customers/${cust.customerId}/wallet/topup`, {
+        amountPaise: Math.round(amt * 100),
+        creditType,
+        paymentMethod,
+        note: `Manual top-up (${creditType}) via Customers Directory`,
+      });
+      showToast(`Successfully credited ₹${amt} to customer wallet!`, "success");
+      modal.close();
+      await loadCustomerData();
+      rerender(root);
+    } catch (err) {
+      showToast(err.message || "Failed to top up wallet.", "error");
+    }
+  });
 }
 
 // Modal: Adjust Points

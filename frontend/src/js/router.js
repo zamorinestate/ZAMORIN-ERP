@@ -289,6 +289,8 @@ async function renderPage() {
       "data-recovery": "trash",
       "admin": "admin",
       "system-administration": "admin",
+      "templates": "templates",
+      "cafe-templates": "templates",
     };
 
     const targetSection = sectionMap[sub] || (sub === "" ? "overview" : sub);

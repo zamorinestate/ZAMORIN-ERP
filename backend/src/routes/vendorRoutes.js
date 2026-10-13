@@ -30,6 +30,7 @@ const {
   getSupplierPerformance,
   getSupplyContinuity,
   getVendorZurfPdf,
+  importSupplierMaterialsHandler,
 } = require('../controllers/vendorController');
 
 const router = express.Router();
@@ -172,6 +173,12 @@ router.delete(
   '/:vendorId/holds/:holdId',
   authorize('VENDORS_WRITE', { allowedRoles: ['MASTER'] }),
   releaseVendorHold
+);
+
+router.post(
+  '/:vendorId/supplier-materials/import',
+  authorize('VENDORS_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  importSupplierMaterialsHandler
 );
 
 module.exports = router;

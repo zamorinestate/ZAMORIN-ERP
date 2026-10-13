@@ -11,6 +11,8 @@ import { showToast, openModal, closeModal, confirmAction } from "../components.j
 import { state } from "../state.js";
 import { ROLES } from "../navigation.js";
 import { generateInvoicePdf } from "../utils/invoicePdfGenerator.js";
+import { renderCorporateInvoiceHtml } from "../components/corporateInvoiceTemplate.js";
+import { renderPosThermalReceiptHtml } from "../components/posThermalReceiptTemplate.js";
 import { offlineManager, QUEUE_STATUSES } from "../utils/offlineManager.js";
 
 
@@ -76,6 +78,14 @@ let activeSirenAudioInterval = null;
 let isNumpadVisible = false;
 let activeDiningAreaId = "DEFAULT";
 let numpadBuffer = "";
+let activeCardType = "DOMESTIC"; // DOMESTIC | CREDIT | INTERNATIONAL (A119)
+let soundboxLanguage = "en"; // en | hi | ml | ta (A057)
+
+function getCardSurchargePaisa(baseAmountPaisa, cardType) {
+  if (cardType === "INTERNATIONAL") return Math.round(baseAmountPaisa * 0.025);
+  if (cardType === "CREDIT") return Math.round(baseAmountPaisa * 0.01);
+  return 0;
+}
 
 // Subview state
 let activeMainView = "POS"; // POS | PAST_ORDERS | REGISTER | DAILY_CLOSE
@@ -200,7 +210,13 @@ function renderTerminalView() {
   const discount = isZeroCollectMode ? subtotal : Math.round(discountPaisa / 100);
   const taxableAmount = Math.max(0, subtotal - discount);
   const gst = isZeroCollectMode ? 0 : Math.round(taxableAmount * 0.05);
-  const grandTotal = isZeroCollectMode ? 0 : (taxableAmount + gst);
+  const baseGrandTotal = isZeroCollectMode ? 0 : (taxableAmount + gst);
+  const cardSurchargePaisa = (activeTender === "CARD" && !isZeroCollectMode) ? getCardSurchargePaisa(baseGrandTotal * 100, activeCardType) : 0;
+  const cardSurchargeRupees = Math.round(cardSurchargePaisa / 100);
+  const grandTotal = baseGrandTotal + cardSurchargeRupees;
+
+  // A060: Mirror live cart to Customer Dual-Screen
+  broadcastToCustomerDualScreen(cart, taxableAmount, gst, grandTotal);
 
   const categories = ["ALL", "Hot Coffees", "Cold Brews", "Bakery & Viennoiserie", "Savouries & Mains", "Desserts"];
   const totalItemCount = cart.reduce((a, c) => a + c.qty, 0);
@@ -365,6 +381,15 @@ function renderTerminalView() {
           </button>
           <button class="pos-service-mode-btn" id="pos-lock-terminal-btn" style="padding:6px 10px;font-size:12px;" title="Inactivity Auto-Lock (A009)" type="button">
             🔒 Lock
+          </button>
+          <button class="pos-service-mode-btn" id="pos-dual-screen-btn" style="padding:6px 10px;font-size:12px;" title="Launch Secondary Customer Display (A060 / F015)" type="button">
+            🖥️ Dual Screen
+          </button>
+          <button class="pos-service-mode-btn" id="pos-cpg-billing-btn" style="padding:6px 10px;font-size:12px;" title="Retail & Wholesale CPG Barcode Billing (F309-F316)" type="button">
+            🏷️ CPG Billing
+          </button>
+          <button class="pos-service-mode-btn" id="pos-soundbox-settings-btn" style="padding:6px 10px;font-size:12px;" title="Multilingual Soundbox Settings & Test (A057)" type="button">
+            🔊 Soundbox
           </button>
           <div id="pos-offline-status-container" style="display:inline-flex;align-items:center;gap:6px;">
             <span id="pos-offline-badge" style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:6px;font-size:11px;font-weight:700;background:${_offlinePendingCount > 0 ? "rgba(245,158,11,0.15)" : (navigator?.onLine ? "rgba(16,185,129,0.12)" : "rgba(239,68,68,0.15)")};color:${_offlinePendingCount > 0 ? "#b45309" : (navigator?.onLine ? "#059669" : "#dc2626")};">
@@ -614,6 +639,13 @@ function renderTerminalView() {
               <span style="font-family:var(--font-mono);">₹${gst.toLocaleString("en-IN")}</span>
             </div>
 
+            ${cardSurchargeRupees > 0 ? `
+              <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:6px;">
+                <span>Card Surcharge (${activeCardType === "INTERNATIONAL" ? "2.5% Intl" : "1.0% Credit"}) (A119)</span>
+                <span style="font-family:var(--font-mono);color:var(--bronze-600);">+₹${cardSurchargeRupees.toLocaleString("en-IN")}</span>
+              </div>
+            ` : ""}
+
             <div style="display:flex;justify-content:space-between;align-items:center;font-size:16px;font-weight:900;color:var(--ink);margin-bottom:10px;padding-top:4px;border-top:1px dashed var(--line);">
               <span>Total Payable</span>
               <span style="font-family:var(--font-mono);color:var(--bronze-600);font-size:19px;">₹${grandTotal.toLocaleString("en-IN")}</span>
@@ -674,12 +706,20 @@ function renderTerminalView() {
               </div>
             ` : ""}
 
-            <!-- EDC Card Machine Assistant Row (F070, A054-A056) -->
+            <!-- EDC Card Machine Assistant Row (F070, A054-A056, A119) -->
             ${activeTender === "CARD" && grandTotal > 0 ? `
               <div style="background:var(--surface-sunken);padding:8px 10px;border-radius:8px;margin-bottom:8px;border:1px solid var(--line);">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
                   <span style="font-size:11.5px;font-weight:700;color:var(--ink);">💳 Push to Card Machine:</span>
                   <span style="font-size:10.5px;color:var(--muted);">PineLabs · MSwipe · Paytm</span>
+                </div>
+                <div style="margin-bottom:6px;">
+                  <label style="font-size:11px;font-weight:700;display:block;margin-bottom:2px;color:var(--ink);">Card Tender Type (A119 Surcharge):</label>
+                  <select id="pos-card-type-select" class="select" style="width:100%;font-size:11.5px;padding:4px 8px;">
+                    <option value="DOMESTIC" ${activeCardType === "DOMESTIC" ? "selected" : ""}>Domestic Debit Card (0% Surcharge)</option>
+                    <option value="CREDIT" ${activeCardType === "CREDIT" ? "selected" : ""}>Domestic Credit Card (+1.0% Surcharge)</option>
+                    <option value="INTERNATIONAL" ${activeCardType === "INTERNATIONAL" ? "selected" : ""}>International Card (+2.5% Surcharge)</option>
+                  </select>
                 </div>
                 <div style="display:flex;gap:6px;">
                   <button class="btn btn-secondary btn-sm" id="pos-edc-push-btn" style="flex:1;font-size:11.5px;padding:6px;font-weight:700;" type="button">
@@ -2127,6 +2167,72 @@ function wirePOSEventListeners(root) {
   root.querySelector("#pos-lock-terminal-btn")?.addEventListener("click", () => {
     lockTerminalScreen(root);
   });
+
+  // A060 / F015: Customer Dual-Screen Mirror Launcher
+  root.querySelector("#pos-dual-screen-btn")?.addEventListener("click", () => {
+    window.open("#dual-screen", "CustomerDualScreen", "width=1024,height=768,menubar=no,toolbar=no");
+    showToast("Customer Dual-Screen mirror launched.", "info");
+  });
+
+  // F309-F316: Retail & Wholesale CPG Barcode Billing
+  root.querySelector("#pos-cpg-billing-btn")?.addEventListener("click", () => {
+    window.location.hash = "#retail-cpg";
+  });
+
+  // A057: Multilingual Soundbox Audio Receipts Modal
+  root.querySelector("#pos-soundbox-settings-btn")?.addEventListener("click", () => {
+    openSoundboxSettingsModal(root);
+  });
+
+  // A119: Card Tender Type Selector with Surcharge
+  root.querySelector("#pos-card-type-select")?.addEventListener("change", (e) => {
+    activeCardType = e.target.value;
+    refreshPOSView(root);
+  });
+}
+
+function openSoundboxSettingsModal(root) {
+  openModal({
+    title: "🔊 Spoken Soundbox Audio Settings (A057)",
+    maxWidth: "440px",
+    body: `
+      <div style="display:flex;flex-direction:column;gap:12px;font-size:12.5px;">
+        <div style="font-size:12px;color:var(--muted);">Configure regional voice announcements for payment receipt confirmation (Web Speech API / Connected Soundbox).</div>
+        <div>
+          <label style="font-weight:700;display:block;margin-bottom:3px;">Speech Language</label>
+          <select id="soundbox-lang-select" class="select" style="width:100%;">
+            <option value="en" ${soundboxLanguage === "en" ? "selected" : ""}>English ("Received X rupees on BHIM UPI")</option>
+            <option value="ml" ${soundboxLanguage === "ml" ? "selected" : ""}>Malayalam ("ഭീം യുപിഐ വഴി X രൂപ ലഭിച്ചു")</option>
+            <option value="hi" ${soundboxLanguage === "hi" ? "selected" : ""}>Hindi ("भीम यूपीआई पर X रुपये प्राप्त हुए")</option>
+            <option value="ta" ${soundboxLanguage === "ta" ? "selected" : ""}>Tamil ("பீம் யுபிஐ மூலம் X ரூபாய் பெறப்பட்டது")</option>
+          </select>
+        </div>
+        <div style="padding:10px;background:var(--surface-sunken);border-radius:6px;border:1px solid var(--line);">
+          <div style="font-size:11.5px;color:var(--ink);font-weight:700;margin-bottom:6px;">Audio Diagnostic Test</div>
+          <button class="btn btn-sm btn-secondary" id="soundbox-test-speech-btn" type="button" style="width:100%;">
+            📢 Test Soundbox Announcement (₹150)
+          </button>
+        </div>
+      </div>
+    `,
+    saveLabel: "Save Preference",
+    onSave: () => {
+      const selected = document.querySelector("#soundbox-lang-select")?.value;
+      if (selected) {
+        soundboxLanguage = selected;
+        showToast(`Soundbox language set to ${selected.toUpperCase()}`, "success");
+        refreshPOSView(root);
+      }
+    },
+  });
+
+  setTimeout(() => {
+    document.querySelector("#soundbox-test-speech-btn")?.addEventListener("click", () => {
+      const selected = document.querySelector("#soundbox-lang-select")?.value || "en";
+      speakSoundboxReceipt(150, selected);
+      showToast("Triggered spoken soundbox speech preview.", "info");
+    });
+  }, 50);
 }
 
 function openPartnerVoucherModal(root) {
@@ -2799,6 +2905,11 @@ async function executeFinalSale(grandTotal, tender, root, paymentRef = "", custo
       );
     }
 
+    // A057: Multilingual Soundbox spoken receipt announcement upon settlement
+    if (posAction !== "SAVE" && grandTotal > 0) {
+      speakSoundboxReceipt(grandTotal, soundboxLanguage || "en");
+    }
+
     if (res?.unmappedPrinterWarnings?.length > 0) {
       showToast(
         `⚠️ KOT Alert: ${res.unmappedPrinterWarnings.length} item(s) unmapped to station printers routed to Expediter (${res.unmappedPrinterWarnings.map(w => w.itemName).join(", ")}).`,
@@ -2965,11 +3076,12 @@ function openReceiptModal(bill, isReprint = false) {
     title: `Tax Invoice Receipt · ${bill.invoiceNumber || bill.billId}`,
     maxWidth: "500px",
     body: `
-      <!-- Paper Width Profile Selector -->
+      <!-- Paper Width / Corporate View Selector -->
       <div class="receipt-profile-toggle-bar" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding:6px 12px;background:var(--surface-sunken);border-radius:6px;border:1px solid var(--line);">
-        <span style="font-size:11.5px;font-weight:700;color:var(--ink);">🖨️ Thermal Paper Profile:</span>
+        <span style="font-size:11.5px;font-weight:700;color:var(--ink);">Format / Paper Profile:</span>
         <div style="display:inline-flex;gap:6px;">
-          <button type="button" class="btn btn-sm ${currentPaperWidth === '80' ? 'btn-primary' : 'btn-outline'}" id="posPaperToggle80" data-width="80" style="padding:3px 10px;font-size:11px;font-weight:700;">80mm Standard</button>
+          <button type="button" class="btn btn-sm btn-outline" id="posViewToggleA4" style="padding:3px 10px;font-size:11px;font-weight:700;">📄 A4 Corporate</button>
+          <button type="button" class="btn btn-sm ${currentPaperWidth === '80' ? 'btn-primary' : 'btn-outline'}" id="posPaperToggle80" data-width="80" style="padding:3px 10px;font-size:11px;font-weight:700;">80mm Thermal</button>
           <button type="button" class="btn btn-sm ${currentPaperWidth === '58' ? 'btn-primary' : 'btn-outline'}" id="posPaperToggle58" data-width="58" style="padding:3px 10px;font-size:11px;font-weight:700;">58mm Compact</button>
         </div>
       </div>
@@ -2979,87 +3091,10 @@ function openReceiptModal(bill, isReprint = false) {
         <div style="font-size:11px;font-family:monospace;color:var(--ink);">Official ID: ${bill.invoiceNumber || bill.billId}</div>
       </div>
 
-      <div class="pos-thermal-receipt ${currentPaperWidth === '58' ? 'paper-58mm' : 'paper-80mm'}" id="pos-thermal-receipt" data-paper-width="${currentPaperWidth}">
-        <div class="receipt-header">
-          <div class="receipt-title">ZAMORIN CAFE ESTATE</div>
-          <div class="receipt-subtitle">GSTIN: 32AABCT1332L1ZV · ${escapeHtml(cafeName)}</div>
-          <div class="receipt-doc-type">
-            ${isVoid ? "TAX INVOICE — [VOID / CANCELLED]" : (reprintCount > 0 ? `TAX INVOICE — [REPRINT #${reprintCount}]` : "TAX INVOICE / RETAIL BILL")}
-          </div>
-        </div>
-        <div class="receipt-row">
-          <span>INVOICE: <strong>${escapeHtml(bill.invoiceNumber || bill.billId)}</strong></span>
-          <span>${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-        </div>
-        <div class="receipt-row" style="color:#64748b;">
-          <span>DATE: ${escapeHtml(bill.businessDate || new Date().toISOString().substring(0, 10))}</span>
-          <span>REGISTER 01</span>
-        </div>
-        ${bill.tableNumber ? `
-        <div class="receipt-row" style="color:#64748b;">
-          <span>TABLE / TOKEN:</span>
-          <strong>${escapeHtml(bill.tableNumber)}</strong>
-        </div>` : ''}
-        ${bill.cashierName ? `
-        <div class="receipt-row" style="color:#64748b;">
-          <span>CASHIER:</span>
-          <span>${escapeHtml(bill.cashierName)}</span>
-        </div>` : ''}
-        <hr class="receipt-divider" />
-        
-        <!-- Table Header with Universal Sl. No. -->
-        <div class="receipt-item-line" style="font-weight:bold;color:#475569;border-bottom:1px solid #cbd5e1;padding-bottom:3px;margin-bottom:4px;">
-          <span class="receipt-item-sl">Sl.</span>
-          <span class="receipt-item-name">Item</span>
-          <span class="receipt-item-qty">Qty</span>
-          <span class="receipt-item-amt">Amount</span>
-        </div>
-
-        ${bill.lineItems?.map((li, idx) => `
-          <div class="receipt-item-line">
-            <span class="receipt-item-sl">${idx + 1}</span>
-            <span class="receipt-item-name">
-              ${escapeHtml(li.itemNameSnapshot || li.name || 'Item')}
-              ${li.modifiers?.size && li.modifiers.size !== 'Regular' ? `<br/><small style="color:#64748b;font-size:9.5px;">* ${escapeHtml(li.modifiers.size)}</small>` : ''}
-              ${li.itemNotes ? `<br/><small style="color:#64748b;font-size:9.5px;">* Note: ${escapeHtml(li.itemNotes)}</small>` : ''}
-            </span>
-            <span class="receipt-item-qty">${li.quantity}</span>
-            <span class="receipt-item-amt">₹${((li.unitPricePaisa * li.quantity) / 100).toFixed(0)}</span>
-          </div>
-        `).join("") || ""}
-        <hr class="receipt-divider" />
-        <div class="receipt-row"><span>Subtotal:</span><span>₹${subtotal.toFixed(0)}</span></div>
-        ${bill.discountPaisa && bill.discountPaisa > 0 ? `
-        <div class="receipt-row" style="color:#b45309;">
-          <span>Discount:</span>
-          <span>-₹${(bill.discountPaisa / 100).toFixed(0)}</span>
-        </div>` : ''}
-        <div class="receipt-row"><span>CGST (2.5%):</span><span>₹${(gst / 2).toFixed(0)}</span></div>
-        <div class="receipt-row"><span>SGST (2.5%):</span><span>₹${(gst / 2).toFixed(0)}</span></div>
-        ${bill.roundOffPaisa && bill.roundOffPaisa !== 0 ? `
-        <div class="receipt-row" style="color:#64748b;font-size:10.5px;">
-          <span>Round Off:</span>
-          <span>${bill.roundOffPaisa < 0 ? `-₹${(Math.abs(bill.roundOffPaisa) / 100).toFixed(2)}` : `+₹${(bill.roundOffPaisa / 100).toFixed(2)}`}</span>
-        </div>` : ''}
-        <div class="receipt-total-row">
-          <span>PAID TOTAL:</span>
-          <span>₹${grandTotal.toFixed(0)}</span>
-        </div>
-        <div class="receipt-footer">
-          Tender: <strong>${escapeHtml(bill.paymentMethod || "UPI")}</strong> · THANK YOU FOR VISITING ZAMORIN!
-        </div>
-        <div style="text-align:center;margin-top:10px;padding-top:8px;border-top:1px dashed #cbd5e1;">
-          <div style="font-family:'Courier New',Courier,monospace;font-size:18px;font-weight:900;letter-spacing:3px;line-height:1;color:#1e293b;">
-            ||| | | || ||| || ||| | || ||
-          </div>
-          <div style="font-size:10px;font-weight:700;color:#64748b;font-family:var(--font-mono);margin-top:3px;">
-            *${escapeHtml(bill.invoiceNumber || bill.billId)}*
-          </div>
-          <div style="font-size:8.5px;color:#94a3b8;margin-top:1px;">
-            1-Scan Barcode Lookup (A034)
-          </div>
-        </div>
+      <div id="pos-receipt-display-frame">
+        ${renderPosThermalReceiptHtml(bill, { paperWidth: currentPaperWidth, tradeName: cafeName, isReprint })}
       </div>
+
 
       <!-- Action Panel -->
       <div class="receipt-action-panel" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px;">
@@ -3090,21 +3125,32 @@ function openReceiptModal(bill, isReprint = false) {
     const toggle80 = modalEl.querySelector("#posPaperToggle80");
     const toggle58 = modalEl.querySelector("#posPaperToggle58");
 
+    const toggleA4 = modalEl.querySelector("#posViewToggleA4");
+    const displayFrame = modalEl.querySelector("#pos-receipt-display-frame");
+    const originalThermalHtml = displayFrame ? displayFrame.innerHTML : "";
+
+    const setViewA4 = () => {
+      if (displayFrame) {
+        displayFrame.innerHTML = renderCorporateInvoiceHtml(bill, { tradeName: cafeName });
+      }
+      const modalCard = modalEl.querySelector(".modal-card");
+      if (modalCard) modalCard.style.maxWidth = "820px";
+      if (toggleA4) toggleA4.className = "btn btn-sm btn-primary";
+      if (toggle80) toggle80.className = "btn btn-sm btn-outline";
+      if (toggle58) toggle58.className = "btn btn-sm btn-outline";
+    };
+
     const setPaperWidth = (w) => {
       currentPaperWidth = w;
       if (typeof localStorage !== "undefined") {
         localStorage.setItem("zamorin_pos_paper_width", w);
       }
-      if (receiptEl) {
-        receiptEl.setAttribute("data-paper-width", w);
-        if (w === "58") {
-          receiptEl.classList.remove("paper-80mm");
-          receiptEl.classList.add("paper-58mm");
-        } else {
-          receiptEl.classList.remove("paper-58mm");
-          receiptEl.classList.add("paper-80mm");
-        }
+      if (displayFrame) {
+        displayFrame.innerHTML = renderPosThermalReceiptHtml(bill, { paperWidth: w, tradeName: cafeName, isReprint });
       }
+      const modalCard = modalEl.querySelector(".modal-card");
+      if (modalCard) modalCard.style.maxWidth = "500px";
+      if (toggleA4) toggleA4.className = "btn btn-sm btn-outline";
       if (toggle80 && toggle58) {
         if (w === "80") {
           toggle80.className = "btn btn-sm btn-primary";
@@ -3116,6 +3162,7 @@ function openReceiptModal(bill, isReprint = false) {
       }
     };
 
+    toggleA4?.addEventListener("click", () => setViewA4());
     toggle80?.addEventListener("click", () => setPaperWidth("80"));
     toggle58?.addEventListener("click", () => setPaperWidth("58"));
 

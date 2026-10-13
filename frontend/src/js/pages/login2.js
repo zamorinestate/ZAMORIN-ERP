@@ -141,34 +141,20 @@ function renderBackgroundAndModalsHtml() {
       </div>
     </div>
 
-    <!-- Biometrics & PIN Chooser Modal -->
+    <!-- Biometrics & PIN Chooser Modal (Glassmorphic Redesign matching Login 2.0) -->
     <div id="l2-biometrics-modal" class="modal-overlay hidden">
-      <div class="light-modal-content" style="max-width: 440px; position: relative;">
+      <div class="light-modal-content bio-chooser-modal-content" style="position: relative;">
         <button id="l2-close-bio-modal" type="button" class="light-close-btn" aria-label="Close">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="18" y1="6" x2="6" y2="18"></line>
             <line x1="6" y1="6" x2="18" y2="18"></line>
           </svg>
         </button>
-        <h3 style="font-size: 19px; font-weight: 700; margin-bottom: 4px; color: #fff; font-family: var(--font-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif) !important;">Choose Sign-In Method</h3>
-        <p style="font-size: 13px; color: var(--l2-text-muted); margin-bottom: 18px; font-family: var(--font-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif) !important;">Authenticate securely using your device biometrics or personal application PIN.</p>
-        
-        <div id="l2-bio-options-list" class="biometric-options">
-          <button type="button" class="light-bio-option" data-bio-type="faceId">
-            <svg class="bio-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M4 7V5a2 2 0 0 1 2-2h2"/>
-              <path d="M16 3h2a2 2 0 0 1 2 2v2"/>
-              <path d="M20 17v2a2 2 0 0 1-2 2h-2"/>
-              <path d="M8 21H6a2 2 0 0 1-2-2v-2"/>
-              <path d="M9 8.5v2"/>
-              <path d="M15 8.5v2"/>
-              <path d="M12 11.5v2.2a.8.8 0 0 1-.8.8H11"/>
-              <path d="M8.5 16.8c1 1.4 2.2 1.9 3.5 1.9s2.5-.5 3.5-1.9"/>
-            </svg>
-            <span style="font-size: 13px; font-weight: 600;">Face ID</span>
-          </button>
-          <button type="button" class="light-bio-option" data-bio-type="fingerprint">
-            <svg class="bio-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+
+        <!-- Brand Emblem & Header matching Login Screen -->
+        <div class="bio-modal-header" style="text-align: center; margin-bottom: 18px;">
+          <div class="bio-modal-icon-badge">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#b17d38" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4"/>
               <path d="M14 13.12c0 2.38 0 6.38-1 8.88"/>
               <path d="M17.29 21.02c.12-.6.43-2.3.5-3.02"/>
@@ -179,36 +165,66 @@ function renderBackgroundAndModalsHtml() {
               <path d="M8.65 22c.21-.66.45-1.32.57-2"/>
               <path d="M9 6.8a6 6 0 0 1 9 5.2v2"/>
             </svg>
-            <span style="font-size: 13px; font-weight: 600;">Fingerprint</span>
+          </div>
+          <h3 style="font-size: 21px; font-weight: 800; color: #0f172a; margin: 0 0 5px 0; letter-spacing: -0.3px; line-height: 1.2;">Choose Sign-In Method</h3>
+          <p style="font-size: 13px; color: #475569; margin: 0; line-height: 1.45; font-weight: 500;">Authenticate securely using your device fingerprint passkey or 6-digit application PIN.</p>
+        </div>
+        
+        <!-- 2 Options: Fingerprint & 6-Digit PIN (Face ID completely removed) -->
+        <div id="l2-bio-options-list" class="biometric-options">
+          <button type="button" class="light-bio-option" data-bio-type="fingerprint" id="l2-bio-fingerprint-btn">
+            <div class="bio-option-icon-wrap">
+              <svg class="bio-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4"/>
+                <path d="M14 13.12c0 2.38 0 6.38-1 8.88"/>
+                <path d="M17.29 21.02c.12-.6.43-2.3.5-3.02"/>
+                <path d="M2 12a10 10 0 0 1 18-6"/>
+                <path d="M2 16h.01"/>
+                <path d="M21.8 16c.2-2 .13-5.35 0-6"/>
+                <path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2"/>
+                <path d="M8.65 22c.21-.66.45-1.32.57-2"/>
+                <path d="M9 6.8a6 6 0 0 1 9 5.2v2"/>
+              </svg>
+            </div>
+            <div class="bio-option-text">
+              <span class="bio-option-title">Fingerprint</span>
+              <span class="bio-option-subtitle">Biometric Passkey</span>
+            </div>
           </button>
-          <button type="button" class="light-bio-option" data-bio-type="appPin">
-            <svg class="bio-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-              <circle cx="8" cy="16" r="1.2" fill="currentColor"/>
-              <circle cx="12" cy="16" r="1.2" fill="currentColor"/>
-              <circle cx="16" cy="16" r="1.2" fill="currentColor"/>
-            </svg>
-            <span style="font-size: 13px; font-weight: 600;">6-Digit PIN</span>
+
+          <button type="button" class="light-bio-option" data-bio-type="appPin" id="l2-bio-pin-btn">
+            <div class="bio-option-icon-wrap">
+              <svg class="bio-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                <circle cx="8" cy="16" r="1.2" fill="currentColor"/>
+                <circle cx="12" cy="16" r="1.2" fill="currentColor"/>
+                <circle cx="16" cy="16" r="1.2" fill="currentColor"/>
+              </svg>
+            </div>
+            <div class="bio-option-text">
+              <span class="bio-option-title">6-Digit PIN</span>
+              <span class="bio-option-subtitle">Quick Application PIN</span>
+            </div>
           </button>
         </div>
 
         <!-- 6-Digit PIN Entry Section (revealed when 6-Digit PIN is clicked) -->
-        <div id="l2-app-pin-section" class="hidden" style="margin-top: 18px; border-top: 1px solid rgba(255,255,255,0.12); padding-top: 16px;">
-          <p style="font-size: 13px; color: var(--l2-text-muted); margin-bottom: 6px; text-align: center; font-family: var(--font-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif) !important;">Enter your 6-digit personal application PIN</p>
-          <p style="font-size: 11px; color: #d4a359; margin-bottom: 12px; text-align: center; font-weight: 600;">(Demo PIN: 847291)</p>
-          <div id="l2-modal-pin-error" class="l2-error-banner" style="display:none; margin-bottom: 12px; font-size: 12px; font-family: var(--font-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif) !important;"></div>
-          <div style="display: flex; gap: 8px; justify-content: center; margin-bottom: 16px;">
-            <input type="password" class="l2-pin-input-box" maxlength="1" inputmode="numeric" pattern="[0-9]" />
-            <input type="password" class="l2-pin-input-box" maxlength="1" inputmode="numeric" pattern="[0-9]" />
-            <input type="password" class="l2-pin-input-box" maxlength="1" inputmode="numeric" pattern="[0-9]" />
-            <input type="password" class="l2-pin-input-box" maxlength="1" inputmode="numeric" pattern="[0-9]" />
-            <input type="password" class="l2-pin-input-box" maxlength="1" inputmode="numeric" pattern="[0-9]" />
-            <input type="password" class="l2-pin-input-box" maxlength="1" inputmode="numeric" pattern="[0-9]" />
+        <div id="l2-app-pin-section" class="hidden" style="margin-top: 18px; border-top: 1px solid rgba(0,0,0,0.08); padding-top: 20px;">
+          <p style="font-size: 13.5px; color: #334155; margin-bottom: 4px; text-align: center; font-weight: 600;">Enter your 6-digit personal application PIN</p>
+          <p style="font-size: 11.5px; color: #b17d38; margin-bottom: 16px; text-align: center; font-weight: 700;">(Demo PIN: 847291)</p>
+          <div id="l2-modal-pin-error" class="l2-error-banner" style="display:none; margin-bottom: 14px; font-size: 12.5px;"></div>
+          <div style="display: flex; gap: 8px; justify-content: center; margin-bottom: 20px;">
+            <input type="password" class="l2-pin-input-box" maxlength="1" inputmode="numeric" pattern="[0-9]" autocomplete="off" />
+            <input type="password" class="l2-pin-input-box" maxlength="1" inputmode="numeric" pattern="[0-9]" autocomplete="off" />
+            <input type="password" class="l2-pin-input-box" maxlength="1" inputmode="numeric" pattern="[0-9]" autocomplete="off" />
+            <input type="password" class="l2-pin-input-box" maxlength="1" inputmode="numeric" pattern="[0-9]" autocomplete="off" />
+            <input type="password" class="l2-pin-input-box" maxlength="1" inputmode="numeric" pattern="[0-9]" autocomplete="off" />
+            <input type="password" class="l2-pin-input-box" maxlength="1" inputmode="numeric" pattern="[0-9]" autocomplete="off" />
           </div>
-          <div style="display: flex; gap: 10px; justify-content: center;">
-            <button type="button" id="l2-modal-pin-back" class="btn-pill-white" style="padding: 8px 18px; font-size: 13px; font-family: var(--font-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif) !important;">Back</button>
-            <button type="button" id="l2-modal-pin-submit" class="light-btn btn-pill-lime" style="padding: 8px 24px; font-size: 13px; font-family: var(--font-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif) !important;">Unlock &amp; Sign In</button>
+          <div style="display: flex; gap: 12px; justify-content: center;">
+            <button type="button" id="l2-modal-pin-back" class="btn-pill-white" style="padding: 9px 20px; font-size: 13.5px; font-weight: 600;">Back</button>
+            <button type="button" id="l2-modal-pin-submit" class="light-btn btn-pill-lime" style="padding: 9px 26px; font-size: 13.5px; font-weight: 700;">Unlock &amp; Sign In</button>
           </div>
         </div>
       </div>
@@ -342,13 +358,6 @@ export function renderLoginPage2({ organisationId = "ZAMORIN", email = "", notic
         ${notice ? `<div class="l2-notice-banner">${notice}</div>` : ""}
         <div id="l2-login-error" class="l2-error-banner" style="${error ? "" : "display:none;"}">${error}</div>
 
-        <!-- Quick One-Click Demo Personas -->
-        <div class="l2-demo-persona-row" style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;justify-content:center;">
-          <button type="button" class="demo-persona-btn" data-email="pradeeshk331@gmail.com" data-pwd="Zamorin@2026Master!" title="Primary Master" style="font-size:11px;padding:5px 10px;cursor:pointer;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:20px;color:#fff;font-weight:600;">👑 Master</button>
-          <button type="button" class="demo-persona-btn" data-email="owner@example.com" data-pwd="Zamorin@2026Master!" title="Owner" style="font-size:11px;padding:5px 10px;cursor:pointer;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:20px;color:#fff;font-weight:600;">💼 Owner</button>
-          <button type="button" class="demo-persona-btn" data-email="admin@example.com" data-pwd="Zamorin@2026Master!" title="Cafe Operations" style="font-size:11px;padding:5px 10px;cursor:pointer;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:20px;color:#fff;font-weight:600;">☕ Cafe Ops</button>
-          <button type="button" class="demo-persona-btn" data-email="staff@example.com" data-pwd="Zamorin@2026Master!" title="Staff" style="font-size:11px;padding:5px 10px;cursor:pointer;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:20px;color:#fff;font-weight:600;">🧑‍🍳 Staff</button>
-        </div>
 
         <form id="l2-login-form">
           <!-- Organisation ID -->
@@ -402,9 +411,9 @@ export function renderLoginPage2({ organisationId = "ZAMORIN", email = "", notic
 
           <!-- Options Row: Remember Device & Forgot Password -->
           <div class="options-row" style="display: flex; justify-content: space-between; align-items: center; margin-top: 0px; margin-bottom: 10px;">
-            <label class="toggle-switch-group" style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;">
+            <label class="toggle-switch-group" for="l2-remember-device" style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;">
               <span class="toggle-switch">
-                <input type="checkbox" id="l2-remember-device" ${isRemembered ? "checked" : "checked"} />
+                <input type="checkbox" id="l2-remember-device" ${isRemembered ? "checked" : ""} />
                 <span class="light-slider"></span>
               </span>
               <span class="light-toggle-label" style="font-size: 12.5px; color: #475569; font-weight: 600;">Remember device</span>
@@ -531,35 +540,50 @@ export function wireLoginPage2(container, { onSubmit, onForgotPassword, onRegist
     pwdInput.addEventListener("keydown", checkCapsLock);
   }
 
-  // Automatic Registered Email recognition and safe persistence
+  // Explicit Remember Device Toggle & Persistence Wiring
   const emailInput = container.querySelector("#l2-email");
   const orgInput = container.querySelector("#l2-org-id");
   const rememberDeviceInput = container.querySelector("#l2-remember-device");
+
+  if (rememberDeviceInput) {
+    rememberDeviceInput.addEventListener("change", () => {
+      if (rememberDeviceInput.checked) {
+        const emailVal = emailInput?.value?.trim();
+        const orgVal = orgInput?.value?.trim() || "ZAMORIN";
+        if (emailVal) {
+          try {
+            localStorage.setItem("zamorin_remembered_device", JSON.stringify({ email: emailVal, organisationId: orgVal }));
+          } catch {}
+        }
+      } else {
+        try {
+          localStorage.removeItem("zamorin_remembered_device");
+        } catch {}
+      }
+    });
+  }
+
   if (emailInput) {
     const persistEmail = () => {
       const emailVal = emailInput.value.trim();
       const orgVal = orgInput?.value?.trim() || "ZAMORIN";
-      if (emailVal && rememberDeviceInput?.checked !== false) {
+      if (rememberDeviceInput?.checked) {
+        if (emailVal) {
+          try {
+            localStorage.setItem("zamorin_remembered_device", JSON.stringify({ email: emailVal, organisationId: orgVal }));
+          } catch {}
+        }
+      } else {
         try {
-          localStorage.setItem("zamorin_remembered_device", JSON.stringify({ email: emailVal, organisationId: orgVal }));
+          localStorage.removeItem("zamorin_remembered_device");
         } catch {}
       }
     };
     emailInput.addEventListener("blur", persistEmail);
     emailInput.addEventListener("change", persistEmail);
+    emailInput.addEventListener("input", persistEmail);
   }
 
-  // One-Click Demo Persona Button Wiring
-  container.querySelectorAll(".demo-persona-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const email = btn.dataset.email;
-      const pwd = btn.dataset.pwd;
-      if (emailInput) emailInput.value = email;
-      if (pwdInput) pwdInput.value = pwd;
-      if (orgInput) orgInput.value = "ZAMORIN";
-      form?.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
-    });
-  });
 
   if (openTermsBtn && termsModal) {
     openTermsBtn.addEventListener("click", () => {
@@ -666,7 +690,7 @@ export function wireLoginPage2(container, { onSubmit, onForgotPassword, onRegist
     }
 
     const originalHtml = passkeyBtn ? passkeyBtn.innerHTML : "";
-    const labelText = preferredType === "faceId" ? "Scanning Face ID…" : "Scanning Fingerprint…";
+    const labelText = "Scanning Fingerprint…";
     if (passkeyBtn) {
       passkeyBtn.disabled = true;
       passkeyBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#d4a359" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10" opacity="0.3"/><path d="M12 2a10 10 0 0 1 0 20" stroke-dasharray="62.8" stroke-dashoffset="0"><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.8s" repeatCount="indefinite"/></path></svg> <span>${labelText}</span>`;
@@ -897,13 +921,13 @@ export function wireLoginPage2(container, { onSubmit, onForgotPassword, onRegist
     });
   }
 
-  // Handle Option Clicks (Face ID, Fingerprint, 6-Digit PIN)
+  // Handle Option Clicks (Fingerprint, 6-Digit PIN)
   container.querySelectorAll(".light-bio-option").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const bioType = btn.getAttribute("data-bio-type");
-      if (bioType === "faceId" || bioType === "fingerprint") {
+      if (bioType === "fingerprint") {
         bioModal?.classList.add("hidden");
-        await triggerNativePasskeyAuth({ preferredType: bioType });
+        await triggerNativePasskeyAuth({ preferredType: "fingerprint" });
       } else if (bioType === "appPin") {
         bioOptionsList?.classList.add("hidden");
         appPinSection?.classList.remove("hidden");

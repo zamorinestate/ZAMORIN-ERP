@@ -11,6 +11,9 @@ import { state } from "../state.js";
 import { ROLES } from "../navigation.js";
 import { showToast, openModal, renderFileUploadZone, wireFileUploadZone, openUniversalDocumentModal } from "../components.js";
 import { navigate } from "../router.js";
+import { renderCorporateInvoiceHtml } from "../components/corporateInvoiceTemplate.js";
+import { renderPosThermalReceiptHtml } from "../components/posThermalReceiptTemplate.js";
+import { generateInvoicePdf } from "../utils/invoicePdfGenerator.js";
 
 let activeSubTab = "overview"; // 'overview' | 'bills' | 'upload' | 'adjustments' | 'payments' | 'tax' | 'reconciliation' | 'reports'
 let selectedCafeFilter = "ALL";
@@ -1890,84 +1893,60 @@ async function openReceiptModal(billId) {
   const cgst = ((bill.cgstPaisa || (bill.taxPaisa ? bill.taxPaisa / 2 : 0)) / 100).toFixed(2);
   const sgst = ((bill.sgstPaisa || (bill.taxPaisa ? bill.taxPaisa / 2 : 0)) / 100).toFixed(2);
   const subtotal = ((bill.subtotalPaisa || 0) / 100).toFixed(2);
-  const discounts = ((bill.discountPaisa || 0) / 100).toFixed(2);
+  let currentFormat = "A4"; // "A4" | "THERMAL"
+
+  const thermalMarkup = renderPosThermalReceiptHtml(bill, {
+    tradeName: CAFE_NAMES[bill.cafeId] || bill.cafeName || 'Zamorin Café',
+    gstin: bill.gstRegistrationNumber || '32AABCT1332L1ZV',
+    address: bill.cafeAddress || '123, Koramangala 5th Block, Bengaluru',
+    paperWidth: '80',
+  });
+
+  const corporateMarkup = renderCorporateInvoiceHtml(bill, {
+    tradeName: CAFE_NAMES[bill.cafeId] || bill.cafeName || 'Zamorin Café',
+    legalName: 'Zamorin Speciality Coffee & Kitchens Pvt. Ltd.',
+    gstin: bill.gstRegistrationNumber || '32AABCT1332L1ZV',
+  });
 
   openModal({
-    title: `Receipt · ${bill.invoiceNumber || bill.billId}`,
-    maxWidth: "460px",
+    title: `Tax Invoice · ${bill.invoiceNumber || bill.billId}`,
+    maxWidth: "820px",
     body: `
-      <div style="font-family:var(--font-mono); font-size:12.5px; color:var(--ink); padding:10px 0;">
-        <div style="text-align:center; margin-bottom:12px;">
-          <strong style="font-size:15px; letter-spacing:1px;">ZAMORIN CAFE</strong>
-          <div style="font-size:11.5px; color:var(--muted);">${escapeHtml(CAFE_NAMES[bill.cafeId] || bill.cafeId)}</div>
-          <div style="font-size:10.5px; color:var(--muted); margin-top:2px;">
-            ${bill.gstRegistrationNumber ? `GSTIN: <strong>${escapeHtml(bill.gstRegistrationNumber)}</strong>` : 'GST: Unregistered / Composition'}
-          </div>
-          <div style="font-size:10px; color:var(--muted); margin-top:2px; font-style:italic;">
-            E-Invoice: Not Applicable (B2C Retail Outlets Exempt)
+      <!-- Format Switcher Bar -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding:8px 14px;background:var(--surface-sunken, #f8fafc);border-radius:8px;border:1px solid var(--line, #e2e8f0);">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:12px;font-weight:700;color:var(--ink, #1e293b);">Format View:</span>
+          <div style="display:inline-flex;gap:6px;">
+            <button type="button" class="btn btn-sm btn-primary" id="btn-toggle-format-a4" style="padding:4px 12px;font-size:11.5px;font-weight:700;">📄 A4 Corporate Invoice</button>
+            <button type="button" class="btn btn-sm btn-outline" id="btn-toggle-format-thermal" style="padding:4px 12px;font-size:11.5px;font-weight:700;">🧾 Thermal Slip</button>
           </div>
         </div>
-
-        <div style="border-top:1px dashed var(--border-subtle); border-bottom:1px dashed var(--border-subtle); padding:8px 0; margin-bottom:10px; font-size:11.5px;">
-          <div>Invoice: <strong>${escapeHtml(bill.invoiceNumber || bill.billId)}</strong></div>
-          <div>Date: ${escapeHtml(bill.businessDate || '')} · ${bill.createdAt ? new Date(bill.createdAt).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }) : 'IST'}</div>
-          <div>Table / Mode: ${escapeHtml(bill.tableNumber || bill.serviceMode || "Dine In")}</div>
-          <div>Cashier: ${escapeHtml(bill.cashierUserId || "Staff")}</div>
-          ${bill.b2bCustomerGstin ? `<div style="margin-top:4px; font-weight:600; color:var(--brand-gold, #c89d5c);">B2B Recipient GSTIN: ${escapeHtml(bill.b2bCustomerGstin)}</div>` : ''}
-        </div>
-
-        <div style="margin-bottom:10px;">
-          ${(bill.lineItems || [])
-            .map(
-              (li) => `
-            <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-              <span>${li.quantity}× ${escapeHtml(li.itemNameSnapshot)}</span>
-              <span>₹${((li.lineSubtotalPaisa || li.unitPricePaisa * li.quantity) / 100).toFixed(2)}</span>
-            </div>
-          `
-            )
-            .join("")}
-        </div>
-
-        <div style="border-top:1px dashed var(--border-subtle); padding-top:8px; font-size:12px;">
-          <div style="display:flex; justify-content:space-between; margin-bottom:3px;">
-            <span>Subtotal:</span>
-            <span>₹${subtotal}</span>
-          </div>
-          ${Number(discounts) > 0 ? `
-          <div style="display:flex; justify-content:space-between; margin-bottom:3px; color:var(--color-warning);">
-            <span>Discount:</span>
-            <span>- ₹${discounts}</span>
-          </div>` : ''}
-          <div style="display:flex; justify-content:space-between; margin-bottom:2px; font-size:11px; color:var(--muted);">
-            <span>CGST (2.5%):</span>
-            <span>₹${cgst}</span>
-          </div>
-          <div style="display:flex; justify-content:space-between; margin-bottom:3px; font-size:11px; color:var(--muted);">
-            <span>SGST (2.5%):</span>
-            <span>₹${sgst}</span>
-          </div>
-          <div style="display:flex; justify-content:space-between; font-size:14px; font-weight:800; margin-top:6px; border-top:1px solid var(--border-subtle); padding-top:6px;">
-            <span>TOTAL PAID:</span>
-            <span>₹${total}</span>
-          </div>
-          <div style="font-size:11px; color:var(--muted); margin-top:4px;">
-            Paid via: <strong>${escapeHtml(bill.paymentMethod)}</strong>
-            ${Array.isArray(bill.tenders) && bill.tenders.length > 1 ? ` (${bill.tenders.map((t) => `${t.paymentMethod}: ₹${((t.amountPaisa || 0) / 100).toFixed(2)}`).join(', ')})` : ''}
-          </div>
-          ${Array.isArray(bill.reprints) && bill.reprints.length > 0 ? `
-            <div style="font-size:10px; color:var(--color-warning); margin-top:6px;">
-              Reprinted: ${bill.reprints.length} time(s) (Latest: ${new Date(bill.reprints[bill.reprints.length - 1].reprintedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })})
-            </div>
-          ` : ''}
-        </div>
-
-        <div style="display:flex; justify-content:space-between; gap:10px; margin-top:16px;">
-          <button class="btn btn-sm btn-ghost" id="btn-modal-reprint-receipt" type="button" style="font-size:11.5px; border:1px solid var(--border-subtle);">
-            🖨️ Log &amp; Reprint Receipt
+        <div style="display:inline-flex;gap:8px;">
+          <button type="button" class="btn btn-sm btn-secondary" id="btn-modal-download-a4-pdf" style="font-size:11.5px;font-weight:700;">
+            💾 Download Official PDF
           </button>
-          <button class="btn btn-sm btn-primary" onclick="window.print()" type="button" style="font-size:11.5px;">
-            Print Preview
+          <button type="button" class="btn btn-sm btn-primary" onclick="window.print()" style="font-size:11.5px;font-weight:700;">
+            🖨️ Print
+          </button>
+        </div>
+      </div>
+
+      <!-- Container -->
+      <div id="modal-invoice-content-container">
+        ${corporateMarkup}
+      </div>
+
+      <!-- Action Footer -->
+      <div style="display:flex; flex-direction:column; gap:8px; margin-top:20px; border-top:1px solid var(--border-subtle, #e2e8f0); padding-top:14px;">
+        <div style="display:flex; justify-content:space-between; gap:8px;">
+          <button class="btn btn-sm btn-ghost" id="btn-modal-reprint-receipt" type="button" style="font-size:11.5px; border:1px solid var(--border-subtle); flex:1;">
+            🖨️ Log &amp; Audit Reprint
+          </button>
+          <button class="btn btn-sm btn-secondary" id="btn-modal-export-einvoice" type="button" style="font-size:11px; flex:1;" title="Export Statutory NIC E-Invoice JSON Payload (A003)">
+            📄 E-Invoice JSON (INV-01)
+          </button>
+          <button class="btn btn-sm btn-secondary" id="btn-modal-export-ewaybill" type="button" style="font-size:11px; flex:1;" title="Generate Statutory NIC E-Way Bill JSON Payload (A003)">
+            🚛 E-Way Bill (EWB-01)
           </button>
         </div>
       </div>
@@ -1975,6 +1954,45 @@ async function openReceiptModal(billId) {
     showSave: false,
     cancelLabel: "Close",
   });
+
+  setTimeout(() => {
+    const container = document.getElementById("modal-invoice-content-container");
+    const btnA4 = document.getElementById("btn-toggle-format-a4");
+    const btnThermal = document.getElementById("btn-toggle-format-thermal");
+    const btnPdf = document.getElementById("btn-modal-download-a4-pdf");
+
+    btnA4?.addEventListener("click", () => {
+      if (container) container.innerHTML = corporateMarkup;
+      btnA4.className = "btn btn-sm btn-primary";
+      btnThermal.className = "btn btn-sm btn-outline";
+    });
+
+    btnThermal?.addEventListener("click", () => {
+      if (container) container.innerHTML = thermalMarkup;
+      btnThermal.className = "btn btn-sm btn-primary";
+      btnA4.className = "btn btn-sm btn-outline";
+    });
+
+    btnPdf?.addEventListener("click", () => {
+      try {
+        const { blob, filename } = generateInvoicePdf(bill, {
+          tradeName: CAFE_NAMES[bill.cafeId] || bill.cafeName || 'Zamorin Café',
+          legalName: 'Zamorin Speciality Coffee & Kitchens Pvt. Ltd.',
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        showToast(`Official Tax Invoice PDF downloaded: ${filename}`, "mint");
+      } catch (pdfErr) {
+        showToast("Failed to download PDF: " + pdfErr.message, "coral");
+      }
+    });
+  }, 50);
 
   document.getElementById("btn-modal-reprint-receipt")?.addEventListener("click", async () => {
     try {
@@ -1985,6 +2003,41 @@ async function openReceiptModal(billId) {
       showToast(err.message || "Failed to log reprint", "coral");
     }
   });
+
+  document.getElementById("btn-modal-export-einvoice")?.addEventListener("click", async () => {
+    try {
+      const res = await apiGet(`/finance/invoices/${encodeURIComponent(bill.billId)}/einvoice-json`);
+      const payload = res.data || res;
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${bill.invoiceNumber || bill.billId}_einvoice_INV01.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast("Downloaded official NIC E-Invoice (INV-01) payload.", "success");
+    } catch (err) {
+      showToast(err.message || "Failed to generate E-Invoice payload", "coral");
+    }
+  });
+
+  document.getElementById("btn-modal-export-ewaybill")?.addEventListener("click", async () => {
+    try {
+      const res = await apiPost(`/finance/invoices/${encodeURIComponent(bill.billId)}/ewaybill-json`, {});
+      const payload = res.data || res;
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${bill.invoiceNumber || bill.billId}_ewaybill_EWB01.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast("Downloaded official NIC E-Way Bill (EWB-01) payload.", "success");
+    } catch (err) {
+      showToast(err.message || "Failed to generate E-Way Bill payload", "coral");
+    }
+  });
+
 }
 
 async function openBillDetailModal(billId) {

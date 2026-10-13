@@ -1039,12 +1039,20 @@ const getCustomerWalletHandler = asyncHandler(async (request, response) => {
     organisationId: request.auth.organisationId,
   }).sort({ createdAt: -1 }).limit(20).lean();
 
+  const purchasedPaise = customer.purchasedWalletBalancePaise || 0;
+  const promotionalPaise = customer.promotionalWalletBalancePaise || 0;
+  const totalPaise = customer.walletBalancePaise || (purchasedPaise + promotionalPaise);
+
   return response.status(200).json({
     success: true,
     data: {
       customerId,
-      walletBalancePaise: customer.walletBalancePaise || 0,
-      walletBalanceRupees: Number(((customer.walletBalancePaise || 0) / 100).toFixed(2)),
+      walletBalancePaise: totalPaise,
+      walletBalanceRupees: Number((totalPaise / 100).toFixed(2)),
+      purchasedBalancePaise: purchasedPaise,
+      purchasedBalanceRupees: Number((purchasedPaise / 100).toFixed(2)),
+      promotionalBalancePaise: promotionalPaise,
+      promotionalBalanceRupees: Number((promotionalPaise / 100).toFixed(2)),
       ledger,
     },
     correlationId: request.correlationId || null,
