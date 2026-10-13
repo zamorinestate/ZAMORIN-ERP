@@ -215,6 +215,21 @@ const IMPLICIT_ROUTES_ALL = new Set([
   'staff-home',
   'announcements',
   'employee-profile',
+  'emergency-terminal',
+  'waiter',
+  'captain',
+  'qr',
+  'qr-order',
+  'token-display',
+  'pickup-display',
+  'dual-screen',
+  'customer-screen',
+  'menu-board',
+  'digital-signage',
+  'call-center',
+  'phone-orders',
+  'retail-cpg',
+  'cpg-invoice',
 ]);
 
 // Implicit routes specific to CAFE_ADMIN — auth-context pages (not sidebar items)

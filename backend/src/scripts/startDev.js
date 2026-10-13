@@ -16,6 +16,16 @@ process.env.JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'zamorin_dev_se
 process.env.MFA_ENCRYPTION_KEY = process.env.MFA_ENCRYPTION_KEY || '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 process.env.CAFE_ACCESS_HMAC_SECRET = process.env.CAFE_ACCESS_HMAC_SECRET || '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 process.env.PORT = process.env.PORT || '4000';
+process.env.INITIAL_ORGANISATION_ID = process.env.INITIAL_ORGANISATION_ID || 'ZAMORIN';
+process.env.INITIAL_MASTER_NAME = process.env.INITIAL_MASTER_NAME || 'Zamorin Primary Master';
+process.env.INITIAL_MASTER_EMAIL = process.env.INITIAL_MASTER_EMAIL || 'pradeeshk331@gmail.com';
+process.env.INITIAL_MASTER_PASSWORD = process.env.INITIAL_MASTER_PASSWORD || 'Zamorin@2026Master!';
+process.env.INITIAL_DEMO_PASSWORD = process.env.INITIAL_DEMO_PASSWORD || 'Zamorin@2026Master!';
+process.env.INITIAL_OPERATOR_PIN_1 = process.env.INITIAL_OPERATOR_PIN_1 || '847291';
+process.env.INITIAL_OPERATOR_PIN_2 = process.env.INITIAL_OPERATOR_PIN_2 || '847291';
+process.env.SEED_MINIMAL = 'false';
+process.env.SEED_DEMO_DATA = 'true';
+process.env.DISABLE_MFA = 'true';
 
 const { MongoMemoryServer } = require('mongodb-memory-server');
 
@@ -24,11 +34,10 @@ const {
   disconnectDatabase,
 } = require('../config/database');
 
-const {
-  seedMasterUser,
-  seedPermissionRules,
-  seedSystemCommunicationSettings,
-} = require('./seedInitialData');
+const { runSeed } = require('./seedInitialData');
+const { seedPassbookData } = require('./seedPassbookData');
+const { User } = require('../models/User');
+const bcrypt = require('bcrypt');
 
 async function main() {
   let uri = process.env.MONGODB_URI;
@@ -76,40 +85,47 @@ async function main() {
     await connectDatabase({ uri });
   }
 
-  const organisationId =
-    process.env.INITIAL_ORGANISATION_ID || 'ZAMORIN';
-  const masterName =
-    process.env.INITIAL_MASTER_NAME || 'Zamorin Primary Master';
-  const masterEmail =
-    process.env.INITIAL_MASTER_EMAIL || 'pradeeshk331@gmail.com';
-  const crypto = require('crypto');
-  const masterPassword =
-    process.env.INITIAL_MASTER_PASSWORD ||
-    process.env.DEFAULT_ADMIN_PASSWORD ||
-    crypto.randomBytes(24).toString('base64url');
+  console.log('[dev] Seeding complete enterprise dataset (cafes, menus, inventory, finance, workforce)...');
+  await runSeed();
 
-  console.log('[dev] Seeding MASTER account and canonical role users...');
+  try {
+    await seedPassbookData();
+  } catch (passErr) {
+    console.warn('[dev] Passbook seed note:', passErr.message);
+  }
 
-  const masterUser = await seedMasterUser({
-    organisationId,
-    masterName,
-    masterEmail,
-    masterPassword,
-  });
+  // Ensure connection is active before updating users
+  await connectDatabase({ uri });
 
-  await seedPermissionRules({
-    organisationId,
-    masterUserId: masterUser.userId,
-  });
+  // Ensure all users have 6-digit PIN and password configured
+  const pin = '847291';
+  const pinHash = await bcrypt.hash(pin, 10);
+  const defaultPwdHash = await bcrypt.hash('Zamorin@2026Master!', 10);
 
-  await seedSystemCommunicationSettings({
-    organisationId,
-    masterEmail,
-  });
-
-  console.log(
-    `[dev] Seed complete — login: ${masterEmail} / ${masterPassword}`
+  await User.updateMany(
+    { organisationId: 'ZAMORIN' },
+    {
+      $set: {
+        appPinEnabled: true,
+        appPinHash: pinHash,
+        operatorPinHash: pinHash,
+        accountStatus: 'ACTIVE',
+      }
+    }
   );
+
+
+
+  console.log('================================================================================');
+  console.log('                  ZAMORIN CAFE ERP — DEV READY ACCOUNTS                         ');
+  console.log('================================================================================');
+  console.log(' 👑 Primary Master:  pradeeshk331@gmail.com / master@zamorin.cafe');
+  console.log(' 💼 Owner:           owner@example.com');
+  console.log(' ☕ Cafe Ops/Admin:  admin@example.com / rahul.ops@zamorin.cafe');
+  console.log(' 🧑‍🍳 Staff:           staff@example.com');
+  console.log(' 🔑 Dev Password:    Zamorin@2026Master! (or admin123)');
+  console.log(' 🔢 6-Digit App PIN: 847291');
+  console.log('================================================================================');
 
   await disconnectDatabase();
 

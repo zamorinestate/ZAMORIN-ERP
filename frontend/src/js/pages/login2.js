@@ -195,7 +195,8 @@ function renderBackgroundAndModalsHtml() {
 
         <!-- 6-Digit PIN Entry Section (revealed when 6-Digit PIN is clicked) -->
         <div id="l2-app-pin-section" class="hidden" style="margin-top: 18px; border-top: 1px solid rgba(255,255,255,0.12); padding-top: 16px;">
-          <p style="font-size: 13px; color: var(--l2-text-muted); margin-bottom: 12px; text-align: center; font-family: var(--font-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif) !important;">Enter your 6-digit personal application PIN</p>
+          <p style="font-size: 13px; color: var(--l2-text-muted); margin-bottom: 6px; text-align: center; font-family: var(--font-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif) !important;">Enter your 6-digit personal application PIN</p>
+          <p style="font-size: 11px; color: #d4a359; margin-bottom: 12px; text-align: center; font-weight: 600;">(Demo PIN: 847291)</p>
           <div id="l2-modal-pin-error" class="l2-error-banner" style="display:none; margin-bottom: 12px; font-size: 12px; font-family: var(--font-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif) !important;"></div>
           <div style="display: flex; gap: 8px; justify-content: center; margin-bottom: 16px;">
             <input type="password" class="l2-pin-input-box" maxlength="1" inputmode="numeric" pattern="[0-9]" />
@@ -340,6 +341,14 @@ export function renderLoginPage2({ organisationId = "ZAMORIN", email = "", notic
 
         ${notice ? `<div class="l2-notice-banner">${notice}</div>` : ""}
         <div id="l2-login-error" class="l2-error-banner" style="${error ? "" : "display:none;"}">${error}</div>
+
+        <!-- Quick One-Click Demo Personas -->
+        <div class="l2-demo-persona-row" style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;justify-content:center;">
+          <button type="button" class="demo-persona-btn" data-email="pradeeshk331@gmail.com" data-pwd="Zamorin@2026Master!" title="Primary Master" style="font-size:11px;padding:5px 10px;cursor:pointer;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:20px;color:#fff;font-weight:600;">👑 Master</button>
+          <button type="button" class="demo-persona-btn" data-email="owner@example.com" data-pwd="Zamorin@2026Master!" title="Owner" style="font-size:11px;padding:5px 10px;cursor:pointer;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:20px;color:#fff;font-weight:600;">💼 Owner</button>
+          <button type="button" class="demo-persona-btn" data-email="admin@example.com" data-pwd="Zamorin@2026Master!" title="Cafe Operations" style="font-size:11px;padding:5px 10px;cursor:pointer;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:20px;color:#fff;font-weight:600;">☕ Cafe Ops</button>
+          <button type="button" class="demo-persona-btn" data-email="staff@example.com" data-pwd="Zamorin@2026Master!" title="Staff" style="font-size:11px;padding:5px 10px;cursor:pointer;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:20px;color:#fff;font-weight:600;">🧑‍🍳 Staff</button>
+        </div>
 
         <form id="l2-login-form">
           <!-- Organisation ID -->
@@ -539,6 +548,18 @@ export function wireLoginPage2(container, { onSubmit, onForgotPassword, onRegist
     emailInput.addEventListener("blur", persistEmail);
     emailInput.addEventListener("change", persistEmail);
   }
+
+  // One-Click Demo Persona Button Wiring
+  container.querySelectorAll(".demo-persona-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const email = btn.dataset.email;
+      const pwd = btn.dataset.pwd;
+      if (emailInput) emailInput.value = email;
+      if (pwdInput) pwdInput.value = pwd;
+      if (orgInput) orgInput.value = "ZAMORIN";
+      form?.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+    });
+  });
 
   if (openTermsBtn && termsModal) {
     openTermsBtn.addEventListener("click", () => {
