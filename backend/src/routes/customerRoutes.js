@@ -38,6 +38,10 @@ const {
   cancelCampaignHandler,
   getDuplicateCandidates,
   deleteCustomer,
+  requestCustomerOtpHandler,
+  verifyCustomerOtpHandler,
+  expirePromotionalBalancesHandler,
+  expirePointsHandler,
 } = require('../controllers/customerController');
 
 const router = express.Router();
@@ -85,6 +89,16 @@ router.post('/:customerId/loyalty/adjust', authorize('CUSTOMERS_WRITE', { allowe
 router.post('/:customerId/points/adjust', authorize('CUSTOMERS_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }), adjustCustomerPoints);
 router.post('/:customerId/points/redeem', authorize('CUSTOMERS_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }), redeemPointsHandler);
 router.post('/:customerId/loyalty/redeem', authorize('CUSTOMERS_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }), redeemPointsHandler);
+router.post('/:customerId/otp/request', authorize('CUSTOMERS_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }), requestCustomerOtpHandler);
+router.post('/:customerId/otp/verify', authorize('CUSTOMERS_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }), verifyCustomerOtpHandler);
+
+// F066: Customer OTP Challenge Endpoints
+router.post('/otp/request', authorize('CUSTOMERS_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }), requestCustomerOtpHandler);
+router.post('/otp/verify', authorize('CUSTOMERS_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }), verifyCustomerOtpHandler);
+
+// F068: Balance & Points Expiration Endpoints
+router.post('/wallet/expire', authorize('CUSTOMERS_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }), expirePromotionalBalancesHandler);
+router.post('/points/expire', authorize('CUSTOMERS_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }), expirePointsHandler);
 
 // Customer Wallet
 router.get('/:customerId/wallet', authorize('CUSTOMERS_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }), getCustomerWalletHandler);

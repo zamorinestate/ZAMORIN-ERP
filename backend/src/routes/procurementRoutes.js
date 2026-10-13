@@ -70,8 +70,14 @@ const {
   rejectRecommendation,
   requestSupplierAlternative,
   escalateOrder,
+  distributeLandedCharges,
+  evaluateOrderApprovalTier,
+  checkItemPriceVariance,
+  performOrderThreeWayMatch,
   runProcurementDispatchWorker,
   reconcileDispatchJob,
+  exportSupplierMatrixHandler,
+  importSupplierMatrixHandler,
 } = require('../controllers/procurementController');
 
 const UPLOAD_STAGING_DIR = path.join(os.tmpdir(), 'zamorin_procurement_staging');
@@ -270,6 +276,34 @@ router.get(
   '/orders/:purchaseOrderId/matching-status',
   authorize('PROCUREMENT_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
   getPoDocumentMatchingStatus
+);
+
+// P26 Landed Cost Distribution (F147-F149)
+router.post(
+  '/orders/:purchaseOrderId/landed-cost/distribute',
+  authorize('PROCUREMENT_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  distributeLandedCharges
+);
+
+// P26 Multi-Tier Approval Level Evaluation (F046-F055)
+router.get(
+  '/orders/:purchaseOrderId/approval-tier',
+  authorize('PROCUREMENT_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  evaluateOrderApprovalTier
+);
+
+// P26 Real-Time Supplier Price Variance Pre-Check (F154-F155)
+router.post(
+  '/price-variance/check',
+  authorize('PROCUREMENT_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  checkItemPriceVariance
+);
+
+// P26 Three-Way Match Tolerance Evaluation (A047-A052)
+router.post(
+  '/orders/:purchaseOrderId/three-way-match',
+  authorize('PROCUREMENT_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  performOrderThreeWayMatch
 );
 
 // P07 Recommendations Conversion
@@ -472,6 +506,19 @@ router.post(
   '/orders/:purchaseOrderId/send-to-accounts',
   authorize('PROCUREMENT_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
   sendToAccounts
+);
+
+// Benchmark A093–A095: Excel Supplier-to-Material Mapping Matrix
+router.get(
+  '/supplier-matrix/export',
+  authorize('PROCUREMENT_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  exportSupplierMatrixHandler
+);
+
+router.post(
+  '/supplier-matrix/import',
+  authorize('PROCUREMENT_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  importSupplierMatrixHandler
 );
 
 // ── ZAMORIN AI INVOICE INTELLIGENCE (PHASE 26) ───────────────────────────────

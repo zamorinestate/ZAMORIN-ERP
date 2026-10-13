@@ -406,6 +406,274 @@ class TableService {
       bill,
     };
   }
+
+  /**
+   * F027: Table Merging
+   * Merges one or more source tables into a target table, consolidating
+   * active sessions, order rounds, line items, and covers.
+   */
+  static async mergeTables({
+    targetTableId,
+    sourceTableIds = [],
+    cafeId,
+    organisationId = 'ORG-DEFAULT',
+    authContext = {},
+  }) {
+    assertCafeAccess(authContext, cafeId);
+
+    const normCafeId = cafeId.trim().toUpperCase();
+    const cleanTargetId = String(targetTableId || '').trim().toUpperCase();
+    const cleanSourceIds = (Array.isArray(sourceTableIds) ? sourceTableIds : [sourceTableIds])
+      .map((id) => String(id || '').trim().toUpperCase())
+      .filter((id) => id && id !== cleanTargetId);
+
+    if (!cleanTargetId || cleanSourceIds.length === 0) {
+      throw new ApiError(400, 'INVALID_MERGE_PARAMS', 'Target table and at least one distinct source table are required.');
+    }
+
+    const targetTable = await DiningTable.findOne({
+      organisationId,
+      cafeId: normCafeId,
+      tableId: cleanTargetId,
+    });
+    if (!targetTable) {
+      throw new ApiError(404, 'TARGET_TABLE_NOT_FOUND', `Target table ${cleanTargetId} not found.`);
+    }
+
+    const sourceTables = await DiningTable.find({
+      organisationId,
+      cafeId: normCafeId,
+      tableId: { $in: cleanSourceIds },
+    });
+    if (sourceTables.length === 0) {
+      throw new ApiError(404, 'SOURCE_TABLES_NOT_FOUND', 'None of the specified source tables were found.');
+    }
+
+    // Ensure target table has an active session
+    let targetSession = null;
+    if (targetTable.activeSessionId) {
+      targetSession = await TableSession.findOne({
+        sessionId: targetTable.activeSessionId,
+        status: 'ACTIVE',
+      });
+    }
+
+    if (!targetSession) {
+      // Create session for target table if none exists
+      const sessId = `TSESS-${Date.now()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+      targetSession = await TableSession.create({
+        sessionId: sessId,
+        organisationId,
+        cafeId: normCafeId,
+        tableId: targetTable.tableId,
+        tableNumber: targetTable.tableNumber,
+        covers: targetTable.seatingCapacity || 2,
+        status: 'ACTIVE',
+        customerName: 'Consolidated Guests',
+        customerPhone: '',
+        openedAt: new Date(),
+        openedByUserId: authContext.userId || 'STAFF',
+        rounds: [],
+        cumulativeTotalPaisa: 0,
+      });
+      targetTable.activeSessionId = targetSession.sessionId;
+      targetTable.status = 'OCCUPIED';
+    }
+
+    const mergedSourceSessions = [];
+    for (const sTable of sourceTables) {
+      if (sTable.activeSessionId) {
+        const sSession = await TableSession.findOne({
+          sessionId: sTable.activeSessionId,
+          status: 'ACTIVE',
+        });
+
+        if (sSession) {
+          // Transfer rounds to target session
+          if (Array.isArray(sSession.rounds) && sSession.rounds.length > 0) {
+            targetSession.rounds.push(...sSession.rounds);
+          }
+          targetSession.covers = (targetSession.covers || 0) + (sSession.covers || 0);
+          targetSession.cumulativeTotalPaisa = (targetSession.cumulativeTotalPaisa || 0) + (sSession.cumulativeTotalPaisa || 0);
+
+          sSession.status = 'MERGED';
+          sSession.metadata = {
+            ...(sSession.metadata || {}),
+            mergedIntoSessionId: targetSession.sessionId,
+            mergedIntoTableId: targetTable.tableId,
+            mergedAt: new Date(),
+          };
+          await sSession.save();
+          mergedSourceSessions.push(sSession.sessionId);
+        }
+      }
+
+      // Mark source table as available / merged
+      sTable.status = 'AVAILABLE';
+      sTable.activeSessionId = null;
+      sTable.metadata = {
+        ...(sTable.metadata || {}),
+        mergedIntoTableId: targetTable.tableId,
+        mergedAt: new Date(),
+      };
+      await sTable.save();
+    }
+
+    await targetSession.save();
+    await targetTable.save();
+
+    // A022: Shifted / Merged KOT Notification
+    const shiftKot = {
+      type: 'KOT_MERGE_NOTIFICATION',
+      event: 'TABLE_MERGED',
+      targetTableId: targetTable.tableId,
+      targetTableNumber: targetTable.tableNumber,
+      sourceTables: sourceTables.map((t) => ({ tableId: t.tableId, tableNumber: t.tableNumber })),
+      mergedAt: new Date(),
+      message: `TABLE MERGE (F027): Tables [${sourceTables.map(t => t.tableNumber).join(', ')}] merged into Table ${targetTable.tableNumber}. Dispatch all items to Table ${targetTable.tableNumber}.`,
+    };
+
+    await auditService.recordAuditEvent({
+      organisationId,
+      cafeId: normCafeId,
+      actorUserId: authContext.userId || 'STAFF',
+      actorRole: authContext.role || 'CAFE_ADMIN',
+      module: 'TABLES',
+      action: 'TABLES_MERGED',
+      entityType: 'DINING_TABLE',
+      entityId: targetTable.tableId,
+      reason: `Merged tables [${cleanSourceIds.join(', ')}] into Table ${targetTable.tableNumber}`,
+      result: 'SUCCESS',
+      metadata: { sourceTableIds: cleanSourceIds, mergedSourceSessions },
+    }).catch(() => {});
+
+    return {
+      success: true,
+      targetTable,
+      targetSession,
+      sourceTables,
+      shiftKot,
+    };
+  }
+
+  /**
+   * A022: Table Shift & Shifted KOT Dispatch
+   * Relocates active session from fromTableId to toTableId and emits
+   * a table shift notification to kitchen stations.
+   */
+  static async shiftTable({
+    fromTableId,
+    toTableId,
+    reason = 'Guest requested relocation',
+    cafeId,
+    organisationId = 'ORG-DEFAULT',
+    authContext = {},
+  }) {
+    assertCafeAccess(authContext, cafeId);
+
+    const normCafeId = cafeId.trim().toUpperCase();
+    const cleanFromId = String(fromTableId || '').trim().toUpperCase();
+    const cleanToId = String(toTableId || '').trim().toUpperCase();
+
+    if (!cleanFromId || !cleanToId || cleanFromId === cleanToId) {
+      throw new ApiError(400, 'INVALID_SHIFT_PARAMS', 'Source table and destination table must be distinct.');
+    }
+
+    const fromTable = await DiningTable.findOne({
+      organisationId,
+      cafeId: normCafeId,
+      tableId: cleanFromId,
+    });
+    if (!fromTable) {
+      throw new ApiError(404, 'FROM_TABLE_NOT_FOUND', `Origin table ${cleanFromId} not found.`);
+    }
+
+    const toTable = await DiningTable.findOne({
+      organisationId,
+      cafeId: normCafeId,
+      tableId: cleanToId,
+    });
+    if (!toTable) {
+      throw new ApiError(404, 'TO_TABLE_NOT_FOUND', `Destination table ${cleanToId} not found.`);
+    }
+
+    if (!fromTable.activeSessionId) {
+      throw new ApiError(400, 'ORIGIN_TABLE_NOT_OCCUPIED', `Origin table ${fromTable.tableNumber} does not have an active dining session.`);
+    }
+
+    if (toTable.status === 'OCCUPIED' && toTable.activeSessionId) {
+      throw new ApiError(400, 'DESTINATION_TABLE_OCCUPIED', `Destination table ${toTable.tableNumber} is already occupied. Merge instead of shift.`);
+    }
+
+    const session = await TableSession.findOne({
+      sessionId: fromTable.activeSessionId,
+      status: 'ACTIVE',
+    });
+    if (!session) {
+      throw new ApiError(404, 'SESSION_NOT_FOUND', `Active session for table ${fromTable.tableNumber} not found.`);
+    }
+
+    // Shift session to destination table
+    const origTableNumber = session.tableNumber;
+    session.tableId = toTable.tableId;
+    session.tableNumber = toTable.tableNumber;
+    session.metadata = {
+      ...(session.metadata || {}),
+      previousTableNumber: origTableNumber,
+      shiftedAt: new Date(),
+      shiftReason: reason,
+    };
+    await session.save();
+
+    toTable.status = 'OCCUPIED';
+    toTable.activeSessionId = session.sessionId;
+    await toTable.save();
+
+    fromTable.status = 'AVAILABLE';
+    fromTable.activeSessionId = null;
+    fromTable.metadata = {
+      ...(fromTable.metadata || {}),
+      shiftedToTableId: toTable.tableId,
+      shiftedAt: new Date(),
+    };
+    await fromTable.save();
+
+    // A022: Shifted KOT Notification
+    const shiftKot = {
+      type: 'KOT_SHIFT_NOTIFICATION',
+      event: 'TABLE_SHIFTED',
+      fromTableId: fromTable.tableId,
+      fromTableNumber: origTableNumber,
+      toTableId: toTable.tableId,
+      toTableNumber: toTable.tableNumber,
+      reason,
+      sessionId: session.sessionId,
+      shiftedAt: new Date(),
+      message: `TABLE SHIFT (A022): Relocated from Table ${origTableNumber} to Table ${toTable.tableNumber}. Deliver pending and future orders to Table ${toTable.tableNumber}.`,
+    };
+
+    await auditService.recordAuditEvent({
+      organisationId,
+      cafeId: normCafeId,
+      actorUserId: authContext.userId || 'STAFF',
+      actorRole: authContext.role || 'CAFE_ADMIN',
+      module: 'TABLES',
+      action: 'TABLE_SHIFTED',
+      entityType: 'DINING_TABLE',
+      entityId: toTable.tableId,
+      reason: `Shifted Table ${origTableNumber} -> Table ${toTable.tableNumber}: ${reason}`,
+      result: 'SUCCESS',
+      metadata: { fromTableId: cleanFromId, toTableId: cleanToId, sessionId: session.sessionId },
+    }).catch(() => {});
+
+    return {
+      success: true,
+      fromTable,
+      toTable,
+      session,
+      shiftKot,
+    };
+  }
 }
 
 module.exports = {

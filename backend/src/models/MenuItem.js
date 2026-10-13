@@ -160,6 +160,15 @@ const menuItemSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Fast-biller alphanumeric shortcode (F044)
+    shortcode: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: null,
+      index: true,
+    },
+
     name: {
       type: String,
       required: true,
@@ -174,6 +183,13 @@ const menuItemSchema = new mongoose.Schema(
       trim: true,
       lowercase: true,
       index: true,
+    },
+
+    nameArabic: {
+      type: String,
+      trim: true,
+      maxlength: 200,
+      default: '',
     },
 
     customerName: {
@@ -224,6 +240,13 @@ const menuItemSchema = new mongoose.Schema(
     },
 
     description: {
+      type: String,
+      trim: true,
+      maxlength: 1000,
+      default: '',
+    },
+
+    descriptionArabic: {
       type: String,
       trim: true,
       maxlength: 1000,
@@ -281,6 +304,95 @@ const menuItemSchema = new mongoose.Schema(
       type: String,
       trim: true,
       uppercase: true,
+      default: null,
+    },
+
+    // Auto-deduct inventory toggle for non-recipe items (F042)
+    autoDeductInventory: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    // Allow fractional decimal quantities (e.g. 0.350 kg for deli/beans) (F050)
+    allowDecimalQuantity: {
+      type: Boolean,
+      default: false,
+    },
+
+    // Area-specific pricing overrides (e.g. Rooftop vs Ground Floor) (F045)
+    areaPricing: {
+      type: [
+        {
+          areaId: { type: String, trim: true, uppercase: true },
+          pricePaisa: { type: Number, min: 0 },
+          isActive: { type: Boolean, default: true },
+        },
+      ],
+      default: [],
+    },
+
+    // Meal-time availability schedule (e.g. Breakfast 7-11 AM) (F048, A036)
+    mealSchedule: {
+      daysOfWeek: { type: [String], default: [] },
+      startTime: { type: String, default: null }, // '07:00'
+      endTime: { type: String, default: null },   // '11:00'
+      isActive: { type: Boolean, default: false },
+    },
+
+    // Half-and-Half Pizza Customizer config (F063)
+    pizzaConfig: {
+      isPizza: { type: Boolean, default: false },
+      supportsHalfAndHalf: { type: Boolean, default: false },
+      defaultCrustPricePaisa: { type: Number, default: 0, min: 0 },
+      allowedToppings: { type: [String], default: [] },
+    },
+
+    // Food vs Liquor Invoice classification (F031)
+    liquorClassification: {
+      isLiquor: { type: Boolean, default: false, index: true },
+      vatRatePercent: { type: Number, default: 0, min: 0 },
+      category: { type: String, default: null }, // 'BEER', 'WINE', 'SPIRITS'
+    },
+
+    // Auto-86 lock from raw material depletion (F122)
+    auto86Locked: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    auto86Reason: {
+      type: String,
+      default: null,
+    },
+    isAvailable: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+
+    // A041 / F002: Open-price / Free-text item pricing allowed
+    isOpenPrice: {
+      type: Boolean,
+      default: false,
+    },
+
+    // A047 / F047 / F267: Independent Self-Order Kiosk Channel availability
+    kioskAvailable: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+
+    // A036 / F048 / F053: Day-specific online channel time windows
+    onlineSchedule: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+
+    // F052 / F053: Day-part offline in-store POS schedule
+    offlineSchedule: {
+      type: mongoose.Schema.Types.Mixed,
       default: null,
     },
 

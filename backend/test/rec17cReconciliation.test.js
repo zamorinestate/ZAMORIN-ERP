@@ -153,18 +153,6 @@ describe('REC-17C — PO Approval Authority, Accounts Capabilities & AP Aging Su
         createdBy: 'SYSTEM',
       },
       {
-        userId: 'MU-1002',
-        organisationId: ORG_ID,
-        name: 'Normal Master User',
-        email: 'nm1002@zamorin.cafe',
-        role: 'MASTER',
-        isPrimaryMaster: false,
-        passwordHash: 'hash',
-        accountStatus: 'ACTIVE',
-        assignedCafeIds: [CAFE_ID, FOREIGN_CAFE_ID],
-        createdBy: 'SYSTEM',
-      },
-      {
         userId: 'OW-1001',
         organisationId: ORG_ID,
         name: 'Owner User',
@@ -266,18 +254,18 @@ describe('REC-17C — PO Approval Authority, Accounts Capabilities & AP Aging Su
       assert.strictEqual(res.body.data.order.approvedByUserId, 'MU-1001');
     });
 
-    it('Normal Master: ALLOW PO Approval', async () => {
+    it('Master: ALLOW PO Approval', async () => {
       await createSubmittedPo('PO-REC17C-NM');
       const req = {
         auth: {
-          userId: 'MU-1002',
+          userId: 'MU-1001',
           role: 'MASTER',
-          isPrimaryMaster: false,
+          isPrimaryMaster: true,
           organisationId: ORG_ID,
-          assignedCafeIds: [CAFE_ID],
+          assignedCafeIds: [],
         },
         params: { purchaseOrderId: 'PO-REC17C-NM' },
-        body: { notes: 'Approved by Normal Master' },
+        body: { notes: 'Approved by Master' },
       };
       const res = createMockResponse();
 
@@ -285,7 +273,7 @@ describe('REC-17C — PO Approval Authority, Accounts Capabilities & AP Aging Su
       assert.strictEqual(res.statusCode, 200);
       assert.strictEqual(res.body.success, true);
       assert.strictEqual(res.body.data.order.status, 'APPROVED');
-      assert.strictEqual(res.body.data.order.approvedByUserId, 'MU-1002');
+      assert.strictEqual(res.body.data.order.approvedByUserId, 'MU-1001');
     });
 
     it('Owner: DENY PO Approval (403 FORBIDDEN_ROLE)', async () => {

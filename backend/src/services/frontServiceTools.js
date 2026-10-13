@@ -144,7 +144,7 @@ class FrontServiceTools {
       status: { $in: ['PREPARING', 'READY_FOR_PICKUP'] },
     })
       .sort({ assignedAt: 1 })
-      .select('tokenNumber status pickupCounter readyAt -_id')
+      .select('tokenNumber status pickupCounter isComplimentary readyAt -_id')
       .lean();
 
     return {
@@ -152,10 +152,20 @@ class FrontServiceTools {
       timestamp: new Date(),
       preparing: activeTokens
         .filter((t) => t.status === 'PREPARING')
-        .map((t) => ({ tokenNumber: t.tokenNumber, counter: t.pickupCounter })),
+        .map((t) => ({
+          tokenNumber: t.tokenNumber,
+          counter: t.pickupCounter,
+          isComplimentary: Boolean(t.isComplimentary),
+          badge: t.isComplimentary ? 'COMPLIMENTARY' : null,
+        })),
       readyForPickup: activeTokens
         .filter((t) => t.status === 'READY_FOR_PICKUP')
-        .map((t) => ({ tokenNumber: t.tokenNumber, counter: t.pickupCounter })),
+        .map((t) => ({
+          tokenNumber: t.tokenNumber,
+          counter: t.pickupCounter,
+          isComplimentary: Boolean(t.isComplimentary),
+          badge: t.isComplimentary ? 'COMPLIMENTARY' : null,
+        })),
     };
   }
 }

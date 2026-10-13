@@ -59,16 +59,23 @@ class SharedRedisMock {
     let ttlMs = null;
     let nx = false;
 
-    for (let i = 0; i < args.length; i++) {
-      const arg = String(args[i]).toUpperCase();
-      if (arg === 'EX') {
-        ttlMs = Number(args[i + 1]) * 1000;
-        i++;
-      } else if (arg === 'PX') {
-        ttlMs = Number(args[i + 1]);
-        i++;
-      } else if (arg === 'NX') {
-        nx = true;
+    if (args.length === 1 && typeof args[0] === 'object' && args[0] !== null) {
+      const opts = args[0];
+      if (opts.NX || opts.nx) nx = true;
+      if (opts.PX || opts.px) ttlMs = Number(opts.PX || opts.px);
+      if (opts.EX || opts.ex) ttlMs = Number(opts.EX || opts.ex) * 1000;
+    } else {
+      for (let i = 0; i < args.length; i++) {
+        const arg = String(args[i]).toUpperCase();
+        if (arg === 'EX') {
+          ttlMs = Number(args[i + 1]) * 1000;
+          i++;
+        } else if (arg === 'PX') {
+          ttlMs = Number(args[i + 1]);
+          i++;
+        } else if (arg === 'NX') {
+          nx = true;
+        }
       }
     }
 
@@ -99,8 +106,19 @@ class SharedRedisMock {
     return val;
   }
 
-  async eval(script, numKeys, key, ...args) {
+  async eval(script, numKeysOrOptions, maybeKey, ...restArgs) {
     this._checkConnected();
+    let key;
+    let args = [];
+
+    if (typeof numKeysOrOptions === 'object' && numKeysOrOptions !== null) {
+      key = numKeysOrOptions.keys?.[0];
+      args = numKeysOrOptions.arguments || [];
+    } else {
+      key = maybeKey;
+      args = restArgs;
+    }
+
     // 1. Sliding window rate limiter Lua script simulation
     if (script.includes('SLIDING_WINDOW_LIMITER') || script.includes('ZREMRANGEBYSCORE')) {
       const now = Number(args[0]);

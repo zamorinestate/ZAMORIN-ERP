@@ -12,6 +12,11 @@
 
 require('dotenv').config();
 
+process.env.JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'zamorin_dev_secret_access_key_min_32_characters';
+process.env.MFA_ENCRYPTION_KEY = process.env.MFA_ENCRYPTION_KEY || '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+process.env.CAFE_ACCESS_HMAC_SECRET = process.env.CAFE_ACCESS_HMAC_SECRET || '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+process.env.PORT = process.env.PORT || '4000';
+
 const { MongoMemoryServer } = require('mongodb-memory-server');
 
 const {
@@ -123,6 +128,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error('[dev] Startup failed:', error.message);
+  console.error('[dev] Startup failed:', error);
   process.exitCode = 1;
 });

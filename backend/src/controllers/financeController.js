@@ -1507,6 +1507,11 @@ const commitZReport = asyncHandler(async (request, response) => {
     denominations,
     countedCashPaisa,
     closingDeclarationNote,
+    isBlindClose,
+    supervisorUserId,
+    supervisorOverridePin,
+    requireSupervisorOnDiscrepancy,
+    freezeDayClose,
   } = request.body;
 
   if (!cafeId) {
@@ -1522,12 +1527,19 @@ const commitZReport = asyncHandler(async (request, response) => {
     denominations,
     countedCashPaisa,
     closingDeclarationNote,
+    isBlindClose: Boolean(isBlindClose),
+    supervisorUserId,
+    supervisorOverridePin,
+    requireSupervisorOnDiscrepancy: Boolean(requireSupervisorOnDiscrepancy),
+    freezeDayClose: Boolean(freezeDayClose),
     auth: request.auth,
   });
 
   return response.status(200).json({
     success: true,
-    message: 'Daily cash reconciliation settled and Z-Report committed.',
+    message: isBlindClose
+      ? 'Daily blind till reconciliation submitted and Z-Report committed.'
+      : 'Daily cash reconciliation settled and Z-Report committed.',
     data: zReport,
     correlationId: request.correlationId || null,
   });
@@ -1608,6 +1620,36 @@ const listAdvanceDeposits = asyncHandler(async (request, response) => {
   });
 
   return response.status(200).json({ success: true, count: deposits.length, deposits });
+});
+
+/**
+ * A020 / F108: Advance-Slip Lookup
+ * Retrieve advance deposit record by receipt voucher slip number or depositId.
+ */
+const getAdvanceDepositBySlip = asyncHandler(async (request, response) => {
+  const { slipNumber } = request.params;
+  const { organisationId } = request.auth;
+  const cafeId = request.query.cafeId || request.auth.cafeId;
+  const { AdvanceDeposit } = require('../models/AdvanceDeposit');
+
+  const query = {
+    organisationId,
+    $or: [
+      { receiptVoucherNumber: String(slipNumber).trim().toUpperCase() },
+      { depositId: String(slipNumber).trim().toUpperCase() },
+      { bookingReference: String(slipNumber).trim() },
+    ],
+  };
+  if (cafeId && cafeId !== '*' && cafeId !== 'ALL') {
+    query.cafeId = cafeId.toUpperCase();
+  }
+
+  const deposit = await AdvanceDeposit.findOne(query).lean();
+  if (!deposit) {
+    return response.status(404).json({ success: false, message: `Advance slip #${slipNumber} not found.` });
+  }
+
+  return response.status(200).json({ success: true, data: deposit });
 });
 
 const applyAdvanceDeposit = asyncHandler(async (request, response) => {
@@ -1758,6 +1800,97 @@ const confirmBankDeposit = asyncHandler(async (request, response) => {
   return response.status(200).json({ success: true, message: 'Bank deposit confirmed and reconciled.', data: result });
 });
 
+/**
+ * A001: Finance Daily Payout Summary
+ * Consolidated daily dashboard: gross sales, aggregator payouts, cash drawer, deductions, bank settlement.
+ */
+const getDailyPayoutSummary = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const cafeId = request.query.cafeId || request.auth.primaryCafeId || request.auth.assignedCafeIds?.[0] || 'ZC-0001';
+  ensureCafeAccess(request, cafeId);
+
+  const businessDate = request.query.businessDate || new Date().toISOString().split('T')[0];
+  const { Bill } = require('../models/Bill');
+
+  const bills = await Bill.find({
+    organisationId,
+    cafeId: cafeId.toUpperCase(),
+    businessDate,
+    status: { $in: ['COMPLETED', 'OPEN', 'PARTIALLY_REFUNDED'] },
+  }).lean();
+
+  let grossSalesPaisa = 0;
+  let netSalesPaisa = 0;
+  let taxPaisa = 0;
+  let discountPaisa = 0;
+  let cashPaisa = 0;
+  let upiPaisa = 0;
+  let cardPaisa = 0;
+  let aggregatorGrossPaisa = 0;
+  let aggregatorNetPaisa = 0;
+  let estimatedAggregatorCommissionPaisa = 0;
+
+  for (const b of bills) {
+    grossSalesPaisa += b.subtotalPaisa || 0;
+    netSalesPaisa += b.totalPaisa || 0;
+    taxPaisa += b.taxPaisa || 0;
+    discountPaisa += b.discountPaisa || 0;
+
+    const channel = String(b.orderChannel || 'POS').toUpperCase();
+    if (channel === 'ZOMATO' || channel === 'SWIGGY' || channel === 'TOING') {
+      aggregatorGrossPaisa += b.totalPaisa || 0;
+      // standard ~22% commission deduction estimate
+      const comm = Math.round((b.totalPaisa || 0) * 0.22);
+      estimatedAggregatorCommissionPaisa += comm;
+      aggregatorNetPaisa += (b.totalPaisa || 0) - comm;
+    } else {
+      for (const t of (b.tenders || [])) {
+        const amt = t.amountPaisa || 0;
+        const method = String(t.paymentMethod || '').toUpperCase();
+        if (method === 'CASH') cashPaisa += amt;
+        else if (method === 'UPI') upiPaisa += amt;
+        else if (method === 'CARD') cardPaisa += amt;
+      }
+    }
+  }
+
+  const directBankSettlementPaisa = upiPaisa + cardPaisa;
+  const estimatedTotalBankDepositPaisa = directBankSettlementPaisa + aggregatorNetPaisa;
+
+  return response.status(200).json({
+    success: true,
+    data: {
+      organisationId,
+      cafeId,
+      businessDate,
+      billCount: bills.length,
+      revenueSummary: {
+        grossSalesPaisa,
+        netSalesPaisa,
+        taxPaisa,
+        discountPaisa,
+      },
+      collectionsByChannel: {
+        cashDrawerPaisa: cashPaisa,
+        upiPaisa,
+        cardPaisa,
+        aggregatorGrossPaisa,
+      },
+      aggregatorSettlement: {
+        aggregatorGrossPaisa,
+        estimatedCommissionPaisa: estimatedAggregatorCommissionPaisa,
+        estimatedNetPayoutPaisa: aggregatorNetPaisa,
+      },
+      bankSettlement: {
+        directTerminalSettlementPaisa: directBankSettlementPaisa,
+        estimatedTotalBankDepositPaisa,
+        status: 'PENDING_RECONCILIATION',
+      },
+      generatedAt: new Date().toISOString(),
+    },
+  });
+});
+
 module.exports = {
   getFinanceOverview,
   getSalesAudit,
@@ -1801,4 +1934,6 @@ module.exports = {
   recordBankDeposit,
   confirmBankDeposit,
   getCustodyBalances,
+  getDailyPayoutSummary,
+  getAdvanceDepositBySlip,
 };

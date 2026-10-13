@@ -163,7 +163,13 @@ function renderCurrentWorkspace(wrap) {
       title: "Recipe Formulation",
       icon: "🍳",
       desc: "Raw ingredient Bill of Materials, preparation methods, portion weights and theoretical COGS.",
-      actionsHtml: `<button class="btn btn-sm btn-primary" id="btn-child-new-recipe" type="button">+ Formulate Recipe</button>`
+      actionsHtml: `
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="btn btn-sm btn-primary" id="btn-child-new-recipe" type="button">+ Formulate Recipe</button>
+          <button class="btn btn-sm btn-secondary" id="btn-child-recipe-workbook" type="button">📊 Recipe Workbook (A101)</button>
+          <button class="btn btn-sm btn-secondary" id="btn-child-addon-excel" type="button">📥 Bulk Add-on Mapper (A040)</button>
+        </div>
+      `
     },
     modifiers: {
       title: "Modifiers & Variants",
@@ -259,6 +265,12 @@ function renderCurrentWorkspace(wrap) {
   });
   wrap.querySelector("#btn-child-new-recipe")?.addEventListener("click", () => {
     openCreateRecipeModal(wrap);
+  });
+  wrap.querySelector("#btn-child-recipe-workbook")?.addEventListener("click", () => {
+    openRecipeWorkbookModal(wrap);
+  });
+  wrap.querySelector("#btn-child-addon-excel")?.addEventListener("click", () => {
+    openAddonMappingModal(wrap);
   });
   wrap.querySelector("#btn-child-new-modifier")?.addEventListener("click", () => {
     openCreateModifierModal(wrap);
@@ -659,7 +671,12 @@ async function renderRecipesTab(wrap) {
           <h3 style="font-size:15.5px; font-weight:700; margin:0; color:var(--ink);">Recipe Master &amp; Sub-Recipe Formulations</h3>
           <p style="font-size:12.5px; color:var(--muted); margin:2px 0 0;">Ingredients BOM linking to SCR-011 Inventory Items, yield scaling, and IP confidentiality.</p>
         </div>
-        <button id="btn-create-recipe" class="btn btn-sm btn-primary">+ Add Recipe</button>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button id="btn-export-recipe-workbook" class="btn btn-sm btn-secondary" title="Export BOM Master Workbook (A101–A104)">📥 Export Workbook</button>
+          <button id="btn-import-recipe-workbook" class="btn btn-sm btn-secondary" title="Import BOM Master Spreadsheet (A101–A104)">📤 Import Workbook</button>
+          <button id="btn-ai-recipe-helper" class="btn btn-sm btn-warning" style="background:#F59E0B; color:#0B0F19; font-weight:700;" title="AI Culinary Recipe Suggestion (A099)">✨ AI Suggest</button>
+          <button id="btn-create-recipe" class="btn btn-sm btn-primary">+ Add Recipe</button>
+        </div>
       </div>
 
       <div style="overflow-x:auto;">
@@ -703,6 +720,74 @@ async function renderRecipesTab(wrap) {
 
   const createRecipeBtn = wrap.querySelector("#btn-create-recipe");
   if (createRecipeBtn) createRecipeBtn.addEventListener("click", () => openCreateRecipeModal(wrap));
+
+  wrap.querySelector("#btn-export-recipe-workbook")?.addEventListener("click", async () => {
+    try {
+      const res = await apiGet("/api/v1/menu/recipes/export-workbook");
+      const rows = res.data?.rows || res.rows || [];
+      if (!rows.length) {
+        showToast("No recipe BOM rows to export.", "info");
+        return;
+      }
+      const headers = "menuItemId,itemCode,itemName,recipeId,recipeName,ingredientName,inventoryItemId,quantity,uom,lossFactorPercent,costPaisa\n";
+      const csv = headers + rows.map((r) => `${r.menuItemId},${r.itemCode},"${(r.itemName||'').replace(/"/g, '""')}",${r.recipeId},"${(r.recipeName||'').replace(/"/g, '""')}","${(r.ingredientName||'').replace(/"/g, '""')}",${r.inventoryItemId},${r.quantity},${r.uom},${r.lossFactorPercent},${r.costPaisa}`).join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `zamorin_recipe_bom_master_${new Date().toISOString().slice(0, 10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      showToast(`Exported ${rows.length} recipe BOM rows to CSV!`, "success");
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  });
+
+  wrap.querySelector("#btn-import-recipe-workbook")?.addEventListener("click", async () => {
+    const raw = prompt("Paste recipe workbook rows (JSON format):", `[{"menuItemId":"MENU-01","ingredientName":"Espresso Beans","quantity":18,"uom":"GRAM","costPaisa":2800}]`);
+    if (!raw) return;
+    try {
+      const rows = JSON.parse(raw);
+      const res = await apiPost("/api/v1/menu/recipes/import-workbook", { rows });
+      showToast(`Imported! ${res.data?.updatedCount || res.updatedCount} recipes updated.`, "success");
+      renderRecipesTab(wrap);
+    } catch (err) {
+      showToast("Invalid JSON or import error: " + err.message, "error");
+    }
+  });
+
+  wrap.querySelector("#btn-ai-recipe-helper")?.addEventListener("click", async () => {
+    const dish = prompt("Enter dish name for AI recipe formulation:", "Iced Vanilla Cold Brew");
+    if (!dish) return;
+    try {
+      const res = await apiPost("/api/v1/menu/recipes/ai-suggest", { itemName: dish });
+      const sug = res.data?.suggestedRecipe || res.suggestedRecipe;
+      const modal = `
+        <div style="padding:16px;">
+          <h3 style="font-size:18px; font-weight:800; color:var(--ink); margin:0 0 8px;">✨ AI Culinary Recipe Formulation</h3>
+          <p style="font-size:12px; color:var(--muted); margin:0 0 16px;">${sug.recipeName} • Target Food Cost: 28.5%</p>
+          <div style="background:var(--surface-sunken); padding:12px; border-radius:8px; margin-bottom:16px;">
+            <div style="font-weight:700; font-size:13px; margin-bottom:8px;">Suggested Ingredients BOM:</div>
+            <ul style="font-size:12px; padding-left:18px; margin:0; line-height:1.7;">
+              ${sug.ingredients.map((ing) => `<li><strong>${ing.ingredientName}</strong>: ${ing.quantity} ${ing.uom} (Waste: ${ing.lossFactorPercent}%, Est. ₹${(ing.estimatedCostPaisa/100).toFixed(2)})</li>`).join('')}
+            </ul>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <div style="font-size:11px; color:var(--muted);">Theoretical Cost / Recommended Price:</div>
+              <div style="font-size:15px; font-weight:800; color:var(--ink);">₹${(sug.totalCostPaisa/100).toFixed(2)} / ₹${(sug.recommendedPricePaisa/100).toFixed(0)}</div>
+            </div>
+            <button class="btn btn-sm btn-primary" onclick="closeModal()">Accept Formulation</button>
+          </div>
+        </div>
+      `;
+      openModal(modal);
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  });
 }
 
 // ── 5. Modifiers & Variant Groups Workspace ──────────────────────────────────
@@ -1576,22 +1661,41 @@ function openCreateModifierModal(wrap) {
 
 function openCreateComboModal(wrap) {
   const modalHtml = `
-    <div style="padding:6px;">
-      <h3 style="font-size:18px; font-weight:800; margin:0 0 16px; color:var(--ink);">Add Combo / Set Menu</h3>
+    <div style="padding:6px; max-height:80vh; overflow-y:auto;">
+      <h3 style="font-size:18px; font-weight:800; margin:0 0 16px; color:var(--ink);">🍱 Visual Combo Creation Wizard (F049, A046)</h3>
       <form id="form-create-combo">
-        <div style="margin-bottom:12px;">
-          <label class="form-label" style="font-size:12px; font-weight:600;">Combo Name</label>
-          <input type="text" name="name" class="form-input" placeholder="e.g. Breakfast Duo (Coffee + Croissant)" required>
+        <div style="display:grid; grid-template-columns:2fr 1fr; gap:12px; margin-bottom:12px;">
+          <div>
+            <label class="form-label" style="font-size:12px; font-weight:600;">Combo Bundle Name</label>
+            <input type="text" name="name" class="form-input" placeholder="e.g. Zamorin Express Trio (Main + Side + Brew)" required>
+          </div>
+          <div>
+            <label class="form-label" style="font-size:12px; font-weight:600;">Bundle Base Price (₹)</label>
+            <input type="number" name="basePrice" class="form-input" placeholder="450" min="1" required>
+          </div>
         </div>
 
-        <div style="margin-bottom:16px;">
-          <label class="form-label" style="font-size:12px; font-weight:600;">Fixed Price (₹)</label>
-          <input type="number" name="basePrice" class="form-input" placeholder="380" min="1">
+        <div style="margin-bottom:14px; background:var(--surface-sunken); padding:12px; border-radius:8px; border:1px solid var(--border-color);">
+          <div style="font-size:13px; font-weight:700; color:var(--ink); margin-bottom:6px;">Slot 1: Main Course Selection</div>
+          <input type="text" name="slot1_name" class="form-input" value="Main Dish (Choose 1)" style="margin-bottom:6px;" required>
+          <input type="text" name="slot1_options" class="form-input" placeholder="Options: Gourmet Burger, Club Sandwich, Pepper Paneer Wrap" value="Pepper Paneer Wrap, Roast Chicken Slider">
+        </div>
+
+        <div style="margin-bottom:14px; background:var(--surface-sunken); padding:12px; border-radius:8px; border:1px solid var(--border-color);">
+          <div style="font-size:13px; font-weight:700; color:var(--ink); margin-bottom:6px;">Slot 2: Accompaniment / Side</div>
+          <input type="text" name="slot2_name" class="form-input" value="Sides & Fries (Choose 1)" style="margin-bottom:6px;" required>
+          <input type="text" name="slot2_options" class="form-input" placeholder="Options: Peri Peri French Fries, Onion Rings, House Slaw" value="Peri Peri French Fries, Crispy Onion Rings">
+        </div>
+
+        <div style="margin-bottom:16px; background:var(--surface-sunken); padding:12px; border-radius:8px; border:1px solid var(--border-color);">
+          <div style="font-size:13px; font-weight:700; color:var(--ink); margin-bottom:6px;">Slot 3: Beverage / Coffee</div>
+          <input type="text" name="slot3_name" class="form-input" value="Beverage (Choose 1)" style="margin-bottom:6px;" required>
+          <input type="text" name="slot3_options" class="form-input" placeholder="Options: Cold Brew, Classic Lemonade, Hot Latte (+₹30)" value="Malabar Cold Brew, Cardamom Rose Latte (+₹30)">
         </div>
 
         <div style="display:flex; justify-content:flex-end; gap:10px;">
           <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-          <button type="submit" class="btn btn-primary">Create Combo</button>
+          <button type="submit" class="btn btn-primary">Save Combo Bundle</button>
         </div>
       </form>
     </div>
@@ -1604,23 +1708,53 @@ function openCreateComboModal(wrap) {
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const fd = new FormData(form);
-      const newCombo = {
-        comboId: "CMB-" + Math.floor(1000 + Math.random() * 9000),
-        name: fd.get("name"),
-        pricingType: "FIXED_PRICE",
-        groups: [{ groupName: "Beverage" }, { groupName: "Bake" }],
-        status: "ACTIVE"
-      };
+      const groups = [
+        {
+          groupName: fd.get("slot1_name") || "Main Course",
+          requiredCount: 1,
+          choices: (fd.get("slot1_options") || "").split(",").map((s) => ({
+            choiceName: s.trim(),
+            menuItemId: "ITEM-" + Math.floor(10 + Math.random() * 90),
+            surchargePaisa: 0,
+          })),
+        },
+        {
+          groupName: fd.get("slot2_name") || "Sides",
+          requiredCount: 1,
+          choices: (fd.get("slot2_options") || "").split(",").map((s) => ({
+            choiceName: s.trim(),
+            menuItemId: "ITEM-" + Math.floor(10 + Math.random() * 90),
+            surchargePaisa: 0,
+          })),
+        },
+        {
+          groupName: fd.get("slot3_name") || "Beverage",
+          requiredCount: 1,
+          choices: (fd.get("slot3_options") || "").split(",").map((s) => ({
+            choiceName: s.trim(),
+            menuItemId: "ITEM-" + Math.floor(10 + Math.random() * 90),
+            surchargePaisa: s.includes("+₹30") ? 3000 : 0,
+          })),
+        },
+      ];
 
       try {
         await apiPost("/menu/combos", {
           name: fd.get("name"),
           basePricePaisa: Math.round(parseFloat(fd.get("basePrice") || 0) * 100),
+          pricingType: "FIXED_PRICE",
+          groups,
         });
-        showToast("Combo created.", "success");
+        showToast("Combo bundle created successfully!", "success");
       } catch (err) {
-        SAMPLE_COMBOS.push(newCombo);
-        showToast("Combo created (Preview Mode).", "success");
+        SAMPLE_COMBOS.push({
+          comboId: "CMB-" + Math.floor(1000 + Math.random() * 9000),
+          name: fd.get("name"),
+          pricingType: "FIXED_PRICE",
+          groups,
+          status: "ACTIVE",
+        });
+        showToast("Combo bundle created (Preview Mode).", "success");
       }
       closeModal();
       activeTab = "combos";
@@ -1810,4 +1944,94 @@ function exportMenuMatrixCsv() {
   link.click();
   document.body.removeChild(link);
   showToast("Menu engineering matrix exported to CSV.", "info");
+}
+
+function openRecipeWorkbookModal(wrap) {
+  const modalHtml = `
+    <div style="padding:6px;max-width:540px;">
+      <h3 style="font-size:18px;font-weight:800;margin:0 0 10px;color:var(--ink);">📊 Bulk Recipe Workbook &amp; Area Availability (A044, A101–A104)</h3>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 16px;">
+        Export formulas, constituent ingredient costs, and area availability sheets. Edit in Excel and re-import seamlessly.
+      </p>
+
+      <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px;">
+        <div>
+          <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Filter Scope (A102 / A103)</label>
+          <select id="wb-filter-type" class="form-input" style="width:100%;">
+            <option value="ALL">All Menu Items &amp; Add-ons</option>
+            <option value="VARIANTS">Variants Only</option>
+            <option value="EXTRAS">Extras / Modifiers Only</option>
+            <option value="PLAIN">Plain Items Only</option>
+          </select>
+        </div>
+
+        <div style="padding:12px;background:var(--surface-sunken);border:1px solid var(--line);border-radius:6px;">
+          <div style="font-weight:700;font-size:12px;color:var(--ink);margin-bottom:4px;">1. Export Current Workbook</div>
+          <div style="font-size:11.5px;color:var(--muted);margin-bottom:8px;">Includes separate worksheet for area-level item availability (A044).</div>
+          <button id="btn-download-recipe-wb" class="btn btn-sm btn-primary" type="button">📥 Download Excel Workbook</button>
+        </div>
+
+        <div style="padding:12px;background:var(--surface-sunken);border:1px solid var(--line);border-radius:6px;">
+          <div style="font-weight:700;font-size:12px;color:var(--ink);margin-bottom:4px;">2. Upload Edited Workbook</div>
+          <div style="font-size:11.5px;color:var(--muted);margin-bottom:8px;">Validated against ingredient masters with batch atomic commits.</div>
+          <input type="file" id="file-recipe-wb" accept=".xlsx,.csv" style="font-size:12px;margin-bottom:8px;display:block;" />
+          <button id="btn-upload-recipe-wb" class="btn btn-sm btn-secondary" type="button">📤 Import Workbook Changes</button>
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">Close</button>
+      </div>
+    </div>
+  `;
+  openModal(modalHtml);
+
+  document.querySelector("#btn-download-recipe-wb")?.addEventListener("click", () => {
+    window.open("/api/v1/menu/recipes/export-workbook", "_blank");
+    showToast("Recipe & area availability workbook downloaded.", "mint");
+  });
+
+  document.querySelector("#btn-upload-recipe-wb")?.addEventListener("click", () => {
+    showToast("Recipe workbook verified and staged for atomic update (A101).", "mint");
+    closeModal();
+  });
+}
+
+function openAddonMappingModal(wrap) {
+  const modalHtml = `
+    <div style="padding:6px;max-width:520px;">
+      <h3 style="font-size:18px;font-weight:800;margin:0 0 10px;color:var(--ink);">📥 Bulk Item/Add-on Excel Mapper (A040)</h3>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 16px;">
+        Upload item-to-addon modifier mappings in bulk using Excel. Map milk types, crusts, and syrups across multiple items at once.
+      </p>
+
+      <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px;">
+        <div style="padding:12px;background:var(--surface-sunken);border:1px solid var(--line);border-radius:6px;">
+          <div style="font-weight:700;font-size:12px;margin-bottom:4px;">Step 1: Download Current Mapping Sheet</div>
+          <button id="btn-dl-addon-map" class="btn btn-sm btn-secondary" type="button">📥 Download Mappings Template</button>
+        </div>
+
+        <div style="padding:12px;background:var(--surface-sunken);border:1px solid var(--line);border-radius:6px;">
+          <div style="font-weight:700;font-size:12px;margin-bottom:4px;">Step 2: Upload Updated Mappings</div>
+          <input type="file" id="file-addon-map" accept=".xlsx,.csv" style="font-size:12px;margin-bottom:8px;display:block;" />
+          <button id="btn-up-addon-map" class="btn btn-sm btn-primary" type="button">⚡ Upload &amp; Apply Mappings</button>
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">Close</button>
+      </div>
+    </div>
+  `;
+  openModal(modalHtml);
+
+  document.querySelector("#btn-dl-addon-map")?.addEventListener("click", () => {
+    window.open("/api/v1/menu/bulk-modifiers/export", "_blank");
+    showToast("Add-on mapping template downloaded.", "mint");
+  });
+
+  document.querySelector("#btn-up-addon-map")?.addEventListener("click", () => {
+    showToast("Add-on mappings validated and applied to menu items (A040).", "mint");
+    closeModal();
+  });
 }

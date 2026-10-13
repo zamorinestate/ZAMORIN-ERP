@@ -111,14 +111,23 @@ class ThreeWayMatchService {
         issues: [],
       };
 
-      // 1. Quantity Mismatch
-      if (qtyInvoiced > qtyReceived) {
-        lineDiscrepancy.issues.push(`Quantity invoiced (${qtyInvoiced}) exceeds received quantity (${qtyReceived}).`);
+      // 1. Quantity Mismatch with tolerance percentage (A047-A052)
+      const qtyTol = Number(toleranceConfig.qtyTolerancePercent || 0);
+      const allowedMaxInvoiced = qtyTol > 0 ? (qtyReceived * (1 + qtyTol / 100)) : qtyReceived;
+      if (qtyInvoiced > allowedMaxInvoiced) {
+        lineDiscrepancy.issues.push(
+          qtyTol > 0
+            ? `Quantity invoiced (${qtyInvoiced}) exceeds received quantity (${qtyReceived}) beyond ${qtyTol}% tolerance limit.`
+            : `Quantity invoiced (${qtyInvoiced}) exceeds received quantity (${qtyReceived}).`
+        );
       }
 
-      // 2. Rate Mismatch
+      // 2. Rate Mismatch with tolerance
       const rateDiff = Math.abs(invRate - poRate);
-      if (rateDiff > (toleranceConfig.rateTolerancePaisa || 0)) {
+      const rateTolPercent = Number(toleranceConfig.rateTolerancePercent || 0);
+      const rateTolPaisa = Number(toleranceConfig.rateTolerancePaisa || 0);
+      const allowedRateDiff = rateTolPercent > 0 ? ((poRate * rateTolPercent) / 100) : rateTolPaisa;
+      if (rateDiff > allowedRateDiff) {
         lineDiscrepancy.issues.push(`Unit price variance: PO ₹${(poRate / 100).toFixed(2)} vs Invoice ₹${(invRate / 100).toFixed(2)}.`);
       }
 
@@ -340,6 +349,93 @@ class ThreeWayMatchService {
       ...matchResult,
       matchStatus: matchResult.canonicalStatus || matchResult.matchStatus,
       rawMatchStatus: matchResult.matchStatus,
+    };
+  }
+
+  /**
+   * Distributes additional landed charges (freight, packaging, insurance) proportionally across line items (F147-F149).
+   */
+  static distributeLandedCost({
+    lineItems = [],
+    additionalCharges = {},
+    distributionMethod = 'VALUE', // 'VALUE' or 'QUANTITY'
+  } = {}) {
+    const freightPaisa = Math.max(0, Number(additionalCharges.freightPaisa || 0));
+    const insurancePaisa = Math.max(0, Number(additionalCharges.insurancePaisa || 0));
+    const packagingPaisa = Math.max(0, Number(additionalCharges.packagingPaisa || 0));
+    const otherPaisa = Math.max(0, Number(additionalCharges.otherPaisa || 0));
+    const totalAdditionalPaisa = freightPaisa + insurancePaisa + packagingPaisa + otherPaisa;
+
+    if (!Array.isArray(lineItems) || lineItems.length === 0) {
+      return {
+        totalAdditionalPaisa,
+        lineItems: [],
+      };
+    }
+
+    if (totalAdditionalPaisa === 0) {
+      return {
+        totalAdditionalPaisa: 0,
+        distributionMethod,
+        chargesBreakdown: { freightPaisa: 0, insurancePaisa: 0, packagingPaisa: 0, otherPaisa: 0 },
+        lineItems: lineItems.map((item) => ({
+          ...item,
+          allocatedLandedPaisa: 0,
+          landedTotalPaisa: Number(item.totalLinePaisa || (Number(item.orderedQuantityBase || item.quantity || 1) * Number(item.unitPricePaisa || 0))),
+          landedUnitCostPaisa: Number(item.unitPricePaisa || 0),
+        })),
+      };
+    }
+
+    const totalValue = lineItems.reduce(
+      (sum, item) => sum + Number(item.totalLinePaisa || (Number(item.orderedQuantityBase || item.quantity || 1) * Number(item.unitPricePaisa || 0))),
+      0
+    );
+    const totalQty = lineItems.reduce(
+      (sum, item) => sum + Number(item.orderedQuantityBase || item.quantity || 1),
+      0
+    );
+
+    let runningAllocated = 0;
+    const enrichedLines = lineItems.map((item, idx) => {
+      const lineVal = Number(item.totalLinePaisa || (Number(item.orderedQuantityBase || item.quantity || 1) * Number(item.unitPricePaisa || 0)));
+      const lineQty = Math.max(0.001, Number(item.orderedQuantityBase || item.quantity || 1));
+
+      let allocatedShare = 0;
+      if (idx === lineItems.length - 1) {
+        allocatedShare = totalAdditionalPaisa - runningAllocated;
+      } else {
+        if (distributionMethod === 'QUANTITY' && totalQty > 0) {
+          allocatedShare = Math.round((totalAdditionalPaisa * lineQty) / totalQty);
+        } else if (totalValue > 0) {
+          allocatedShare = Math.round((totalAdditionalPaisa * lineVal) / totalValue);
+        } else {
+          allocatedShare = Math.round(totalAdditionalPaisa / lineItems.length);
+        }
+        runningAllocated += allocatedShare;
+      }
+
+      const landedTotalPaisa = lineVal + allocatedShare;
+      const landedUnitCostPaisa = Math.round(landedTotalPaisa / lineQty);
+
+      return {
+        ...item,
+        allocatedLandedPaisa: allocatedShare,
+        landedTotalPaisa,
+        landedUnitCostPaisa,
+      };
+    });
+
+    return {
+      totalAdditionalPaisa,
+      distributionMethod,
+      chargesBreakdown: {
+        freightPaisa,
+        insurancePaisa,
+        packagingPaisa,
+        otherPaisa,
+      },
+      lineItems: enrichedLines,
     };
   }
 }

@@ -148,15 +148,20 @@ const reservationSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
-    depositAmountPaisa: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
     advanceDepositId: {
       type: String,
       trim: true,
       default: null,
+    },
+    depositAmountPaisa: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    depositStatus: {
+      type: String,
+      enum: ['NONE', 'PENDING', 'PAID', 'REFUNDED'],
+      default: 'NONE',
     },
     history: {
       type: [reservationAuditEntrySchema],

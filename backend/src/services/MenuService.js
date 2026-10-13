@@ -61,33 +61,59 @@ class MenuService {
   /**
    * Evaluates layered availability for a menu item.
    */
-  static async getEffectiveAvailability({
-    organisationId = 'ZAMORIN',
-    menuItemId,
-    outletId = null,
-    serviceMode = 'DINE_IN',
-    checkTime = new Date(),
-  }) {
-    const rawItem = await MenuItem.findOne({ organisationId, menuItemId });
-    const item = rawItem?.toObject ? rawItem.toObject() : rawItem;
-    if (!item || item.status !== 'ACTIVE') {
-      return { isAvailable: false, reason: 'Item is not Active in Global Master' };
+  static getEffectiveAvailability(itemOrParams, maybeCheckTime = new Date()) {
+    let item = null;
+    let checkTime = maybeCheckTime;
+    let outletId = null;
+
+    if (itemOrParams && (itemOrParams.mealSchedule || itemOrParams.isAvailable !== undefined)) {
+      item = itemOrParams;
+    } else if (itemOrParams && typeof itemOrParams === 'object') {
+      item = itemOrParams.item || null;
+      checkTime = itemOrParams.checkTime || new Date();
+      outletId = itemOrParams.outletId || null;
     }
 
-    if (outletId) {
-      const rawOffering = await OutletOffering.findOne({ organisationId, outletId, menuItemId });
-      const offering = rawOffering?.toObject ? rawOffering.toObject() : rawOffering;
-      if (offering) {
-        if (!offering.isEnabled) {
-          return { isAvailable: false, reason: `Disabled for outlet ${outletId}` };
+    if (item) {
+      if (item.isAvailable === false || (item.status && item.status !== 'ACTIVE')) {
+        return { isAvailable: false, reason: 'Item is not Active in Global Master' };
+      }
+
+      // Benchmark A036, F048, F052 & F053: Day-Part Offline & Online Item Timing Windows
+      const channel = itemOrParams?.channel || 'OFFLINE';
+      const schedule = (channel === 'ONLINE' ? item.onlineSchedule : item.offlineSchedule) || item.mealSchedule || item.schedule;
+      const isScheduleActive = schedule?.isActive !== false &&
+        (schedule?.isActive || (Array.isArray(schedule?.daysOfWeek) && schedule.daysOfWeek.length > 0) || (schedule?.startTime && schedule?.endTime));
+
+      if (isScheduleActive && schedule) {
+        const daysOfWeek = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+        const currentDay = daysOfWeek[checkTime.getDay()];
+        if (Array.isArray(schedule.daysOfWeek) && schedule.daysOfWeek.length > 0) {
+          const allowedDays = schedule.daysOfWeek.map((d) => String(d).toUpperCase());
+          if (!allowedDays.includes(currentDay)) {
+            return { isAvailable: false, reason: `Item schedule is active only on ${allowedDays.join(', ')}` };
+          }
         }
-        if (!offering.isAvailable) {
-          return { isAvailable: false, reason: offering.soldOutReason || 'Sold Out at outlet' };
+        if (schedule.startTime && schedule.endTime) {
+          const curHours = String(checkTime.getHours()).padStart(2, '0') + ':' + String(checkTime.getMinutes()).padStart(2, '0');
+          if (curHours < schedule.startTime || curHours > schedule.endTime) {
+            return { isAvailable: false, reason: `Available only between ${schedule.startTime} and ${schedule.endTime}` };
+          }
         }
       }
+
+      return { isAvailable: true, reason: 'Available across all active layers' };
     }
 
-    return { isAvailable: true, reason: 'Available across all active layers' };
+    return (async () => {
+      const { organisationId = 'ZAMORIN', menuItemId } = itemOrParams || {};
+      const rawItem = await MenuItem.findOne({ organisationId, menuItemId });
+      const dbItem = rawItem?.toObject ? rawItem.toObject() : rawItem;
+      if (!dbItem || dbItem.status !== 'ACTIVE') {
+        return { isAvailable: false, reason: 'Item is not Active in Global Master' };
+      }
+      return MenuService.getEffectiveAvailability(dbItem, checkTime);
+    })();
   }
 
   /**
@@ -310,6 +336,143 @@ class MenuService {
       checksEvaluated: 32,
       issuesFound: issues.length,
       issues,
+    };
+  }
+
+  /**
+   * Benchmark A104 & F160: Global Recipe Component Substitution Wizard
+   * Batch replaces an ingredient across all active recipes in one operation.
+   */
+  static async substituteRecipeIngredient({
+    organisationId = 'ZAMORIN',
+    fromIngredientId,
+    toIngredientId,
+    toIngredientName = '',
+    ratioMultiplier = 1,
+    cafeId = null,
+    performedByUserId = 'CHEF_ADMIN',
+  }) {
+    if (!fromIngredientId || !toIngredientId) {
+      throw new Error('fromIngredientId and toIngredientId are required.');
+    }
+
+    const cleanFromId = String(fromIngredientId).trim().toUpperCase();
+    const cleanToId = String(toIngredientId).trim().toUpperCase();
+    const mult = Number(ratioMultiplier) > 0 ? Number(ratioMultiplier) : 1;
+
+    const recipes = await Recipe.find({
+      organisationId,
+      'ingredients.inventoryItemId': cleanFromId,
+    });
+
+    const modifiedRecipes = [];
+
+    for (const recipe of recipes) {
+      let modified = false;
+      for (const ing of recipe.ingredients) {
+        if (ing.inventoryItemId && ing.inventoryItemId.toUpperCase() === cleanFromId) {
+          ing.inventoryItemId = cleanToId;
+          ing.ingredientName = toIngredientName || cleanToId;
+          ing.quantity = Number((ing.quantity * mult).toFixed(4));
+          modified = true;
+        }
+      }
+      if (modified) {
+        recipe.markModified('ingredients');
+        recipe.version = (recipe.version || 1) + 1;
+        recipe.updatedByUserId = performedByUserId;
+        await recipe.save();
+        modifiedRecipes.push({
+          recipeId: recipe.recipeId,
+          recipeName: recipe.name,
+          newVersion: recipe.version,
+        });
+      }
+    }
+
+    return {
+      success: true,
+      fromIngredientId: cleanFromId,
+      toIngredientId: cleanToId,
+      ratioMultiplier: mult,
+      totalRecipesUpdated: modifiedRecipes.length,
+      modifiedRecipes,
+    };
+  }
+
+  /**
+   * Benchmark A050 & F062: Aggregator Menu Quality-Check Failure Center
+   * Scans menu items against Swiggy & Zomato strict ingestion criteria.
+   */
+  static async auditAggregatorMenuQuality({ organisationId = 'ZAMORIN', cafeId = null }) {
+    const filter = { organisationId, status: 'ACTIVE' };
+    const items = await MenuItem.find(filter).lean();
+    const qualityDefects = [];
+
+    for (const item of items) {
+      const defects = [];
+
+      // 1. Photo presence and resolution requirement (min 500x500px)
+      if (!item.imageUrl && !item.photoUrl) {
+        defects.push({
+          rule: 'MISSING_PHOTO',
+          message: 'Aggregator push requires a high-resolution food photograph (min 500x500px).',
+          severity: 'HIGH',
+        });
+      }
+
+      // 2. Dish description character count limit (min 15 chars, max 500 chars)
+      const descLen = (item.description || '').trim().length;
+      if (descLen === 0) {
+        defects.push({
+          rule: 'MISSING_DESCRIPTION',
+          message: 'Item description is required for online aggregator menus.',
+          severity: 'MEDIUM',
+        });
+      } else if (descLen > 500) {
+        defects.push({
+          rule: 'DESCRIPTION_OVERFLOW',
+          message: `Description exceeds 500 characters limit (${descLen} chars).`,
+          severity: 'HIGH',
+        });
+      }
+
+      // 3. Dietary classification flag (Veg / Non-Veg / Vegan)
+      if (!item.dietaryTags || item.dietaryTags.length === 0) {
+        defects.push({
+          rule: 'MISSING_FOOD_TYPE',
+          message: 'Mandatory FSSAI veg/non-veg tag missing.',
+          severity: 'CRITICAL',
+        });
+      }
+
+      // 4. Statutory HSN/SAC and tax profile
+      if (!item.hsnSacCode) {
+        defects.push({
+          rule: 'MISSING_HSN_CODE',
+          message: 'Statutory GST HSN/SAC code missing.',
+          severity: 'MEDIUM',
+        });
+      }
+
+      if (defects.length > 0) {
+        qualityDefects.push({
+          menuItemId: item.menuItemId,
+          name: item.name,
+          category: item.category,
+          defectsCount: defects.length,
+          defects,
+        });
+      }
+    }
+
+    return {
+      success: true,
+      totalActiveItems: items.length,
+      compliantItemsCount: items.length - qualityDefects.length,
+      nonCompliantItemsCount: qualityDefects.length,
+      complianceRatePercent: items.length > 0 ? Number((((items.length - qualityDefects.length) / items.length) * 100).toFixed(1)) : 100,
+      qualityDefects,
     };
   }
 }

@@ -146,14 +146,85 @@ function getIstBusinessDate(date = new Date(), cutoffHour = 4) {
 
 class PosOrderService {
   /**
+   * Benchmark A013, A026: Calculate cart pricing with complimentary add-on zeroing and biller discount ceilings.
+   */
+  static calculateCartPricing({
+    lineItems = [],
+    discountPaisa = 0,
+    billerPermissionGroup = null,
+    billerGroup = 'JUNIOR_CASHIER',
+    userRole = null,
+    role = 'STAFF',
+    supervisorPin = null,
+    userMaxDiscountPercent = null,
+    isInterState = false,
+  } = {}) {
+    const rawItems = lineItems || [];
+    const effectiveBillerGroup = billerPermissionGroup || billerGroup || 'JUNIOR_CASHIER';
+    const effectiveRole = userRole || role || 'STAFF';
+
+    const enriched = rawItems.map((li) => {
+      const isComp = Boolean(li.isComplimentary || li.complimentary);
+      const basePrice = isComp ? 0 : Number(li.unitPricePaisa || li.pricePaisa || 0);
+      const modPrice = isComp ? 0 : Number(li.modifiers?.modifierPricePaisa || 0);
+      return {
+        ...li,
+        unitPricePaisa: isComp ? 0 : (basePrice + modPrice),
+        isComplimentary: isComp,
+        modifiers: isComp && li.modifiers ? { ...li.modifiers, modifierPricePaisa: 0 } : li.modifiers,
+      };
+    });
+
+    const totals = this.calculateTotals({
+      lineItems: enriched,
+      discountPaisa,
+      isInterState,
+    });
+
+    if (totals.discountPaisa > 0 && totals.subtotalPaisa > 0) {
+      const discountPercent = (totals.discountPaisa / totals.subtotalPaisa) * 100;
+      let configuredCeiling = 10;
+      let ceilingAmountPaisa = Infinity;
+
+      if (supervisorPin || effectiveBillerGroup === 'SHIFT_SUPERVISOR') {
+        configuredCeiling = 100;
+        ceilingAmountPaisa = Infinity;
+      } else if (effectiveBillerGroup === 'JUNIOR_CASHIER') {
+        configuredCeiling = 5;
+        ceilingAmountPaisa = 15000; // ₹150 max cap
+      } else if (effectiveBillerGroup === 'SENIOR_BILLER' || effectiveBillerGroup === 'SENIOR_CASHIER') {
+        configuredCeiling = 15;
+        ceilingAmountPaisa = 50000; // ₹500 max cap
+      }
+
+      // A013 / F076 / F259: Per-User Manual Discount Ceiling Override
+      if (userMaxDiscountPercent != null && !Number.isNaN(Number(userMaxDiscountPercent))) {
+        configuredCeiling = Math.min(configuredCeiling, Number(userMaxDiscountPercent));
+      }
+
+      const isCapped = discountPercent > configuredCeiling || totals.discountPaisa > ceilingAmountPaisa;
+      if (isCapped && effectiveRole !== 'MASTER') {
+        throw new ApiError(403, 'DISCOUNT_CAP_EXCEEDED', `Discount exceeds allowable ceiling for biller group ${effectiveBillerGroup}.`);
+      }
+    }
+
+    return totals;
+  }
+
+  /**
    * Calculates financial totals, taxes (CGST/SGST/IGST), line items, and discounts in paisa.
    */
   static calculateTotals({
     lineItems = [],
+    items = [],
     discountPaisa = 0,
     isInterState = false,
+    tipPercentage = 0,
+    tipCalculationBase = 'PRE_TAX_SUBTOTAL',
+    tipPaisa = null,
   } = {}) {
-    if (!Array.isArray(lineItems) || lineItems.length === 0) {
+    const rawItems = lineItems && lineItems.length > 0 ? lineItems : (items || []);
+    if (!Array.isArray(rawItems) || rawItems.length === 0) {
       throw new ApiError(400, 'LINE_ITEMS_REQUIRED', 'At least one line item is required.');
     }
 
@@ -163,8 +234,17 @@ class PosOrderService {
     let calculatedIgstPaisa = 0;
     let lineItemsDiscountSum = 0;
 
-    const processedLineItems = lineItems.map((item, index) => {
-      const quantity = Math.max(1, Math.floor(Number(item.quantity) || 1));
+    const processedLineItems = rawItems.map((item, index) => {
+      const rawQty = Number(item.quantity);
+      const isDecimalAllowed = Boolean(
+        item.allowDecimalQuantity ||
+        item.isDecimalQuantity ||
+        (rawQty > 0 && rawQty % 1 !== 0)
+      );
+      const quantity = isDecimalAllowed
+        ? Math.max(0.001, Math.round(rawQty * 1000) / 1000)
+        : Math.max(1, Math.floor(rawQty || 1));
+
       const isOpenPrice = Boolean(item.isOpenPrice);
       let effectiveUnitPrice = 0;
 
@@ -176,13 +256,22 @@ class PosOrderService {
           throw new ApiError(400, 'INVALID_OPEN_PRICE', 'Open price ' + openPrice + ' paisa is outside allowable range [' + minPricePaisa + ', ' + maxPricePaisa + '].');
         }
         effectiveUnitPrice = openPrice;
+      } else if (item.isHalfAndHalf || item.pizzaConfig?.isHalfAndHalf) {
+        // F063: Half-and-Half Pizza Higher-Half Pricing Engine
+        const pConf = item.pizzaConfig || item;
+        const halfAPrice = Math.max(0, Math.round(Number(pConf.halfA?.pricePaisa || 0)));
+        const halfBPrice = Math.max(0, Math.round(Number(pConf.halfB?.pricePaisa || 0)));
+        const higherHalfPrice = Math.max(halfAPrice, halfBPrice);
+        const crustPrice = Math.max(0, Math.round(Number(pConf.crust?.pricePaisa || pConf.crustPricePaisa || 0)));
+        const toppingAddOns = Math.max(0, Math.round(Number(pConf.toppingsPricePaisa || pConf.addOnsPricePaisa || 0)));
+        effectiveUnitPrice = higherHalfPrice + crustPrice + toppingAddOns;
       } else {
         const baseUnitPrice = Math.max(0, Math.round(Number(item.unitPricePaisa ?? item.pricePaisa ?? (item.price != null ? item.price * 100 : 0))));
         const modifierPrice = Math.max(0, Math.round(Number(item.modifiers?.modifierPricePaisa || 0)));
         effectiveUnitPrice = baseUnitPrice + modifierPrice;
       }
 
-      const lineSubtotalPaisa = effectiveUnitPrice * quantity;
+      const lineSubtotalPaisa = Math.round(effectiveUnitPrice * quantity);
       calculatedSubtotalPaisa += lineSubtotalPaisa;
 
       const itemDiscount = Math.max(0, Math.min(lineSubtotalPaisa, Math.round(Number(item.discountPaisa || 0))));
@@ -222,8 +311,12 @@ class PosOrderService {
         variantSnapshot: item.variantSnapshot || null,
         modifierSnapshot: item.modifierSnapshot || [],
         comboSnapshot: item.comboSnapshot || null,
+        pizzaConfig: item.pizzaConfig || (item.isHalfAndHalf ? { isHalfAndHalf: true, halfA: item.halfA, halfB: item.halfB, crust: item.crust } : null),
+        liquorClassification: item.liquorClassification || null,
         taxRatePercent,
         taxClassification: item.taxClassification || 'GST_5',
+        isOpenItem: Boolean(item.isOpenItem),
+        kitchenStation: item.kitchenStation || 'KITCHEN',
         discountPaisa: itemDiscount,
         lineSubtotalPaisa,
         cgstPaisa,
@@ -245,8 +338,23 @@ class PosOrderService {
 
     // REC-16 Add-On: Canonical ₹0.50 Customer-Payable Rounding
     const payable = calculateCustomerPayableRounding50P(preRoundingTotalPaisa);
-    const grandTotalPaisa = payable.finalPayablePaisa;
+    const grandTotalWithoutTip = payable.finalPayablePaisa;
     const roundOffPaisa = payable.roundOffPaisa;
+
+    // F074, F075: Pre-Tax vs Post-Tax Tip Calculation
+    let computedTipPaisa = 0;
+    if (tipPaisa != null && Number(tipPaisa) > 0) {
+      computedTipPaisa = Math.round(Number(tipPaisa));
+    } else if (Number(tipPercentage) > 0) {
+      const pct = Number(tipPercentage);
+      if (tipCalculationBase === 'POST_TAX_GRAND_TOTAL') {
+        computedTipPaisa = Math.round((grandTotalWithoutTip * pct) / 100);
+      } else {
+        computedTipPaisa = Math.round((calculatedSubtotalPaisa * pct) / 100);
+      }
+    }
+
+    const finalPayablePaisa = grandTotalWithoutTip + computedTipPaisa;
 
     return {
       subtotalPaisa: calculatedSubtotalPaisa,
@@ -258,7 +366,11 @@ class PosOrderService {
       igstPaisa: calculatedIgstPaisa,
       preRoundingTotalPaisa,
       roundOffPaisa,
-      totalPaisa: grandTotalPaisa,
+      tipPaisa: computedTipPaisa,
+      tipPercentage: Number(tipPercentage || 0),
+      tipCalculationBase,
+      totalPaisa: finalPayablePaisa,
+      grandTotalPaisa: finalPayablePaisa,
       lineItems: processedLineItems,
       taxRuleVersion: TAX_RULE_VERSION,
       roundingPolicyVersion: ROUNDING_POLICY_VERSION,
@@ -278,8 +390,19 @@ class PosOrderService {
     }
 
     for (const [idx, it] of orderData.lineItems.entries()) {
-      if (!it.menuItemId && !it.itemNameSnapshot && !it.name) {
-        throw new ApiError(400, 'INVALID_ITEM', `Line item at index ${idx} is missing menuItemId or name.`);
+      if (it.isOpenItem) {
+        const openName = String(it.name || it.itemNameSnapshot || '').trim();
+        if (openName.length < 2) {
+          throw new ApiError(400, 'INVALID_OPEN_ITEM_NAME', `Open item at index ${idx} must have a name with at least 2 characters.`);
+        }
+        const openPrice = Number(it.unitPricePaisa ?? (it.price != null ? it.price * 100 : 0));
+        if (!Number.isFinite(openPrice) || openPrice <= 0) {
+          throw new ApiError(400, 'INVALID_OPEN_ITEM_PRICE', `Open item "${openName}" must have a positive unit price.`);
+        }
+      } else {
+        if (!it.menuItemId && !it.itemNameSnapshot && !it.name) {
+          throw new ApiError(400, 'INVALID_ITEM', `Line item at index ${idx} is missing menuItemId or name.`);
+        }
       }
       if (it.quantity != null && (Number(it.quantity) < 1 || !Number.isInteger(Number(it.quantity)))) {
         throw new ApiError(400, 'INVALID_QUANTITY', `Line item ${it.menuItemId || idx} must have an integer quantity >= 1.`);
@@ -641,9 +764,10 @@ class PosOrderService {
     let cutoffHour = 4;
 
     // REC-13: Validate café operational status before financial commit
+    let cafeDoc = null;
     if (cafeId) {
       try {
-        const cafeDoc = await Cafe.findOne({ organisationId: orgId, cafeId });
+        cafeDoc = await Cafe.findOne({ organisationId: orgId, cafeId });
         if (cafeDoc && typeof cafeDoc.businessDayCutoffHour === 'number') {
           cutoffHour = cafeDoc.businessDayCutoffHour;
         }
@@ -654,8 +778,19 @@ class PosOrderService {
             `Café ${cafeId} is currently ${cafeDoc.status}. Operational transactions cannot be finalized into a suspended café.`
           );
         }
+        // F011: Mandatory Tender Selection Mode
+        if (cafeDoc && cafeDoc.mandatoryTenderSelection) {
+          const explicitTender = orderPayload.paymentMethod || orderPayload.tender || (Array.isArray(orderPayload.tenderAllocations) && orderPayload.tenderAllocations.length > 0);
+          if (!explicitTender) {
+            throw new ApiError(
+              400,
+              'TENDER_SELECTION_MANDATORY',
+              'Explicit tender selection is required before sale commit when mandatory tender mode is active.'
+            );
+          }
+        }
       } catch (cafeErr) {
-        if (cafeErr.statusCode === 409) throw cafeErr;
+        if (cafeErr.statusCode) throw cafeErr;
       }
     }
 
@@ -705,7 +840,10 @@ class PosOrderService {
     }
 
     // 2. Authoritative Catalogue, Offering, Variant, Modifier & Combo Resolution
-    const itemIds = (orderPayload.lineItems || []).map((li) => normalizeId(li.menuItemId)).filter(Boolean);
+    const itemIds = (orderPayload.lineItems || [])
+      .filter((li) => !li.isOpenItem)
+      .map((li) => normalizeId(li.menuItemId))
+      .filter(Boolean);
     let itemMap = {};
     let offeringMap = {};
     let modifierGroupMap = {};
@@ -774,12 +912,39 @@ class PosOrderService {
 
     // Enrich and strictly validate line items with server authority
     const enrichedItems = orderPayload.lineItems.map((li, idx) => {
+      // A041: Open-price & custom item handling
+      if (li.isOpenItem) {
+        const openName = String(li.name || li.itemNameSnapshot || 'Custom Item').trim();
+        const openPricePaisa = Math.round(Number(li.unitPricePaisa ?? (li.price != null ? li.price * 100 : 0)));
+        if (openPricePaisa > 500000 && authContext.role !== 'MASTER') {
+          const hasSupervisor = orderPayload.supervisorApproval?.supervisorUserId &&
+            (orderPayload.supervisorApproval?.supervisorPasscode || orderPayload.supervisorApproval?.pin);
+          if (!hasSupervisor) {
+            throw new ApiError(403, 'OPEN_ITEM_SUPERVISOR_REQUIRED', 'Open items priced above ₹5,000 require supervisor approval.');
+          }
+        }
+        return {
+          ...li,
+          isOpenItem: true,
+          menuItemId: li.menuItemId || `OPEN-${idx + 1}`,
+          itemNameSnapshot: openName,
+          unitPricePaisa: openPricePaisa,
+          hsnSacCode: li.hsnSacCode || '996331',
+          variantSnapshot: null,
+          modifierSnapshot: [],
+          comboSnapshot: null,
+          taxRatePercent: Number(li.taxRatePercent ?? 5),
+          taxClassification: li.taxClassification || `GST_${Number(li.taxRatePercent ?? 5)}`,
+          kitchenStation: li.kitchenStation || 'KITCHEN',
+        };
+      }
+
       const normItemId = normalizeId(li.menuItemId);
       const catalogItem = itemMap[normItemId];
       const offering = offeringMap[normItemId];
 
       if (catalogItem) {
-        if (catalogItem.status !== 'ACTIVE') {
+        if (catalogItem.status && catalogItem.status !== 'ACTIVE') {
           throw new ApiError(
             400,
             'ITEM_INACTIVE',
@@ -830,6 +995,15 @@ class PosOrderService {
       let resolvedBasePrice = catalogItem?.currentPricePaisa ?? (li.unitPricePaisa ?? li.pricePaisa ?? (li.price != null ? li.price * 100 : 0));
       if (offering && offering.localPricePaisaOverride != null) {
         resolvedBasePrice = offering.localPricePaisaOverride;
+      }
+
+      // F045: Dining Area Specific Price Override (e.g. Rooftop vs Ground Floor)
+      const requestedAreaId = normalizeId(orderPayload.diningAreaId || orderPayload.areaId || orderPayload.tableArea || '');
+      if (requestedAreaId && Array.isArray(catalogItem?.areaPricing)) {
+        const areaMatch = catalogItem.areaPricing.find((ap) => normalizeId(ap.areaId) === requestedAreaId && ap.isActive !== false);
+        if (areaMatch && areaMatch.pricePaisa != null) {
+          resolvedBasePrice = areaMatch.pricePaisa;
+        }
       }
 
       // Variant validation & resolution
@@ -889,12 +1063,23 @@ class PosOrderService {
         };
       }
 
-      const authoritativeUnitPrice = resolvedBasePrice + modifierDeltaSum;
+      // Benchmark A026 & F043: Inherited Complimentary Add-on Zeroing
+      const isComplimentary = Boolean(li.isComplimentary || li.complimentary);
+      if (isComplimentary) {
+        resolvedBasePrice = 0;
+        if (modifierSnapshots.length > 0) {
+          modifierSnapshots.forEach((m) => { m.pricePaisaDelta = 0; });
+        }
+        modifierDeltaSum = 0;
+      }
+
+      const authoritativeUnitPrice = isComplimentary ? 0 : (resolvedBasePrice + modifierDeltaSum);
 
       return {
         ...li,
         itemNameSnapshot: li.itemNameSnapshot || li.name || catalogItem?.name || `Item ${idx + 1}`,
         unitPricePaisa: authoritativeUnitPrice,
+        isComplimentary,
         hsnSacCode: li.hsnSacCode || catalogItem?.hsnSacCode || '996331',
         variantSnapshot: variantSnapshot || li.variantSnapshot || null,
         modifierSnapshot: modifierSnapshots.length > 0 ? modifierSnapshots : (li.modifierSnapshot || []),
@@ -904,12 +1089,76 @@ class PosOrderService {
       };
     });
 
-    // 3. Calculate Totals
+    // 3. Calculate Totals (F074, F075: Pre-Tax vs Post-Tax Tip Base)
+    const effectiveTipBase = orderPayload.tipCalculationBase || cafeDoc?.tipCalculationBase || 'PRE_TAX_SUBTOTAL';
     const totals = this.calculateTotals({
       lineItems: enrichedItems,
       discountPaisa: orderPayload.discountPaisa || 0,
       isInterState: Boolean(orderPayload.isInterState),
+      tipPercentage: orderPayload.tipPercentage || 0,
+      tipCalculationBase: effectiveTipBase,
+      tipPaisa: orderPayload.tipPaisa,
     });
+
+    // Benchmark A013 & F076: Tiered Custom Discount Caps Based on User Seniority
+    if (totals.discountPaisa > 0 && totals.subtotalPaisa > 0) {
+      const discountPercent = (totals.discountPaisa / totals.subtotalPaisa) * 100;
+      const billerGroup = orderPayload.billerGroup || authContext.billerGroup || 'JUNIOR_CASHIER';
+      let configuredCeiling = Number(orderPayload.discountCeilingPercent || 10);
+      let ceilingAmountPaisa = Infinity;
+
+      if (orderPayload.billerGroup) {
+        if (billerGroup === 'JUNIOR_CASHIER') {
+          configuredCeiling = 5;
+          ceilingAmountPaisa = 15000; // ₹150 max cap
+        } else if (billerGroup === 'SENIOR_BILLER' || billerGroup === 'SENIOR_CASHIER') {
+          configuredCeiling = 15;
+          ceilingAmountPaisa = 50000; // ₹500 max cap
+        } else if (billerGroup === 'SHIFT_SUPERVISOR') {
+          configuredCeiling = 100;
+          ceilingAmountPaisa = Infinity;
+        }
+      }
+
+      const isCapped = discountPercent > configuredCeiling || totals.discountPaisa > ceilingAmountPaisa;
+      if (isCapped && authContext.role !== 'MASTER') {
+        const hasSupervisor = orderPayload.supervisorApproval?.supervisorUserId &&
+          (orderPayload.supervisorApproval?.supervisorPasscode || orderPayload.supervisorApproval?.pin);
+        if (!hasSupervisor) {
+          throw new ApiError(
+            403,
+            'DISCOUNT_CEILING_EXCEEDED',
+            `Manual discount of ${discountPercent.toFixed(1)}% (₹${(totals.discountPaisa / 100).toFixed(2)}) exceeds the authorized ceiling of ${configuredCeiling}% / ₹${(ceilingAmountPaisa / 100).toFixed(2)}. Supervisor approval required.`
+          );
+        }
+      }
+    }
+
+    // Benchmark A119 & F076: International Tender-Based Surcharge Engine
+    if (orderPayload.isInternationalCard || orderPayload.tenderSurchargePercent) {
+      const surchargePercent = Number(orderPayload.tenderSurchargePercent || 3.5);
+      totals.tenderSurchargePaisa = Math.round((totals.totalPaisa * surchargePercent) / 100);
+      totals.totalPaisa += totals.tenderSurchargePaisa;
+    }
+
+    // Benchmark A037: Locality Distance Delivery Fee
+    if (orderPayload.deliveryFeePaisa) {
+      totals.deliveryFeePaisa = Math.round(Number(orderPayload.deliveryFeePaisa));
+      totals.totalPaisa += totals.deliveryFeePaisa;
+    }
+
+    // A012: Preconfigured Charge Edit Restriction
+    if (orderPayload.customCharges?.isModified === true && authContext.role !== 'MASTER') {
+      const hasSupervisor = orderPayload.supervisorApproval?.supervisorUserId &&
+        (orderPayload.supervisorApproval?.supervisorPasscode || orderPayload.supervisorApproval?.pin);
+      if (!hasSupervisor) {
+        throw new ApiError(
+          403,
+          'CHARGE_EDIT_RESTRICTED',
+          'Preconfigured packaging/delivery charge modification requires supervisor approval.'
+        );
+      }
+    }
 
     // Stale Cart Protection: Material price change check
     const clientExpectedTotal = orderPayload.expectedTotalPaisa ?? orderPayload.clientReviewedTotalPaisa;
@@ -1022,7 +1271,15 @@ class PosOrderService {
     let dueAmountPaisa = Math.max(0, totals.totalPaisa - paidAmountPaisa);
     let changeGivenPaisa = Math.max(0, paidAmountPaisa - totals.totalPaisa);
 
-    if (totalTenderPaidPaisa >= totals.totalPaisa && isImmediateCompletion) {
+    const isExemptNonCommercial = Boolean(
+      orderPayload.isTraining ||
+      options.isTraining ||
+      orderPayload.orderType === 'STAFF_MEAL' ||
+      paymentMethod === 'STAFF_MEAL' ||
+      paymentMethod === 'COMPLIMENTARY'
+    );
+
+    if ((totalTenderPaidPaisa >= totals.totalPaisa || isExemptNonCommercial) && isImmediateCompletion) {
       paymentStatus = 'PAID';
       dueAmountPaisa = 0;
     } else if (isImmediateCompletion && dueAmountPaisa > 0) {
@@ -1123,6 +1380,10 @@ class PosOrderService {
         preRoundingTotalPaisa: totals.preRoundingTotalPaisa || totals.totalPaisa,
         roundOffPaisa: totals.roundOffPaisa || 0,
         totalPaisa: totals.totalPaisa,
+        isLiquorInvoice: Boolean(orderPayload.isLiquorInvoice),
+        tipCalculationBase: totals.tipCalculationBase || 'PRE_TAX_SUBTOTAL',
+        tipPercentage: totals.tipPercentage || 0,
+        tipPaisa: totals.tipPaisa || 0,
         taxRuleVersion: totals.taxRuleVersion || TAX_RULE_VERSION,
         roundingPolicyVersion: totals.roundingPolicyVersion || ROUNDING_POLICY_VERSION,
         paymentMethod: finalPaymentMethod,
@@ -1149,6 +1410,20 @@ class PosOrderService {
         reviewedByRole: orderPayload.reviewedByRole || options.reviewedByRole || null,
         reviewReason: orderPayload.reviewReason || options.reviewReason || null,
         reviewId: orderPayload.reviewId || options.reviewId || null,
+        parentSplitBillId: orderPayload.parentSplitBillId || null,
+        supervisorAuthorized: Boolean(orderPayload.supervisorApproval?.supervisorUserId),
+        supervisorUserId: orderPayload.supervisorApproval?.supervisorUserId || null,
+        jurisdiction: orderPayload.jurisdiction || 'IN_GST',
+        vatPaisa: orderPayload.vatPaisa || totals.vatPaisa || 0,
+        vatRegistrationNumber: orderPayload.vatRegistrationNumber || '',
+        loyaltyOptOut: Boolean(orderPayload.loyaltyOptOut),
+        tenderSurchargePaisa: totals.tenderSurchargePaisa || 0,
+        bilingualArabic: Boolean(orderPayload.bilingualArabic),
+        deliveryLocalityZone: orderPayload.deliveryLocalityZone || null,
+        deliveryFeePaisa: totals.deliveryFeePaisa || orderPayload.deliveryFeePaisa || 0,
+        // A017 / F213: Staff assignee for dine-in orders & staff reporting
+        assignedStaffId: orderPayload.assignedStaffId || orderPayload.waiterId || orderPayload.serverId || null,
+        assignedStaffName: orderPayload.assignedStaffName || orderPayload.waiterName || '',
       });
 
       try {
@@ -1714,6 +1989,458 @@ class PosOrderService {
       printBuffer: printResult.printBufferBase64,
       htmlPreview: printResult.htmlPreview,
       rawBuffer: printResult.rawBuffer,
+    };
+  }
+
+  /**
+   * F028: Split Bill By Items
+   * Distributes selected line items and quantities across 2 or more child bills.
+   * Closes original bill with status 'SPLIT_CLOSED'.
+   */
+  static async splitBillByItems({ originalBillId, splitGroups = [], authContext = {} }) {
+    if (!originalBillId) {
+      throw new ApiError(400, 'BILL_ID_REQUIRED', 'originalBillId is required for item split.');
+    }
+    if (!Array.isArray(splitGroups) || splitGroups.length < 2) {
+      throw new ApiError(400, 'INVALID_SPLIT_GROUPS', 'At least 2 split groups are required.');
+    }
+
+    const orgId = normalizeId(authContext.organisationId || 'ORG-ZAMORIN');
+    const origBill = await Bill.findOne({
+      billId: normalizeId(originalBillId),
+      organisationId: orgId,
+    });
+
+    if (!origBill) {
+      throw new ApiError(404, 'BILL_NOT_FOUND', `Original bill ${originalBillId} not found.`);
+    }
+
+    if (origBill.status === 'COMPLETED' || origBill.status === 'VOIDED' || origBill.status === 'SPLIT_CLOSED') {
+      throw new ApiError(400, 'CANNOT_SPLIT_FINALIZED_BILL', `Bill status is ${origBill.status}; only open/unpaid bills can be split.`);
+    }
+
+    assertCafeAccess(authContext, origBill.cafeId);
+
+    const childBills = [];
+    const childBillIds = [];
+
+    for (let i = 0; i < splitGroups.length; i++) {
+      const group = splitGroups[i];
+      if (!Array.isArray(group.lineItems) || group.lineItems.length === 0) {
+        throw new ApiError(400, 'EMPTY_SPLIT_GROUP', `Split group ${i + 1} must contain at least one line item.`);
+      }
+
+      const childPayload = {
+        cafeId: origBill.cafeId,
+        orderType: origBill.orderType,
+        serviceMode: origBill.serviceMode,
+        tableNumber: origBill.tableNumber ? `${origBill.tableNumber} (Split ${i + 1})` : '',
+        guestCovers: Math.max(1, Math.floor((origBill.guestCovers || 1) / splitGroups.length)),
+        lineItems: group.lineItems,
+        parentSplitBillId: origBill.billId,
+        isImmediateCompletion: false,
+      };
+
+      const committed = await this.executeOrderCommit(childPayload, authContext, 'SAVE');
+      childBills.push(committed.bill);
+      childBillIds.push(committed.bill.billId);
+    }
+
+    origBill.status = 'SPLIT_CLOSED';
+    origBill.childSplitBillIds = childBillIds;
+    await origBill.save();
+
+    await auditService.recordAuditEvent({
+      organisationId: orgId,
+      cafeId: origBill.cafeId,
+      eventType: 'BILL_SPLIT_BY_ITEMS',
+      actorUserId: authContext.userId,
+      entityType: 'Bill',
+      entityId: origBill.billId,
+      details: { childBillIds, splitCount: splitGroups.length },
+    });
+
+    return {
+      originalBillId: origBill.billId,
+      status: 'SPLIT_CLOSED',
+      childBills,
+    };
+  }
+
+  /**
+   * F029: Split Bill Evenly
+   * Distributes bill grand total equally across N shares with exact paisa conservation.
+   */
+  static async splitBillEvenly({ originalBillId, splitCount = 2, authContext = {} }) {
+    const numSplits = Math.max(2, Math.min(10, Math.floor(Number(splitCount) || 2)));
+    if (!originalBillId) {
+      throw new ApiError(400, 'BILL_ID_REQUIRED', 'originalBillId is required.');
+    }
+
+    const orgId = normalizeId(authContext.organisationId || 'ORG-ZAMORIN');
+    const origBill = await Bill.findOne({
+      billId: normalizeId(originalBillId),
+      organisationId: orgId,
+    });
+
+    if (!origBill) {
+      throw new ApiError(404, 'BILL_NOT_FOUND', `Original bill ${originalBillId} not found.`);
+    }
+
+    if (origBill.status === 'COMPLETED' || origBill.status === 'VOIDED' || origBill.status === 'SPLIT_CLOSED') {
+      throw new ApiError(400, 'CANNOT_SPLIT_FINALIZED_BILL', `Bill status is ${origBill.status}; cannot split.`);
+    }
+
+    assertCafeAccess(authContext, origBill.cafeId);
+
+    const totalToSplit = origBill.totalPaisa;
+    const baseShare = Math.floor(totalToSplit / numSplits);
+    const remainder = totalToSplit % numSplits;
+
+    const childBills = [];
+    const childBillIds = [];
+
+    for (let i = 0; i < numSplits; i++) {
+      // Distribute remainder paisa across first N shares (exact paisa conservation)
+      const sharePaisa = baseShare + (i < remainder ? 1 : 0);
+      const childPayload = {
+        cafeId: origBill.cafeId,
+        orderType: origBill.orderType,
+        serviceMode: origBill.serviceMode,
+        tableNumber: origBill.tableNumber ? `${origBill.tableNumber} (Split ${i + 1}/${numSplits})` : '',
+        guestCovers: 1,
+        lineItems: [
+          {
+            isOpenItem: true,
+            name: `Even Split Share (${i + 1}/${numSplits}) of ${origBill.invoiceNumber || origBill.billId}`,
+            unitPricePaisa: sharePaisa,
+            quantity: 1,
+            taxRatePercent: 0,
+            taxClassification: 'NIL',
+          },
+        ],
+        parentSplitBillId: origBill.billId,
+        isImmediateCompletion: false,
+      };
+
+      const committed = await this.executeOrderCommit(childPayload, authContext, 'SAVE');
+      childBills.push(committed.bill);
+      childBillIds.push(committed.bill.billId);
+    }
+
+    origBill.status = 'SPLIT_CLOSED';
+    origBill.childSplitBillIds = childBillIds;
+    await origBill.save();
+
+    await auditService.recordAuditEvent({
+      organisationId: orgId,
+      cafeId: origBill.cafeId,
+      eventType: 'BILL_SPLIT_EVENLY',
+      actorUserId: authContext.userId,
+      entityType: 'Bill',
+      entityId: origBill.billId,
+      details: { childBillIds, splitCount: numSplits, totalPaisa: totalToSplit },
+    });
+
+    return {
+      originalBillId: origBill.billId,
+      status: 'SPLIT_CLOSED',
+      splitCount: numSplits,
+      totalPaisa: totalToSplit,
+      childBills,
+    };
+  }
+
+  /**
+   * F031: Separate Food and Drink Bills
+   * Partitions lines into food vs beverage bills.
+   */
+  static async splitBillByFoodBeverage({ originalBillId, authContext = {} }) {
+    if (!originalBillId) {
+      throw new ApiError(400, 'BILL_ID_REQUIRED', 'originalBillId is required.');
+    }
+
+    const orgId = normalizeId(authContext.organisationId || 'ORG-ZAMORIN');
+    const origBill = await Bill.findOne({
+      billId: normalizeId(originalBillId),
+      organisationId: orgId,
+    });
+
+    if (!origBill) {
+      throw new ApiError(404, 'BILL_NOT_FOUND', `Original bill ${originalBillId} not found.`);
+    }
+
+    if (origBill.status === 'COMPLETED' || origBill.status === 'VOIDED' || origBill.status === 'SPLIT_CLOSED') {
+      throw new ApiError(400, 'CANNOT_SPLIT_FINALIZED_BILL', `Bill status is ${origBill.status}; cannot split.`);
+    }
+
+    assertCafeAccess(authContext, origBill.cafeId);
+
+    const foodLines = [];
+    const bevLines = [];
+
+    const bevKeywords = ['BEVERAGE', 'BEV', 'BAR', 'DRINK', 'COFFEE', 'TEA', 'JUICE', 'ALCOHOL', 'COCKTAIL', 'MOCKTAIL'];
+
+    for (const li of origBill.lineItems) {
+      const station = String(li.kitchenStation || '').toUpperCase();
+      const name = String(li.itemNameSnapshot || '').toUpperCase();
+      const isBeverage = station === 'BAR' || bevKeywords.some((kw) => name.includes(kw));
+
+      const lineData = {
+        menuItemId: li.menuItemId,
+        name: li.itemNameSnapshot,
+        quantity: li.quantity,
+        unitPricePaisa: li.unitPricePaisa,
+        taxRatePercent: li.taxRatePercent,
+        taxClassification: li.taxClassification,
+        isOpenItem: Boolean(li.isOpenItem),
+        modifiers: li.modifiers,
+        itemNotes: li.itemNotes,
+      };
+
+      if (isBeverage) {
+        bevLines.push(lineData);
+      } else {
+        foodLines.push(lineData);
+      }
+    }
+
+    if (foodLines.length === 0 || bevLines.length === 0) {
+      throw new ApiError(
+        400,
+        'CANNOT_SPLIT_FNB',
+        'Bill must contain both food and beverage items to separate them into distinct invoices.'
+      );
+    }
+
+    const foodPayload = {
+      cafeId: origBill.cafeId,
+      orderType: origBill.orderType,
+      serviceMode: origBill.serviceMode,
+      tableNumber: origBill.tableNumber ? `${origBill.tableNumber} (Food)` : '',
+      guestCovers: origBill.guestCovers,
+      lineItems: foodLines,
+      parentSplitBillId: origBill.billId,
+      isImmediateCompletion: false,
+    };
+
+    const bevPayload = {
+      cafeId: origBill.cafeId,
+      orderType: origBill.orderType,
+      serviceMode: origBill.serviceMode,
+      tableNumber: origBill.tableNumber ? `${origBill.tableNumber} (Beverage)` : '',
+      guestCovers: origBill.guestCovers,
+      lineItems: bevLines,
+      parentSplitBillId: origBill.billId,
+      isImmediateCompletion: false,
+    };
+
+    const committedFood = await this.executeOrderCommit(foodPayload, authContext, 'SAVE');
+    const committedBev = await this.executeOrderCommit(bevPayload, authContext, 'SAVE');
+
+    origBill.status = 'SPLIT_CLOSED';
+    origBill.childSplitBillIds = [committedFood.bill.billId, committedBev.bill.billId];
+    await origBill.save();
+
+    await auditService.recordAuditEvent({
+      organisationId: orgId,
+      cafeId: origBill.cafeId,
+      eventType: 'BILL_SPLIT_FOOD_BEVERAGE',
+      actorUserId: authContext.userId,
+      entityType: 'Bill',
+      entityId: origBill.billId,
+      details: { foodBillId: committedFood.bill.billId, beverageBillId: committedBev.bill.billId },
+    });
+
+    return {
+      originalBillId: origBill.billId,
+      status: 'SPLIT_CLOSED',
+      foodBill: committedFood.bill,
+      beverageBill: committedBev.bill,
+    };
+  }
+
+  /**
+   * F031: Food vs Bar Split Invoices
+   * Separates food (GST 5%) from liquor/bar (State VAT / Excise e.g. 22%) into distinct legal invoices.
+   */
+  static async splitBillByFoodBar({ originalBillId, authContext = {} }) {
+    if (!originalBillId) {
+      throw new ApiError(400, 'BILL_ID_REQUIRED', 'originalBillId is required.');
+    }
+
+    const orgId = normalizeId(authContext.organisationId || 'ORG-ZAMORIN');
+    const origBill = await Bill.findOne({
+      billId: normalizeId(originalBillId),
+      organisationId: orgId,
+    });
+
+    if (!origBill) {
+      throw new ApiError(404, 'BILL_NOT_FOUND', `Original bill ${originalBillId} not found.`);
+    }
+
+    if (origBill.status === 'COMPLETED' || origBill.status === 'VOIDED' || origBill.status === 'SPLIT_CLOSED') {
+      throw new ApiError(400, 'CANNOT_SPLIT_FINALIZED_BILL', `Bill status is ${origBill.status}; cannot split.`);
+    }
+
+    assertCafeAccess(authContext, origBill.cafeId);
+
+    const foodLines = [];
+    const barLines = [];
+    const liquorKeywords = ['BEER', 'WINE', 'WHISKY', 'WHISKEY', 'VODKA', 'RUM', 'GIN', 'LIQUOR', 'ALCOHOL', 'COCKTAIL'];
+
+    for (const li of origBill.lineItems) {
+      const station = String(li.kitchenStation || '').toUpperCase();
+      const name = String(li.itemNameSnapshot || '').toUpperCase();
+      const isLiquor = Boolean(
+        li.liquorClassification?.isLiquor ||
+        li.isLiquor ||
+        station === 'BAR' ||
+        liquorKeywords.some((kw) => name.includes(kw))
+      );
+
+      const lineData = {
+        menuItemId: li.menuItemId,
+        name: li.itemNameSnapshot,
+        quantity: li.quantity,
+        unitPricePaisa: li.unitPricePaisa,
+        taxRatePercent: isLiquor ? (li.liquorClassification?.vatRatePercent || 22) : 5,
+        taxClassification: isLiquor ? 'STATE_VAT' : 'GST_5',
+        isOpenItem: Boolean(li.isOpenItem),
+        modifiers: li.modifiers,
+        itemNotes: li.itemNotes,
+        pizzaConfig: li.pizzaConfig,
+        liquorClassification: li.liquorClassification,
+      };
+
+      if (isLiquor) {
+        barLines.push(lineData);
+      } else {
+        foodLines.push(lineData);
+      }
+    }
+
+    if (foodLines.length === 0 || barLines.length === 0) {
+      throw new ApiError(
+        400,
+        'CANNOT_SPLIT_FOOD_BAR',
+        'Bill must contain both food and liquor/bar items to separate them into distinct invoices.'
+      );
+    }
+
+    const foodPayload = {
+      cafeId: origBill.cafeId,
+      orderType: origBill.orderType,
+      serviceMode: origBill.serviceMode,
+      tableNumber: origBill.tableNumber ? `${origBill.tableNumber} (Food)` : '',
+      guestCovers: origBill.guestCovers,
+      lineItems: foodLines,
+      parentSplitBillId: origBill.billId,
+      isImmediateCompletion: false,
+      isLiquorInvoice: false,
+    };
+
+    const barPayload = {
+      cafeId: origBill.cafeId,
+      orderType: origBill.orderType,
+      serviceMode: origBill.serviceMode,
+      tableNumber: origBill.tableNumber ? `${origBill.tableNumber} (Bar)` : '',
+      guestCovers: origBill.guestCovers,
+      lineItems: barLines,
+      parentSplitBillId: origBill.billId,
+      isImmediateCompletion: false,
+      isLiquorInvoice: true,
+    };
+
+    const committedFood = await this.executeOrderCommit(foodPayload, authContext, 'SAVE');
+    const committedBar = await this.executeOrderCommit(barPayload, authContext, 'SAVE');
+
+    origBill.status = 'SPLIT_CLOSED';
+    origBill.childSplitBillIds = [committedFood.bill.billId, committedBar.bill.billId];
+    await origBill.save();
+
+    try {
+      await auditService.recordAuditEvent({
+        organisationId: orgId,
+        cafeId: origBill.cafeId,
+        module: 'POS',
+        action: 'BILL_SPLIT_FOOD_BAR',
+        actorUserId: authContext.userId || 'SYSTEM',
+        actorRole: authContext.role || 'STAFF',
+        entityType: 'Bill',
+        entityId: origBill.billId,
+        details: { foodBillId: committedFood.bill.billId, barBillId: committedBar.bill.billId },
+      });
+    } catch (_) {}
+
+    return {
+      originalBillId: origBill.billId,
+      status: 'SPLIT_CLOSED',
+      foodBill: committedFood.bill,
+      barBill: committedBar.bill,
+    };
+  }
+
+  /**
+   * F044: Fast-Biller Shortcode Lookup
+   */
+  static async lookupMenuItemByShortcode(shortcode, cafeId = null, organisationId = 'ZAMORIN') {
+    if (!shortcode || typeof shortcode !== 'string') {
+      throw new ApiError(400, 'INVALID_SHORTCODE', 'Shortcode is required for item lookup.');
+    }
+    const cleanCode = shortcode.trim().toUpperCase();
+    const cleanOrg = normalizeId(organisationId || 'ZAMORIN');
+    const item = await MenuItem.findOne({
+      organisationId: cleanOrg,
+      shortcode: cleanCode,
+      status: { $in: ['ACTIVE', null] },
+    });
+    if (!item) {
+      throw new ApiError(404, 'ITEM_NOT_FOUND_FOR_SHORTCODE', `No active menu item found for shortcode "${cleanCode}".`);
+    }
+    return item;
+  }
+
+  /**
+   * A034: Barcode Bill Lookup
+   * Rapid Code128 / QR barcode scanning lookup for 1-scan cashier retrieval.
+   */
+  static async lookupOrderByBarcode(barcode, cafeId = null) {
+    if (!barcode || typeof barcode !== 'string') {
+      throw new ApiError(400, 'INVALID_BARCODE', 'Barcode is required for bill lookup.');
+    }
+
+    // Clean barcode string (strip URL wrapper or query parameters if scanned from QR)
+    let cleanCode = barcode.trim();
+    if (cleanCode.includes('/')) {
+      const parts = cleanCode.split('/');
+      cleanCode = parts[parts.length - 1].split('?')[0];
+    }
+    cleanCode = cleanCode.trim();
+
+    const query = {
+      $or: [
+        { invoiceNumber: cleanCode },
+        { invoiceNumber: new RegExp(`^${cleanCode}$`, 'i') },
+        { billId: cleanCode },
+        { billId: new RegExp(`^${cleanCode}$`, 'i') },
+        { 'metadata.barcode': cleanCode },
+      ],
+    };
+    if (cafeId) {
+      query.cafeId = cafeId.trim().toUpperCase();
+    }
+
+    const bill = await Bill.findOne(query).lean();
+    if (!bill) {
+      throw new ApiError(404, 'BILL_NOT_FOUND', `No bill found matching barcode or invoice "${barcode}".`);
+    }
+
+    return {
+      bill,
+      isRefundable: bill.status === 'COMPLETED' && (bill.paidAmountPaisa > 0),
+      isVoidable: bill.status === 'COMPLETED',
+      reprintCount: (bill.reprints || []).length,
     };
   }
 

@@ -22,6 +22,7 @@ const {
   createTransfer,
   dispatchTransfer,
   receiveTransfer,
+  generateConsolidatedRouteManifest,
   listLots,
   getExpirySchedule,
   recordIncomingInspection,
@@ -43,6 +44,10 @@ const {
   submitCycleCount,
   approveCycleCount,
   recordWastage,
+  recordBatchProduction,
+  listBatchProductions,
+  getBatchProduction,
+  getRecipeCostAnalysis,
   getInventoryIntegrity,
   listReservations,
   createReservation,
@@ -53,6 +58,10 @@ const {
   getInventoryValuationReport,
   getDataQualityReport,
   evaluateItemQuality,
+  setHistoricalFreezeDate,
+  evaluateRawMaterialAuto86Handler,
+  recordActualProductionYield,
+  consumeAdvanceStockHandler,
 } = require('../controllers/inventoryController');
 
 const router = express.Router();
@@ -171,6 +180,13 @@ router.post(
   '/transfers/:transferId/receive',
   authorize('INVENTORY_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
   receiveTransfer
+);
+
+// A111, F199, F200: Consolidated Central Kitchen Route Manifest
+router.post(
+  '/central-kitchen/route-manifest',
+  authorize('INVENTORY_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  generateConsolidatedRouteManifest
 );
 
 // 6. Lots, Expiry & FEFO
@@ -329,6 +345,32 @@ router.post(
   recordWastage
 );
 
+// 10b. Semi-Finished Batch Production (F040 / F156-F159)
+router.post(
+  '/batches/produce',
+  authorize('INVENTORY_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  recordBatchProduction
+);
+
+router.get(
+  '/batches',
+  authorize('INVENTORY_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  listBatchProductions
+);
+
+router.get(
+  '/batches/:batchNumber',
+  authorize('INVENTORY_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  getBatchProduction
+);
+
+// 10c. Recipe Cost & Yield Loss Analysis (F038)
+router.get(
+  '/recipes/:recipeId/costing',
+  authorize('INVENTORY_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  getRecipeCostAnalysis
+);
+
 // 11. Inventory Reservations (Stages 151-158)
 router.get(
   '/reservations',
@@ -387,6 +429,34 @@ router.get(
   '/integrity',
   authorize('INVENTORY_READ', { allowedRoles: ['MASTER', 'OWNER'] }),
   getInventoryIntegrity
+);
+
+// F188–F191: Irreversible Historical Stock Freeze Date
+router.post(
+  '/freeze-date',
+  authorize('INVENTORY_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  setHistoricalFreezeDate
+);
+
+// F122: Raw Material Menu Auto-86 Lock Evaluation
+router.post(
+  '/auto-86/evaluate',
+  authorize('INVENTORY_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  evaluateRawMaterialAuto86Handler
+);
+
+// F156–F159: Actual Production Yield & Unit Cost Adjustment
+router.post(
+  '/production/record-actual-yield',
+  authorize('INVENTORY_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  recordActualProductionYield
+);
+
+// F114–F116: Deferred Advance Stock Consumption
+router.post(
+  '/advance-stock/:depositId/consume',
+  authorize('INVENTORY_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  consumeAdvanceStockHandler
 );
 
 module.exports = router;

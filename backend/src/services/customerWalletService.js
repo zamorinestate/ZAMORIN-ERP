@@ -18,6 +18,7 @@ const { WalletLedger } = require('../models/WalletLedger');
 const { GiftCard } = require('../models/GiftCard');
 const { SequenceCounter } = require('../models/SequenceCounter');
 const { ApiError } = require('../utils/ApiError');
+const { verifyCustomerAuthorizationToken } = require('./customerProtectionService');
 
 function hashSecret(secret) {
   return crypto.createHash('sha256').update(String(secret).trim()).digest('hex');
@@ -44,6 +45,7 @@ async function topUpWallet({
   performedByUserId,
   idempotencyKey = null,
   note = '',
+  validityDays = 90,
 }) {
   const amount = Math.round(Number(amountPaise));
   if (!amount || amount <= 0) {
@@ -119,6 +121,7 @@ async function topUpWallet({
     sourcePaymentMethod,
     paymentStatus: 'CONFIRMED',
     idempotencyKey,
+    expiresAt: validCreditType === 'PROMOTIONAL' ? new Date(Date.now() + (validityDays || 90) * 24 * 60 * 60 * 1000) : null,
     description: note || `Wallet top-up (${validCreditType}) via ${sourcePaymentMethod}`,
     performedByUserId,
     serverTimestamp: new Date(),
@@ -149,10 +152,25 @@ async function redeemWallet({
   performedByUserId,
   idempotencyKey = null,
   note = '',
+  otpAuthorizationToken = null,
+  isOtpVerified = false,
+  userRole = 'STAFF',
 }) {
   const amount = Math.round(Number(amountPaise));
   if (!amount || amount <= 0) {
     throw new ApiError(400, 'INVALID_AMOUNT', 'Redemption amount must be a positive integer in paise.');
+  }
+
+  // F066: OTP Verification challenge for high-value wallet redemptions (> ₹500 / 50,000 paise)
+  if (amount > 50000 && userRole !== 'MASTER' && userRole !== 'OWNER' && !isOtpVerified) {
+    const isAuthorized = verifyCustomerAuthorizationToken(otpAuthorizationToken, customerId);
+    if (!isAuthorized) {
+      throw new ApiError(
+        403,
+        'CUSTOMER_OTP_REQUIRED',
+        'Wallet redemptions exceeding ₹500 strictly require customer OTP verification (F066).'
+      );
+    }
   }
 
   if (idempotencyKey) {
@@ -425,10 +443,76 @@ async function getWalletBalanceBreakdown({ organisationId, customerId }) {
   };
 }
 
+/**
+ * F068: Expire customer promotional wallet balances
+ */
+async function expireCustomerPromotionalBalances({
+  organisationId,
+  customerId = null,
+  validityDays = 90,
+  asOfDate = new Date(),
+  performedByUserId = 'SYSTEM',
+}) {
+  const query = {
+    organisationId,
+    promotionalWalletBalancePaise: { $gt: 0 },
+  };
+  if (customerId) query.customerId = customerId;
+
+  const customers = await Customer.find(query);
+  const expiredResults = [];
+
+  for (const customer of customers) {
+    const expiredAmount = customer.promotionalWalletBalancePaise;
+    if (!expiredAmount || expiredAmount <= 0) continue;
+
+    const prevBalance = customer.walletBalancePaise || 0;
+    customer.promotionalWalletBalancePaise = 0;
+    customer.walletBalancePaise = Math.max(0, prevBalance - expiredAmount);
+    await customer.save();
+
+    const seqId = await SequenceCounter.generateId({
+      organisationId,
+      sequenceKey: 'WALLET_LEDGER_SEQ',
+      prefix: 'WAL',
+      minimumDigits: 4,
+    });
+
+    const ledgerEntry = new WalletLedger({
+      walletLedgerId: seqId,
+      organisationId,
+      customerId: customer.customerId,
+      transactionType: 'EXPIRATION',
+      creditType: 'PROMOTIONAL',
+      amountPaise: -expiredAmount,
+      balanceBeforePaise: prevBalance,
+      balanceAfterPaise: customer.walletBalancePaise,
+      description: `Promotional wallet balance auto-expired after ${validityDays} days validity (F068)`,
+      performedByUserId,
+      serverTimestamp: asOfDate,
+    });
+    await ledgerEntry.save();
+
+    expiredResults.push({
+      customerId: customer.customerId,
+      expiredAmountPaise: expiredAmount,
+      newBalancePaise: customer.walletBalancePaise,
+      ledger: ledgerEntry.toObject(),
+    });
+  }
+
+  return {
+    success: true,
+    totalExpiredCustomers: expiredResults.length,
+    expiredResults,
+  };
+}
+
 module.exports = {
   topUpWallet,
   redeemWallet,
   issueGiftCard,
   redeemGiftCard,
   getWalletBalanceBreakdown,
+  expireCustomerPromotionalBalances,
 };

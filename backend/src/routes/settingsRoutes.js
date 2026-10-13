@@ -49,6 +49,11 @@ const {
   updateManageSupportTicket,
   addSupportTicketReply,
   addEmployeeSupportTicketReply,
+  getGoogleBusinessSummary,
+  connectGoogleBusinessProfile,
+  syncGoogleReviews,
+  replyGoogleReview,
+  updateGoogleBusinessMetrics,
 } = require('../controllers/settingsController');
 
 const router = express.Router();
@@ -131,6 +136,13 @@ router.get('/company-identity/history', getCompanyIdentityHistory);
 // ── Application Updates & Version Control (Role-Targeted) ────────────────────
 const updateRoutes = require('./updateRoutes');
 router.use('/updates', updateRoutes);
+
+// ── Google Business Profile Dashboard (A005 & A006) ─────────────────────────
+router.get('/google-business/summary', getGoogleBusinessSummary);
+router.post('/google-business/connect', connectGoogleBusinessProfile);
+router.post('/google-business/sync-reviews', syncGoogleReviews);
+router.post('/google-business/reviews/:reviewId/reply', replyGoogleReview);
+router.post('/google-business/metrics', updateGoogleBusinessMetrics);
 
 // ── Legacy redirect aliases ───────────────────────────────────────────────────
 // My Profile was previously navigated to directly; now lives in Settings.

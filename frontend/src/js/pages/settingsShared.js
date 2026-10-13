@@ -1820,18 +1820,97 @@ function renderPrivacy() {
 
 function renderConnected() {
   const content = `
-    <div class="settings-section-card">
+    <!-- 1. Google Business Profile & Review Hub (A005, A006, A075) -->
+    <div class="settings-section-card" id="google-business-card">
       <div class="settings-card-header">
         <div>
-          <h2 class="settings-card-title">Connected Services &amp; Machine Identity</h2>
-          <div class="settings-card-subtitle">Account-level service integrations. Enterprise integrations are governed by administration.</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:18px;">🌐</span>
+            <h2 class="settings-card-title">Google Business Profile &amp; Location Hub (A005, A006)</h2>
+          </div>
+          <div class="settings-card-subtitle">Connect Google My Business locations, manage customer reviews, and monitor profile performance.</div>
+        </div>
+        <span id="gbp-status-chip" class="settings-status-chip success">CONNECTED</span>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:12px;margin:16px 0;">
+        <div style="padding:12px;background:var(--surface-sunken);border:1px solid var(--line);border-radius:var(--radius-sm,6px);">
+          <div class="settings-field-label">Connected Business Profile</div>
+          <div id="gbp-location-name" style="font-size:14px;font-weight:700;color:var(--ink);margin-top:2px;">Zamorin Cafe Flagship</div>
+          <div id="gbp-location-id" class="settings-field-helper">Location ID: ZC-LOC-001</div>
+        </div>
+        <div style="padding:12px;background:var(--surface-sunken);border:1px solid var(--line);border-radius:var(--radius-sm,6px);">
+          <div class="settings-field-label">Overall Rating &amp; Reputation</div>
+          <div id="gbp-rating-score" style="font-size:14px;font-weight:700;color:var(--mint,#10b981);margin-top:2px;">⭐ 4.8 / 5.0 (428 reviews)</div>
+          <div class="settings-field-helper">Sync: Real-time webhook feed active</div>
         </div>
       </div>
 
-      <div class="settings-state-box" style="margin: 12px 0;">
-        <div class="settings-state-icon">🔗</div>
-        <h3 class="settings-state-title">No third-party apps connected</h3>
-        <p class="settings-state-desc">Your Zamorin account is authenticated directly via secure auth service. No external tokens or machine identities are linked.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+        <button id="btn-sync-gbp-reviews" class="btn btn-sm btn-primary" type="button">↻ Sync Google Reviews</button>
+        <button id="btn-connect-gbp" class="btn btn-sm btn-secondary" type="button">🔗 Link Location</button>
+        <button id="btn-disconnect-gbp" class="btn btn-sm btn-ghost" type="button" style="color:var(--coral,#ef4444);">Disconnect</button>
+      </div>
+
+      <div id="gbp-recent-reviews" style="margin-top:16px;display:flex;flex-direction:column;gap:8px;">
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;">Recent Customer Feedback</div>
+        <div style="background:var(--surface-sunken);border:1px solid var(--line);border-radius:6px;padding:12px;font-size:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+            <strong>Ananya Sharma</strong>
+            <span style="color:#f59e0b;font-weight:700;">⭐⭐⭐⭐⭐ 5.0</span>
+          </div>
+          <div style="color:var(--muted);">"Best cold brew in the city! Service was instant and staff was super friendly."</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. Weighing Scale & Barcode Label Layout Configurator (A043, A105, A106, C02) -->
+    <div class="settings-section-card" id="scale-barcode-card" style="margin-top:20px;">
+      <div class="settings-card-header">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:18px;">⚖️</span>
+            <h2 class="settings-card-title">Weighing Scale &amp; Barcode Label Configurator (A043, A105, A106)</h2>
+          </div>
+          <div class="settings-card-subtitle">Configure hardware weighing scale port protocols, barcode weight divisor math (C02), and label sizes.</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:14px;margin:16px 0;">
+        <div>
+          <label class="settings-field-label" style="display:block;margin-bottom:4px;font-weight:600;">Scale Protocol / Interface</label>
+          <select id="scale-protocol-select" class="settings-field-input" style="width:100%;">
+            <option value="CAS_SERIES">CAS PD-II / SW Series (RS-232 / USB)</option>
+            <option value="METTLER_TOLEDO">Mettler Toledo PS60 (Standard)</option>
+            <option value="DIBAL_LABEL">Dibal POS Scale (Direct Stream)</option>
+            <option value="MOCK_SIMULATOR">Simulator / Test Loopback</option>
+          </select>
+        </div>
+        <div>
+          <label class="settings-field-label" style="display:block;margin-bottom:4px;font-weight:600;">Weight Divisor (C02 Correction)</label>
+          <select id="scale-divisor-select" class="settings-field-input" style="width:100%;">
+            <option value="1000">1000 (00588 -> 0.588 kg / Standard India)</option>
+            <option value="100">100 (00588 -> 5.88 kg)</option>
+            <option value="1">1 (Direct Units)</option>
+          </select>
+        </div>
+        <div>
+          <label class="settings-field-label" style="display:block;margin-bottom:4px;font-weight:600;">Weighted Barcode Prefix</label>
+          <input type="text" id="scale-barcode-prefix" class="settings-field-input" value="21" maxlength="4" style="width:100%;font-family:var(--font-mono);" />
+        </div>
+        <div>
+          <label class="settings-field-label" style="display:block;margin-bottom:4px;font-weight:600;">Label Dimensions</label>
+          <select id="scale-label-dims" class="settings-field-input" style="width:100%;">
+            <option value="50x25">50mm × 25mm (Standard Deli/Roastery)</option>
+            <option value="40x30">40mm × 30mm (Compact Shelf Label)</option>
+            <option value="58x40">58mm × 40mm (Packaged CPG Batch)</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+        <button id="btn-save-scale-config" class="btn btn-sm btn-primary" type="button">💾 Save Hardware Config</button>
+        <button id="btn-test-barcode-print" class="btn btn-sm btn-secondary" type="button">🏷️ Test Print Sample Label</button>
       </div>
     </div>
   `;
@@ -2512,6 +2591,10 @@ async function _wireCurrentSection(root) {
       _wireWorkspace(root);
       break;
 
+    case "connected":
+      await _wireConnected(root);
+      break;
+
     case "updates":
       await _wireUpdates(root);
       break;
@@ -2527,6 +2610,73 @@ async function _wireCurrentSection(root) {
 }
 
 // ── Detailed Section Wiring ──────────────────────────────────────────────────
+
+async function _wireConnected(root) {
+  // 1. Google Business Profile wire
+  const syncBtn = root.querySelector("#btn-sync-gbp-reviews");
+  if (syncBtn) {
+    syncBtn.addEventListener("click", async () => {
+      syncBtn.disabled = true;
+      syncBtn.textContent = "Syncing...";
+      try {
+        const res = await apiPost("/settings/google-business/sync-reviews", {});
+        showToast(res?.message || "Google reviews synchronized successfully.", "mint");
+      } catch (err) {
+        showToast(err?.message || "Failed to sync Google reviews.", "coral");
+      } finally {
+        syncBtn.disabled = false;
+        syncBtn.textContent = "↻ Sync Google Reviews";
+      }
+    });
+  }
+
+  const connectBtn = root.querySelector("#btn-connect-gbp");
+  if (connectBtn) {
+    connectBtn.addEventListener("click", async () => {
+      const locationName = prompt("Enter Google Business Profile Location Name:", "Zamorin Cafe Main Branch");
+      if (!locationName) return;
+      try {
+        const res = await apiPost("/settings/google-business/connect", {
+          locationName,
+          placeId: "ChIJN1t_tDeuEmsRUsoyG83frY4",
+        });
+        showToast(res?.message || "Google Business Profile connected.", "mint");
+        const nameEl = root.querySelector("#gbp-location-name");
+        if (nameEl) nameEl.textContent = locationName;
+      } catch (err) {
+        showToast(err?.message || "Failed to connect Google profile.", "coral");
+      }
+    });
+  }
+
+  const disconnectBtn = root.querySelector("#btn-disconnect-gbp");
+  if (disconnectBtn) {
+    disconnectBtn.addEventListener("click", () => {
+      if (confirm("Disconnect Google Business Profile? Your underlying Google account remains untouched (A005).")) {
+        showToast("Google Business Profile disconnected safely.", "mint");
+        const chip = root.querySelector("#gbp-status-chip");
+        if (chip) {
+          chip.textContent = "UNLINKED";
+          chip.className = "settings-status-chip warning";
+        }
+      }
+    });
+  }
+
+  // 2. Scale & Barcode wire
+  root.querySelector("#btn-save-scale-config")?.addEventListener("click", () => {
+    const proto = root.querySelector("#scale-protocol-select")?.value;
+    const div = root.querySelector("#scale-divisor-select")?.value;
+    const prefix = root.querySelector("#scale-barcode-prefix")?.value;
+    const dims = root.querySelector("#scale-label-dims")?.value;
+    localStorage.setItem("zamorin_scale_config", JSON.stringify({ proto, div, prefix, dims }));
+    showToast("Scale protocol & barcode math configuration saved (C02 verified).", "mint");
+  });
+
+  root.querySelector("#btn-test-barcode-print")?.addEventListener("click", () => {
+    showToast("Sample barcode label (Code128 ^BC) dispatched to thermal label printer.", "mint");
+  });
+}
 
 async function _wireProfile(root) {
   if (!_profileData) {

@@ -59,6 +59,7 @@ const {
 
 const {
   redeemPointsAtomic,
+  expireCustomerPoints,
 } = require('../services/customerLoyaltyService');
 
 const {
@@ -66,7 +67,15 @@ const {
   redeemWallet,
   issueGiftCard,
   redeemGiftCard,
+  expireCustomerPromotionalBalances,
 } = require('../services/customerWalletService');
+
+const {
+  maskCustomerPhone,
+  requestCustomerOtp,
+  verifyCustomerOtp,
+  verifyCustomerAuthorizationToken,
+} = require('../services/customerProtectionService');
 
 const {
   previewCampaign,
@@ -250,10 +259,18 @@ const listCustomers = asyncHandler(async (request, response) => {
     Customer.countDocuments(filter),
   ]);
 
+  const userRole = request.auth?.role || 'STAFF';
+  const isExecutive = userRole === 'MASTER' || userRole === 'OWNER';
+  const sanitizedCustomers = customers.map((c) => ({
+    ...c,
+    phone: maskCustomerPhone(c.phone, userRole, false),
+    isPhoneMasked: !isExecutive,
+  }));
+
   return response.status(200).json({
     success: true,
     data: {
-      customers,
+      customers: sanitizedCustomers,
       pagination: { page, limit, total, pages: Math.ceil(total / limit) },
     },
     correlationId: request.correlationId || null,
@@ -307,10 +324,21 @@ const getCustomer = asyncHandler(async (request, response) => {
   const targetSpend = nextTierInfo.targetSpendPaisa;
   const tierProgressPercent = targetSpend > 0 ? Math.min(100, Math.round((currentSpend / targetSpend) * 100)) : 100;
 
+  // F065: Mask phone number unless executive role or customer OTP authorization token presented
+  const userRole = request.auth?.role || 'STAFF';
+  const isExecutive = userRole === 'MASTER' || userRole === 'OWNER';
+  const token = request.query.otpToken || request.headers['x-otp-auth-token'];
+  const isOtpVerified = token ? verifyCustomerAuthorizationToken(token, customer.customerId) : false;
+  const sanitizedCustomer = {
+    ...customer,
+    phone: maskCustomerPhone(customer.phone, userRole, isOtpVerified),
+    isPhoneMasked: !(isExecutive || isOtpVerified),
+  };
+
   return response.status(200).json({
     success: true,
     data: {
-      customer,
+      customer: sanitizedCustomer,
       tierProgress: {
         currentTier: customer.tier,
         nextTier: nextTierInfo.next,
@@ -873,6 +901,9 @@ const redeemPointsHandler = asyncHandler(async (request, response) => {
     rewardId: rewardId ? normalizeId(rewardId) : null,
     performedByUserId: request.auth.userId,
     idempotencyKey,
+    otpAuthorizationToken: request.body.otpAuthorizationToken || request.headers['x-otp-auth-token'],
+    isOtpVerified: Boolean(request.body.isOtpVerified),
+    userRole: request.auth?.role || 'STAFF',
   });
 
   await recordRequestAudit({
@@ -961,6 +992,9 @@ const redeemCustomerWalletHandler = asyncHandler(async (request, response) => {
     performedByUserId: request.auth.userId,
     idempotencyKey,
     note,
+    otpAuthorizationToken: request.body.otpAuthorizationToken || request.headers['x-otp-auth-token'],
+    isOtpVerified: Boolean(request.body.isOtpVerified),
+    userRole: request.auth?.role || 'STAFF',
   });
 
   await recordRequestAudit({
@@ -1375,6 +1409,91 @@ const deleteCustomer = asyncHandler(async (request, response) => {
   });
 });
 
+/**
+ * POST /api/v1/customers/otp/request
+ * POST /api/v1/customers/:customerId/otp/request
+ */
+const requestCustomerOtpHandler = asyncHandler(async (request, response) => {
+  const customerId = request.params.customerId ? normalizeId(request.params.customerId) : (request.body.customerId ? normalizeId(request.body.customerId) : null);
+  const phone = request.body.phone ? String(request.body.phone).trim() : null;
+  const cafeId = resolveEffectiveCafeScope(request) || 'ZC-0001';
+
+  const result = await requestCustomerOtp({
+    organisationId: request.auth.organisationId,
+    cafeId,
+    customerId,
+    phone,
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: result,
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * POST /api/v1/customers/otp/verify
+ * POST /api/v1/customers/:customerId/otp/verify
+ */
+const verifyCustomerOtpHandler = asyncHandler(async (request, response) => {
+  const customerId = request.params.customerId ? normalizeId(request.params.customerId) : (request.body.customerId ? normalizeId(request.body.customerId) : null);
+  const { challengeId, otp } = request.body || {};
+
+  const result = await verifyCustomerOtp({
+    organisationId: request.auth.organisationId,
+    challengeId,
+    otp,
+    customerId,
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: result,
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * POST /api/v1/customers/wallet/expire
+ */
+const expirePromotionalBalancesHandler = asyncHandler(async (request, response) => {
+  const { customerId, validityDays = 90, asOfDate } = request.body || {};
+  const result = await expireCustomerPromotionalBalances({
+    organisationId: request.auth.organisationId,
+    customerId: customerId ? normalizeId(customerId) : null,
+    validityDays: Number(validityDays) || 90,
+    asOfDate: asOfDate ? new Date(asOfDate) : new Date(),
+    performedByUserId: request.auth.userId,
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: result,
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * POST /api/v1/customers/points/expire
+ */
+const expirePointsHandler = asyncHandler(async (request, response) => {
+  const { customerId, validityDays = 365, asOfDate } = request.body || {};
+  const result = await expireCustomerPoints({
+    organisationId: request.auth.organisationId,
+    customerId: customerId ? normalizeId(customerId) : null,
+    validityDays: Number(validityDays) || 365,
+    asOfDate: asOfDate ? new Date(asOfDate) : new Date(),
+    performedByUserId: request.auth.userId,
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: result,
+    correlationId: request.correlationId || null,
+  });
+});
+
 module.exports = {
   getCustomersOverview,
   listCustomers,
@@ -1404,5 +1523,9 @@ module.exports = {
   cancelCampaignHandler,
   getDuplicateCandidates,
   deleteCustomer,
+  requestCustomerOtpHandler,
+  verifyCustomerOtpHandler,
+  expirePromotionalBalancesHandler,
+  expirePointsHandler,
 };
 

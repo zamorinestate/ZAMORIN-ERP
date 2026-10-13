@@ -16,6 +16,7 @@ const {
   createMenuItem,
   updateMenuItem,
   retireMenuItem,
+  deleteMenuItemVariant,
   listRecipes,
   getRecipeDetail,
   createRecipe,
@@ -36,6 +37,13 @@ const {
   simulateEffectiveMenu,
   getMenuIntegrityAudit,
   getMenuAnalytics,
+  exportRecipeWorkbook,
+  importRecipeWorkbook,
+  aiSuggestRecipe,
+  substituteRecipeIngredientHandler,
+  aggregatorQcAuditHandler,
+  exportBulkModifierMappingHandler,
+  importBulkModifierMappingHandler,
 } = require('../controllers/menuController');
 
 const router = express.Router();
@@ -80,11 +88,36 @@ router.delete(
   retireMenuItem
 );
 
+// A052 / F042: Variation Removal with History Guard
+router.delete(
+  '/items/:menuItemId/variants/:variantId',
+  authorize('MENU_WRITE', { allowedRoles: ['MASTER'] }),
+  deleteMenuItemVariant
+);
+
 // 3. Recipes & Sub-Recipes
 router.get(
   '/recipes',
   authorize('MENU_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
   listRecipes
+);
+
+router.get(
+  '/recipes/export-workbook',
+  authorize('MENU_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  exportRecipeWorkbook
+);
+
+router.post(
+  '/recipes/import-workbook',
+  authorize('MENU_WRITE', { allowedRoles: ['MASTER'] }),
+  importRecipeWorkbook
+);
+
+router.post(
+  '/recipes/ai-suggest',
+  authorize('MENU_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  aiSuggestRecipe
 );
 
 router.get(
@@ -236,6 +269,39 @@ router.get(
   '/analytics',
   authorize('MENU_READ', { allowedRoles: ['MASTER', 'OWNER'] }),
   getMenuAnalytics
+);
+
+// Benchmark A104: Global Recipe Component Substitution Wizard
+router.post(
+  '/recipes/substitute-ingredient',
+  authorize('MENU_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  substituteRecipeIngredientHandler
+);
+
+// Benchmark A050: Aggregator Menu Quality-Check Failure Center
+router.get(
+  '/aggregator-qc-audit',
+  authorize('MENU_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  aggregatorQcAuditHandler
+);
+
+// Benchmark A040: Bulk Add-on to Menu Item Excel Mapper (Export & Import)
+router.get(
+  '/bulk-modifiers/export',
+  authorize('MENU_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  exportBulkModifierMappingHandler
+);
+
+router.post(
+  '/bulk-modifiers/import',
+  authorize('MENU_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  importBulkModifierMappingHandler
+);
+
+router.post(
+  '/addon-mapping/bulk-import',
+  authorize('MENU_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  importBulkModifierMappingHandler
 );
 
 module.exports = router;

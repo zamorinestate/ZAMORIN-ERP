@@ -17,6 +17,32 @@ const { LoyaltyLedger } = require('../models/LoyaltyLedger');
 const { LoyaltyProgramme } = require('../models/LoyaltyProgramme');
 const { SequenceCounter } = require('../models/SequenceCounter');
 const { ApiError } = require('../utils/ApiError');
+const { verifyCustomerAuthorizationToken } = require('./customerProtectionService');
+
+/**
+ * F067: Standard Dynamic Loyalty Slabs
+ * Multipliers: Bronze 1.0x, Silver 1.25x, Gold 1.5x, Platinum 2.0x
+ */
+const STANDARD_LOYALTY_SLABS = [
+  { tier: 'BRONZE', minSpendPaisa: 0, minVisits: 0, earnMultiplier: 1.0 },
+  { tier: 'SILVER', minSpendPaisa: 500000, minVisits: 5, earnMultiplier: 1.25 },
+  { tier: 'GOLD', minSpendPaisa: 1500000, minVisits: 15, earnMultiplier: 1.5 },
+  { tier: 'PLATINUM', minSpendPaisa: 3000000, minVisits: 30, earnMultiplier: 2.0 },
+];
+
+function evaluateCustomerTier(customer, customSlabs = null) {
+  const slabs = (customSlabs && customSlabs.length > 0) ? customSlabs : STANDARD_LOYALTY_SLABS;
+  const spend = customer?.totalSpendPaisa || 0;
+  const visits = customer?.totalVisits || 0;
+
+  let qualifiedTier = 'BRONZE';
+  for (const slab of slabs) {
+    if (spend >= (slab.minSpendPaisa || 0) || (slab.minVisits && visits >= slab.minVisits)) {
+      qualifiedTier = slab.tier;
+    }
+  }
+  return qualifiedTier;
+}
 
 /**
  * Retrieve active loyalty programme rules for an organization
@@ -63,7 +89,12 @@ async function accrueSaleRewards({
   billAmountPaise = 0,
   performedByUserId = 'SYSTEM',
   idempotencyKey = null,
+  loyaltyOptOut = false,
 }) {
+  if (loyaltyOptOut) {
+    return { success: true, pointsAccrued: 0, optedOut: true, message: 'Transaction opted out of loyalty accrual (Benchmark A068).' };
+  }
+
   if (!organisationId || !customerId || !billId) {
     throw new ApiError(400, 'INVALID_ACCRUAL_PARAMETERS', 'Organisation, customer ID, and bill ID are required.');
   }
@@ -99,18 +130,21 @@ async function accrueSaleRewards({
 
   const rules = await getEffectiveLoyaltyRules(organisationId);
   const tierConfig = rules.tierRules.find((t) => t.tier === customer.tier) || { earnMultiplier: 1.0 };
-  const basePoints = Math.floor((Number(eligibleAmountRupees) || 0) * rules.spendToPointsRatio);
+  const effectiveRupees = Number(eligibleAmountRupees) ||
+    ((Number(billAmountPaise) || Number(arguments[0]?.finalPaidAmountPaisa) || 0) / 100);
+  const basePoints = Math.floor(effectiveRupees * rules.spendToPointsRatio);
   const pointsToAccrue = Math.max(0, Math.floor(basePoints * (tierConfig.earnMultiplier || 1.0)));
 
   if (pointsToAccrue <= 0) {
     return { success: true, pointsAccrued: 0, message: 'No points earned for this transaction.' };
   }
 
-  const prevBalance = customer.pointsBalance || 0;
+  const prevBalance = customer.loyaltyPointsBalance ?? customer.pointsBalance ?? 0;
   const newBalance = prevBalance + pointsToAccrue;
 
   customer.pointsBalance = newBalance;
-  customer.totalSpendPaisa = (customer.totalSpendPaisa || 0) + (billAmountPaise || Math.round((eligibleAmountRupees || 0) * 100));
+  customer.loyaltyPointsBalance = newBalance;
+  customer.totalSpendPaisa = (customer.totalSpendPaisa || 0) + (billAmountPaise || Math.round(effectiveRupees * 100));
   customer.totalVisits = (customer.totalVisits || 0) + 1;
   customer.lastVisitAt = new Date();
   await customer.save();
@@ -139,11 +173,48 @@ async function accrueSaleRewards({
 
   await ledgerEntry.save();
 
+  // F067: Dynamic Loyalty Slab & Tier Progression
+  const oldTier = customer.tier || 'BRONZE';
+  const newTier = evaluateCustomerTier(customer, rules.tierRules);
+  let tierChangeLedger = null;
+
+  if (newTier !== oldTier) {
+    customer.tier = newTier;
+    customer.tierQualifiedAt = new Date();
+    await customer.save();
+
+    const tierSeq = await SequenceCounter.generateId({
+      organisationId,
+      sequenceKey: 'LOYALTY_LEDGER_SEQ',
+      prefix: 'LOY',
+      minimumDigits: 4,
+    });
+
+    const tierEntry = new LoyaltyLedger({
+      loyaltyLedgerId: tierSeq,
+      organisationId,
+      customerId,
+      transactionType: 'TIER_CHANGED',
+      pointsDelta: 0,
+      balanceBefore: newBalance,
+      balanceAfter: newBalance,
+      referenceBillId: billId,
+      description: `Dynamic tier progression upgraded from ${oldTier} to ${newTier} (F067)`,
+      performedByUserId,
+      serverTimestamp: new Date(),
+    });
+    await tierEntry.save();
+    tierChangeLedger = tierEntry.toObject();
+  }
+
   return {
     success: true,
     pointsAccrued: pointsToAccrue,
     newBalance,
+    tier: customer.tier,
+    tierUpgraded: newTier !== oldTier,
     ledger: ledgerEntry.toObject(),
+    tierChangeLedger,
   };
 }
 
@@ -385,10 +456,25 @@ async function redeemPointsAtomic({
   allowedRedemptionDays = null, // e.g. ['MONDAY', 'TUESDAY', ...]
   performedByUserId = 'SYSTEM',
   idempotencyKey = null,
+  otpAuthorizationToken = null,
+  isOtpVerified = false,
+  userRole = 'STAFF',
 }) {
   const points = Math.round(Number(pointsToRedeem));
   if (!points || points <= 0) {
     throw new ApiError(400, 'INVALID_REDEMPTION_AMOUNT', 'Points to redeem must be a positive integer.');
+  }
+
+  // F066: OTP Verification challenge for high-value points redemptions (> 500 points)
+  if (points > 500 && userRole !== 'MASTER' && userRole !== 'OWNER' && !isOtpVerified) {
+    const isAuthorized = verifyCustomerAuthorizationToken(otpAuthorizationToken, customerId);
+    if (!isAuthorized) {
+      throw new ApiError(
+        403,
+        'CUSTOMER_OTP_REQUIRED',
+        'Redemptions exceeding 500 loyalty points strictly require customer OTP verification (F066).'
+      );
+    }
   }
 
   // Weekday restriction enforcement (Benchmark A063)
@@ -599,14 +685,85 @@ function calculateMultiCategoryRedemption({
   };
 }
 
+/**
+ * F068: Expire lapsed loyalty points past validity threshold
+ */
+async function expireCustomerPoints({
+  organisationId,
+  customerId = null,
+  validityDays = 365,
+  asOfDate = new Date(),
+  performedByUserId = 'SYSTEM',
+}) {
+  const query = {
+    organisationId,
+    pointsBalance: { $gt: 0 },
+  };
+  if (customerId) query.customerId = customerId;
+
+  const cutoffDate = new Date(asOfDate.getTime() - validityDays * 24 * 60 * 60 * 1000);
+  query.$or = [
+    { lastVisitAt: { $lt: cutoffDate } },
+    { lastVisitAt: null, createdAt: { $lt: cutoffDate } },
+  ];
+
+  const customers = await Customer.find(query);
+  const expiredResults = [];
+
+  for (const customer of customers) {
+    const expiredPoints = customer.pointsBalance;
+    if (!expiredPoints || expiredPoints <= 0) continue;
+
+    const prevBalance = customer.pointsBalance;
+    customer.pointsBalance = 0;
+    await customer.save();
+
+    const loySeq = await SequenceCounter.generateId({
+      organisationId,
+      sequenceKey: 'LOYALTY_LEDGER_SEQ',
+      prefix: 'LOY',
+      minimumDigits: 4,
+    });
+
+    const ledgerEntry = new LoyaltyLedger({
+      loyaltyLedgerId: loySeq,
+      organisationId,
+      customerId: customer.customerId,
+      transactionType: 'POINTS_EXPIRED',
+      pointsDelta: -expiredPoints,
+      balanceBefore: prevBalance,
+      balanceAfter: 0,
+      description: `Points lapsed past ${validityDays}-day inactivity threshold (F068)`,
+      performedByUserId,
+      serverTimestamp: asOfDate,
+    });
+    await ledgerEntry.save();
+
+    expiredResults.push({
+      customerId: customer.customerId,
+      expiredPoints,
+      ledger: ledgerEntry.toObject(),
+    });
+  }
+
+  return {
+    success: true,
+    totalExpiredCustomers: expiredResults.length,
+    expiredResults,
+  };
+}
+
 module.exports = {
   getEffectiveLoyaltyRules,
+  evaluateCustomerTier,
   accrueSaleRewards,
   reverseSaleRewardsOnVoid,
   reverseRewardsOnRefund,
   redeemPointsAtomic,
+  expireCustomerPoints,
   processSalesReturnRewardAdjustment,
   validateAndPersistCaptainKOTRedemption,
   calculateMultiCategoryRedemption,
+  STANDARD_LOYALTY_SLABS,
 };
 

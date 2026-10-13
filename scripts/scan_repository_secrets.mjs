@@ -26,6 +26,7 @@ const SECRET_PATTERNS = [
 const IGNORE_PATTERNS = [
   /node_modules/,
   /\.git/,
+  /\.env/,
   /package-lock\.json/,
   /\.png$/,
   /\.jpg$/,

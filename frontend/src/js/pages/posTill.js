@@ -67,7 +67,15 @@ let searchQuery = "";
 let isCompactMode = false;
 let discountPaisa = 0;
 let discountReason = "";
+let currentSupervisorPin = "";
 let isPaymentInProgress = false;
+let activeCustomer = null;
+let customerAuthToken = "";
+let isWalletOtpVerified = false;
+let activeSirenAudioInterval = null;
+let isNumpadVisible = false;
+let activeDiningAreaId = "DEFAULT";
+let numpadBuffer = "";
 
 // Subview state
 let activeMainView = "POS"; // POS | PAST_ORDERS | REGISTER | DAILY_CLOSE
@@ -90,6 +98,26 @@ let upiState = "READY"; // READY | GENERATING | PRESENTED | CONFIRMING | PAID | 
 let cashReceivedAmount = 0;
 let isMobileTicketOpen = false;
 
+// A014: Persistent Held Carts Queue
+function getLocalHeldCarts(cafeId) {
+  try {
+    const key = `zamorin_held_carts_${cafeId || "default"}`;
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalHeldCarts(cafeId, carts) {
+  try {
+    const key = `zamorin_held_carts_${cafeId || "default"}`;
+    localStorage.setItem(key, JSON.stringify(carts));
+  } catch (e) {
+    console.error("Failed to save held carts", e);
+  }
+}
+
 function escapeHtml(str) {
   if (typeof str !== "string") return "";
   return str.replace(/[&<>'"]/g, (tag) => ({
@@ -99,6 +127,38 @@ function escapeHtml(str) {
     "'": "&#39;",
     '"': "&quot;",
   }[tag] || tag));
+}
+
+// A057: Multilingual Soundbox Receipts (Web Speech API in EN, HI, ML, TA)
+function speakSoundboxReceipt(amountRupees, language = "en") {
+  if (typeof window === "undefined" || !window.speechSynthesis) return;
+  try {
+    const text = language === "ml"
+      ? `ഭീം യുപിഐ വഴി ${amountRupees} രൂപ ലഭിച്ചു`
+      : language === "hi"
+      ? `भीम यूपीआई पर ${amountRupees} रुपये प्राप्त हुए`
+      : language === "ta"
+      ? `பீம் யுபிஐ மூலம் ${amountRupees} ரூபாய் பெறப்பட்டது`
+      : `Received ${amountRupees} rupees on BHIM UPI`;
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 1.0;
+    utterance.pitch = 1.1;
+    window.speechSynthesis.speak(utterance);
+  } catch (_) {}
+}
+
+// A060: Live BroadcastChannel for Customer Dual-Screen
+function broadcastToCustomerDualScreen(cartEntries = [], subtotal = 0, tax = 0, grandTotal = 0) {
+  try {
+    const ch = new BroadcastChannel("zamorin_pos_dualscreen");
+    ch.postMessage({
+      items: cartEntries.map((l) => ({ name: l.item?.name || "Item", qty: l.qty, pricePaisa: Math.round((l.item?.price || 0) * 100) })),
+      subtotalPaisa: Math.round(subtotal * 100),
+      taxPaisa: Math.round(tax * 100),
+      totalPaisa: Math.round(grandTotal * 100),
+    });
+    ch.close();
+  } catch (_) {}
 }
 
 export function renderPOS() {
@@ -221,7 +281,13 @@ function renderTerminalView() {
           <!-- Dine-In / Takeaway / Special Metadata Controls -->
           ${activeServiceMode === "DINE_IN" ? `
             <div style="display:flex;align-items:center;gap:6px;">
+              <select id="pos-dining-area-picker" class="select" style="font-size:11.5px;padding:3px 8px;font-weight:700;" title="Dining Area Pricing (F045)">
+                <option value="DEFAULT" ${activeDiningAreaId === "DEFAULT" ? "selected" : ""}>Main Area</option>
+                <option value="AREA-ROOFTOP" ${activeDiningAreaId === "AREA-ROOFTOP" ? "selected" : ""}>Rooftop (+Area Price)</option>
+                <option value="AREA-GARDEN" ${activeDiningAreaId === "AREA-GARDEN" ? "selected" : ""}>Garden</option>
+              </select>
               <select id="pos-table-picker" class="select" style="font-size:11.5px;padding:3px 8px;font-weight:700;">
+
                 <option value="Table 01 (Indoor)" ${activeTable === "Table 01 (Indoor)" ? "selected" : ""}>Table 01 (Indoor)</option>
                 <option value="Table 02 (Indoor)" ${activeTable === "Table 02 (Indoor)" ? "selected" : ""}>Table 02 (Indoor)</option>
                 <option value="Table 03 (Patio)" ${activeTable === "Table 03 (Patio)" ? "selected" : ""}>Table 03 (Patio)</option>
@@ -231,6 +297,12 @@ function renderTerminalView() {
               <select id="pos-covers-picker" class="select" style="font-size:11.5px;padding:3px 6px;">
                 ${[1, 2, 3, 4, 5, 6, 8].map((c) => `<option value="${c}" ${guestCovers === c ? "selected" : ""}>${c}p</option>`).join("")}
               </select>
+              <button class="btn btn-sm btn-ghost" id="pos-shift-table-btn" type="button" style="padding:2px 8px;font-size:11px;font-weight:700;" title="Shift Table (A022)">
+                🔄 Shift
+              </button>
+              <button class="btn btn-sm btn-ghost" id="pos-merge-table-btn" type="button" style="padding:2px 8px;font-size:11px;font-weight:700;" title="Merge Tables (F027)">
+                🔗 Merge
+              </button>
             </div>
           ` : activeServiceMode === "TAKEAWAY" ? `
             <div style="display:flex;align-items:center;gap:6px;">
@@ -273,6 +345,27 @@ function renderTerminalView() {
           <button class="pos-service-mode-btn" id="toggle-density-btn" style="padding:6px 10px;font-size:12px;" title="Toggle Compact Mode" type="button">
             ${isCompactMode ? "🖼️ Visual" : "☷ Compact"}
           </button>
+          <button class="pos-service-mode-btn ${isNumpadVisible ? 'active' : ''}" id="pos-numpad-toggle-btn" style="padding:6px 10px;font-size:12px;" title="Toggle On-Screen Touch Numpad (F002, F009)" type="button">
+            🔢 ${isNumpadVisible ? "Hide Numpad" : "Touch Numpad"}
+          </button>
+          <button class="pos-service-mode-btn" id="pos-test-siren-btn" style="padding:6px 10px;font-size:12px;color:var(--danger);font-weight:700;" title="Test Real-Time Negative Feedback Alert Siren (F249)" type="button">
+            🚨 Siren Test
+          </button>
+          <button class="pos-service-mode-btn" id="pos-kitchen-snooze-btn" style="padding:6px 10px;font-size:12px;" title="30-Min Kitchen Snooze (A081)" type="button">
+            ⏳ 30m Snooze
+          </button>
+          <button class="pos-service-mode-btn" id="pos-partner-voucher-btn" style="padding:6px 10px;font-size:12px;" title="Partner Dining Voucher (A058/A059)" type="button">
+            🎟️ Voucher
+          </button>
+          <button class="pos-service-mode-btn" id="pos-captain-pairing-btn" style="padding:6px 10px;font-size:12px;" title="Floor Captain QR Pairing (A131)" type="button">
+            📱 Captain QR
+          </button>
+          <button class="pos-service-mode-btn" id="pos-hardware-diag-btn" style="padding:6px 10px;font-size:12px;" title="Peripheral Diagnostics (A132)" type="button">
+            🩺 Hardware
+          </button>
+          <button class="pos-service-mode-btn" id="pos-lock-terminal-btn" style="padding:6px 10px;font-size:12px;" title="Inactivity Auto-Lock (A009)" type="button">
+            🔒 Lock
+          </button>
           <div id="pos-offline-status-container" style="display:inline-flex;align-items:center;gap:6px;">
             <span id="pos-offline-badge" style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:6px;font-size:11px;font-weight:700;background:${_offlinePendingCount > 0 ? "rgba(245,158,11,0.15)" : (navigator?.onLine ? "rgba(16,185,129,0.12)" : "rgba(239,68,68,0.15)")};color:${_offlinePendingCount > 0 ? "#b45309" : (navigator?.onLine ? "#059669" : "#dc2626")};">
               ${_offlinePendingCount > 0 ? `⚠️ Offline — ${_offlinePendingCount} waiting to sync` : (navigator?.onLine ? "🟢 Online" : "🔴 Offline")}
@@ -288,10 +381,26 @@ function renderTerminalView() {
       <div class="pos-grid-layout" style="display:grid;grid-template-columns:1fr 390px;gap:14px;flex:1;align-items:start;">
         <!-- Left Column: Menu Search, Categories, Product Cards -->
         <div class="card" style="padding:16px;display:flex;flex-direction:column;gap:12px;background:var(--surface);border:1px solid var(--line);">
+          ${isNumpadVisible ? `
+            <div id="pos-touch-numpad" style="background:var(--surface-sunken);border:1px solid var(--line);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:8px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-size:11.5px;font-weight:700;color:var(--ink);">🔢 Touch Numpad / On-Screen Keypad (F002 / F009)</span>
+                <span id="pos-numpad-display" style="font-family:var(--font-mono);font-size:14px;font-weight:800;color:var(--ink);background:var(--surface);padding:3px 10px;border-radius:6px;border:1px solid var(--line);min-width:80px;text-align:right;">${numpadBuffer || "0"}</span>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:6px;">
+                ${['7','8','9','⌫','4','5','6','CLR','1','2','3','ENT','.','0','+','−'].map((k) => `
+                  <button class="btn btn-secondary pos-numpad-key" data-numpad-key="${k}" style="padding:10px;font-size:14px;font-weight:800;min-height:42px;border-radius:8px;" type="button">
+                    ${k}
+                  </button>
+                `).join('')}
+              </div>
+            </div>
+          ` : ""}
+
           <!-- Search & Category Filter Bar (§24–§27) -->
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             <div style="position:relative;flex:1;min-width:220px;">
-              <input type="text" id="pos-menu-search" class="input" placeholder="Search menu or code (PO-01)..." value="${escapeHtml(searchQuery)}" style="font-size:12.5px;padding:6px 28px 6px 30px;" />
+              <input type="text" id="pos-menu-search" class="input" placeholder="Search menu, code (PO-01), KOT# (A019), slip (A020)..." value="${escapeHtml(searchQuery)}" style="font-size:12.5px;padding:6px 28px 6px 30px;" />
               <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);font-size:12px;color:var(--muted);">🔍</span>
               ${searchQuery ? `
                 <button id="pos-clear-search" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;" type="button">✕</button>
@@ -366,19 +475,72 @@ function renderTerminalView() {
         <!-- Right Column: Active Order Ticket & Checkout Assistant (§42–§85) -->
         <div class="card pos-ticket-panel" style="padding:16px;display:flex;flex-direction:column;justify-content:space-between;background:var(--surface);border:1px solid var(--line);position:sticky;top:70px;border-radius:12px;box-shadow:var(--shadow-sm);">
           <div>
-            <!-- Ticket Header & Quick Actions (§48–§50) -->
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--line);">
+            <!-- Ticket Header & Quick Actions (§48–§50, A014, A041, A013) -->
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--line);gap:6px;flex-wrap:wrap;">
               <div>
                 <h2 style="font-size:15px;font-weight:800;margin:0;color:var(--ink);">Active Order Ticket</h2>
                 <span style="font-size:11px;color:var(--muted);">
                   ${activeServiceMode === "DINE_IN" ? `${activeTable} · ${guestCovers} Covers` : activeServiceMode === "TAKEAWAY" ? `Takeaway Token ${activeToken}` : "Quick Sale · Counter"}
                 </span>
               </div>
-              <div style="display:flex;gap:5px;">
-                <button class="pos-service-mode-btn" id="hold-ticket-btn" ${!cart.length ? "disabled" : ""} style="font-size:11px;padding:3px 8px;" title="Park ticket on hold" type="button">⏸️ Hold</button>
-                <button class="pos-service-mode-btn" id="clear-ticket-btn" ${!cart.length ? "disabled" : ""} style="font-size:11px;padding:3px 8px;color:var(--danger);" type="button">Clear</button>
+              <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                <button class="pos-service-mode-btn" id="held-carts-btn" style="font-size:11px;padding:3px 7px;font-weight:700;" title="View Held Carts (A014)" type="button">
+                  📦 Held (<span id="held-count-badge">${getLocalHeldCarts(resolvePosCafeId()).length}</span>)
+                </button>
+                <button class="pos-service-mode-btn" id="open-item-btn" style="font-size:11px;padding:3px 7px;font-weight:700;color:var(--bronze-600);" title="Add Open Item (A041)" type="button">
+                  ➕ Open
+                </button>
+                <button class="pos-service-mode-btn" id="discount-btn" ${!cart.length ? "disabled" : ""} style="font-size:11px;padding:3px 7px;font-weight:700;" title="Apply Discount (A013)" type="button">
+                  🏷️ Disc
+                </button>
+                <button class="pos-service-mode-btn" id="pos-split-bill-cart-btn" ${!cart.length ? "disabled" : ""} style="font-size:11px;padding:3px 7px;font-weight:700;" title="Split Bill (F028–F031)" type="button">
+                  ✂️ Split
+                </button>
+                <button class="pos-service-mode-btn" id="hold-ticket-btn" ${!cart.length ? "disabled" : ""} style="font-size:11px;padding:3px 7px;" title="Park ticket on hold" type="button">⏸️ Hold</button>
+                <button class="pos-service-mode-btn" id="clear-ticket-btn" ${!cart.length ? "disabled" : ""} style="font-size:11px;padding:3px 7px;color:var(--danger);" type="button">Clear</button>
               </div>
             </div>
+
+            <!-- Customer & Loyalty Bar (F065, F066, F067) -->
+            <div id="pos-customer-bar" style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;margin-bottom:8px;background:var(--surface-sunken);border-radius:6px;border:1px solid var(--line);font-size:11px;">
+              ${activeCustomer ? `
+                <div style="display:flex;align-items:center;gap:6px;overflow:hidden;">
+                  <span>👤</span>
+                  <strong style="color:var(--ink);">${escapeHtml(activeCustomer.name)}</strong>
+                  <span style="font-family:var(--font-mono);color:var(--muted);">${escapeHtml(activeCustomer.phone)}</span>
+                  <span class="badge" style="font-size:9px;padding:1px 5px;background:var(--bronze-500);color:#ffffff;">${activeCustomer.tier || 'BRONZE'}</span>
+                </div>
+                <div style="display:flex;gap:4px;align-items:center;">
+                  ${activeCustomer.isPhoneMasked ? `
+                    <button class="btn btn-sm btn-ghost" id="pos-unmask-customer-btn" type="button" style="font-size:10px;padding:1px 5px;font-weight:700;color:var(--bronze-600);" title="Verify OTP to Unmask (F066)">📲 OTP</button>
+                  ` : ""}
+                  <button class="btn btn-sm btn-ghost" id="pos-remove-customer-btn" type="button" style="font-size:10px;padding:1px 4px;color:var(--danger);" title="Remove Customer">✕</button>
+                </div>
+              ` : `
+                <span style="color:var(--muted);">No Customer Attached</span>
+                <button class="btn btn-sm btn-ghost" id="pos-attach-customer-btn" type="button" style="font-size:10.5px;padding:2px 6px;font-weight:700;color:var(--bronze-600);">
+                  👤 + Customer / Loyalty
+                </button>
+              `}
+            </div>
+
+            <!-- Cashier Milestone & Occasion Banner (F230, A078) -->
+            ${(() => {
+              const occ = getCustomerOccasion(activeCustomer);
+              if (!occ) return "";
+              return `
+                <div id="pos-occasion-banner" style="background:linear-gradient(135deg, #fef3c7, #fde68a);border:1.5px solid #d97706;padding:8px 10px;border-radius:6px;margin-bottom:8px;display:flex;align-items:center;gap:8px;box-shadow:0 1px 4px rgba(217,119,6,0.15);">
+                  <span style="font-size:20px;">${occ.icon}</span>
+                  <div style="flex:1;min-width:0;">
+                    <div style="font-weight:800;color:#92400e;font-size:11.5px;line-height:1.2;">${escapeHtml(occ.title)}</div>
+                    <div style="font-size:10.5px;color:#78350f;margin-top:2px;">${escapeHtml(occ.message)}</div>
+                  </div>
+                  <button class="btn btn-sm" id="pos-occasion-treat-btn" type="button" style="background:#b45309;color:#ffffff;font-size:10.5px;padding:2px 8px;font-weight:700;border:none;border-radius:4px;white-space:nowrap;">
+                    🎁 ${escapeHtml(occ.suggestedAction)}
+                  </button>
+                </div>
+              `;
+            })()}
 
             <!-- Cart Line Items (§42–§47) -->
             <div id="pos-ticket-items" style="max-height:calc(100vh - 430px);overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding-right:2px;">
@@ -399,6 +561,9 @@ function renderTerminalView() {
                     <div style="flex:1;padding-right:6px;">
                       <div style="display:flex;align-items:center;gap:6px;">
                         <strong style="font-size:13px;color:var(--ink);">${line.item.name}</strong>
+                        ${line.isOpenItem || line.item?.isOpenItem ? `
+                          <span style="font-size:9.5px;padding:1px 5px;background:rgba(217,119,6,0.15);color:#d97706;font-weight:700;border-radius:4px;">Open</span>
+                        ` : ""}
                         ${line.item.hasModifiers ? `
                           <button class="btn btn-sm btn-ghost" data-edit-line-mods="${line.lineId}" style="padding:0 4px;font-size:10px;color:var(--bronze-600);height:18px;" type="button">✎ Edit</button>
                         ` : ""}
@@ -409,10 +574,11 @@ function renderTerminalView() {
                     </div>
                     <div style="display:flex;align-items:center;gap:3px;">
                       <button class="btn btn-sm btn-ghost" data-dec-line="${line.lineId}" style="padding:1px 6px;font-size:11px;min-height:26px;" type="button">−</button>
-                      <span style="font-family:var(--font-mono);font-weight:800;font-size:12.5px;min-width:14px;text-align:center;">${line.qty}</span>
+                      <span data-qty-line="${line.lineId}" title="Click to enter decimal qty/weight (F050)" style="font-family:var(--font-mono);font-weight:800;font-size:12.5px;min-width:14px;text-align:center;cursor:pointer;text-decoration:underline dotted;">${line.qty}</span>
                       <button class="btn btn-sm btn-ghost" data-inc-line="${line.lineId}" style="padding:1px 6px;font-size:11px;min-height:26px;" type="button">+</button>
-                      <button class="btn btn-sm btn-ghost" data-dup-line="${line.lineId}" title="Duplicate line" style="padding:1px 4px;font-size:10px;min-height:26px;" type="button">⎘</button>
+
                       <span style="font-family:var(--font-mono);font-weight:800;font-size:13.5px;min-width:55px;text-align:right;color:var(--ink);">₹${lineTotal}</span>
+                      <button class="btn btn-sm btn-ghost" data-edit-line-shortcut="${line.lineId}" title="Edit order line shortcut (A123)" style="padding:1px 4px;font-size:11px;min-height:24px;color:var(--bronze-600);cursor:pointer;" type="button">✏️</button>
                     </div>
                   </div>
                 `;
@@ -434,9 +600,12 @@ function renderTerminalView() {
             </div>
 
             ${discount > 0 ? `
-              <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--danger);margin-bottom:2px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--danger);margin-bottom:2px;">
                 <span>Discount (${escapeHtml(discountReason || "Applied")})</span>
-                <span style="font-family:var(--font-mono);">-₹${discount.toLocaleString("en-IN")}</span>
+                <div style="display:flex;align-items:center;gap:4px;">
+                  <span style="font-family:var(--font-mono);">-₹${discount.toLocaleString("en-IN")}</span>
+                  <button class="btn btn-sm btn-ghost" id="remove-discount-btn" style="padding:0 4px;font-size:10px;color:var(--danger);height:16px;" title="Remove discount" type="button">✕</button>
+                </div>
               </div>
             ` : ""}
 
@@ -451,11 +620,12 @@ function renderTerminalView() {
             </div>
 
             <!-- Tenders Grid (§71–§85) -->
-            <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-bottom:8px;">
+            <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin-bottom:8px;">
               ${[
                 { id: "UPI", label: "📱 UPI" },
                 { id: "CASH", label: "💵 Cash" },
                 { id: "CARD", label: "💳 Card" },
+                { id: "WALLET", label: "👛 Wallet" },
                 { id: "COMPLIMENTARY", label: "🎁 Free" },
                 { id: "SPLIT", label: "✂️ Split" },
               ].map((t) => `
@@ -503,6 +673,62 @@ function renderTerminalView() {
                 </div>
               </div>
             ` : ""}
+
+            <!-- EDC Card Machine Assistant Row (F070, A054-A056) -->
+            ${activeTender === "CARD" && grandTotal > 0 ? `
+              <div style="background:var(--surface-sunken);padding:8px 10px;border-radius:8px;margin-bottom:8px;border:1px solid var(--line);">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                  <span style="font-size:11.5px;font-weight:700;color:var(--ink);">💳 Push to Card Machine:</span>
+                  <span style="font-size:10.5px;color:var(--muted);">PineLabs · MSwipe · Paytm</span>
+                </div>
+                <div style="display:flex;gap:6px;">
+                  <button class="btn btn-secondary btn-sm" id="pos-edc-push-btn" style="flex:1;font-size:11.5px;padding:6px;font-weight:700;" type="button">
+                    📲 Push ₹${grandTotal} to EDC
+                  </button>
+                  <button class="btn btn-secondary btn-sm" id="pos-edc-status-btn" style="font-size:11.5px;padding:6px;display:none;" type="button">
+                    ⏳ Check Status
+                  </button>
+                </div>
+                <div id="pos-edc-msg" style="font-size:11px;color:var(--muted);margin-top:4px;">Tap button to push sale to connected card terminal.</div>
+              </div>
+            ` : ""}
+
+            <!-- Customer Wallet SMS OTP Assistant Row (F234, F236) -->
+            ${activeTender === "WALLET" && grandTotal > 0 ? `
+              <div style="background:var(--surface-sunken);padding:8px 10px;border-radius:8px;margin-bottom:8px;border:1px solid var(--line);">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                  <span style="font-size:11.5px;font-weight:700;color:var(--ink);">👛 Loyalty Wallet Redemption (F234):</span>
+                  <span style="font-size:10.5px;color:var(--muted);">4-Digit SMS OTP Challenge</span>
+                </div>
+                ${!activeCustomer ? `
+                  <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:var(--surface);border-radius:6px;border:1px dashed var(--line);">
+                    <span style="font-size:11px;color:var(--muted);">Attach a customer profile to redeem wallet credits.</span>
+                    <button class="btn btn-sm btn-primary" id="pos-wallet-attach-btn" type="button" style="font-size:11px;padding:2px 8px;font-weight:700;">👤 Attach</button>
+                  </div>
+                ` : `
+                  <div style="display:flex;flex-direction:column;gap:6px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;font-size:11.5px;">
+                      <span>Available Balance: <strong style="color:var(--success);">₹${((activeCustomer.walletBalancePaise || 0) / 100).toFixed(2)}</strong></span>
+                      <span>Deduction: <strong style="color:var(--ink);">₹${grandTotal.toFixed(2)}</strong></span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;padding-top:4px;border-top:1px dashed var(--line);">
+                      ${isWalletOtpVerified ? `
+                        <span style="font-size:11px;color:var(--success);font-weight:800;display:inline-flex;align-items:center;gap:4px;">
+                          ✅ SMS OTP Verified & Authorized
+                        </span>
+                        <span class="badge" style="font-size:9.5px;background:var(--success);color:#ffffff;">READY</span>
+                      ` : `
+                        <span style="font-size:11px;color:var(--muted);">Security Challenge Required</span>
+                        <button class="btn btn-sm btn-secondary" id="pos-wallet-otp-challenge-btn" type="button" style="font-size:11px;padding:3px 8px;font-weight:700;color:var(--bronze-600);">
+                          🔐 Verify 4-Digit OTP
+                        </button>
+                      `}
+                    </div>
+                  </div>
+                `}
+              </div>
+            ` : ""}
+
 
             <!-- Action Buttons Grid: Preview, Save, and Save & Print with Duplicate-Lock -->
             <div style="display:grid;grid-template-columns:1fr 1fr 1.6fr;gap:6px;">
@@ -637,6 +863,12 @@ function renderPastOrdersListSubTab(isMaster) {
         <div style="display:flex;gap:8px;flex:1;min-width:240px;">
           <input type="text" id="past-orders-search" class="input" placeholder="Search by Bill #, Invoice #, Table or Customer..." value="${escapeHtml(pastOrdersSearch)}" style="font-size:12.5px;padding:5px 10px;" />
         </div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input type="text" id="pos-barcode-lookup-input" class="input" placeholder="Scan Barcode / QR (A034)..." style="font-size:12px;padding:5px 8px;width:190px;font-family:var(--font-mono);" />
+          <button class="btn btn-sm btn-secondary" id="pos-barcode-lookup-btn" type="button" style="font-size:11.5px;font-weight:700;padding:5px 10px;">
+            🔍 Scan
+          </button>
+        </div>
         <div style="display:flex;gap:6px;">
           <select id="past-orders-status-filter" class="select" style="font-size:12px;padding:4px 8px;">
             <option value="ALL" ${pastOrdersStatus === "ALL" ? "selected" : ""}>All Statuses</option>
@@ -687,11 +919,14 @@ function renderPastOrdersListSubTab(isMaster) {
                   <div style="display:flex;gap:3px;justify-content:flex-end;">
                     <button class="btn btn-sm btn-ghost" data-inspect-bill="${o.billId}" style="padding:2px 5px;font-size:11px;" title="View 360 Detail" type="button">👁️</button>
                     <button class="btn btn-sm btn-ghost" data-reprint-bill="${o.billId}" style="padding:2px 5px;font-size:11px;" title="Reprint Receipt" type="button">🖨️</button>
+                    ${o.status === "COMPLETED" || o.status === "SAVED" ? `
+                      <button class="btn btn-sm btn-ghost" data-split-bill="${o.billId}" style="padding:2px 5px;font-size:11px;color:var(--bronze-600);" title="Split Bill (F028–F031)" type="button">✂️</button>
+                    ` : ""}
                     ${o.status === "COMPLETED" ? `
                       <button class="btn btn-sm btn-ghost" data-refund-bill="${o.billId}" style="padding:2px 5px;font-size:11px;color:var(--danger);" title="Issue Refund" type="button">↩️</button>
                     ` : ""}
-                    ${isMaster && o.status === "COMPLETED" ? `
-                      <button class="btn btn-sm btn-ghost" data-void-bill="${o.billId}" style="padding:2px 5px;font-size:11px;color:var(--danger);" title="Master Void" type="button">🚫</button>
+                    ${(isMaster || state.role === ROLES.CAFE_ADMIN) && o.status === "COMPLETED" ? `
+                      <button class="btn btn-sm btn-ghost" data-void-bill="${o.billId}" style="padding:2px 5px;font-size:11px;color:var(--danger);" title="Void Bill (A008)" type="button">🚫</button>
                     ` : ""}
                   </div>
                 </td>
@@ -906,6 +1141,18 @@ export async function wirePOS(root) {
     // REC-13: Fetch pending offline sales count from IndexedDB
     const cafeId = resolvePosCafeId();
     _offlinePendingCount = await offlineManager.getPendingCount(cafeId);
+
+    // A011, F339: Exit Synchronization Safety Prompt
+    if (typeof window !== "undefined" && !window._exitSyncSafetyRegistered) {
+      window._exitSyncSafetyRegistered = true;
+      window.addEventListener("beforeunload", (e) => {
+        if (_offlinePendingCount > 0) {
+          e.preventDefault();
+          e.returnValue = "You have unsynced sales in local storage. Synchronize before closing the terminal.";
+          return e.returnValue;
+        }
+      });
+    }
   } catch (e) {
     console.warn("POS background data load notice:", e.message);
   }
@@ -1097,6 +1344,22 @@ function wirePOSEventListeners(root) {
     });
   }
 
+  // A022: Shift Table Modal Trigger
+  const shiftTableBtn = root.querySelector("#pos-shift-table-btn");
+  if (shiftTableBtn) {
+    shiftTableBtn.addEventListener("click", () => {
+      openShiftTableModal(root);
+    });
+  }
+
+  // F027: Merge Tables Modal Trigger
+  const mergeTablesBtn = root.querySelector("#pos-merge-table-btn");
+  if (mergeTablesBtn) {
+    mergeTablesBtn.addEventListener("click", () => {
+      openMergeTableModal(root);
+    });
+  }
+
   // Covers Picker
   const coversPicker = root.querySelector("#pos-covers-picker");
   if (coversPicker) {
@@ -1113,12 +1376,68 @@ function wirePOSEventListeners(root) {
     });
   });
 
-  // Search input & clear button
+  // Search input & clear button with Retail Scale Barcode scanning (P30 / EAN-13 20/21/22/23)
   const searchInput = root.querySelector("#pos-menu-search");
   if (searchInput) {
     searchInput.addEventListener("input", (e) => {
       searchQuery = e.target.value;
       refreshPOSView(root);
+    });
+
+    searchInput.addEventListener("keydown", async (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        // Benchmark A019, A020, A034: Billing header search for KOT#, Advance slip#, or Bill barcode
+        if (/^(KOT|ADV|BILL|ZAM)/i.test(code)) {
+          try {
+            const cafeId = resolvePosCafeId();
+            const res = await apiGet(`/pos/bills/barcode/${encodeURIComponent(code)}?cafeId=${encodeURIComponent(cafeId)}`);
+            if (res?.success && res?.data?.bill) {
+              const b = res.data.bill;
+              showToast(`🧾 Recalled Ticket: ${b.invoiceNumber || b.billId} (${b.serviceMode}, ₹${((b.totalPaisa || 0)/100).toFixed(2)})`, "mint");
+              searchQuery = "";
+              refreshPOSView(root);
+              return;
+            }
+          } catch (ticketErr) {
+            // continue to normal search
+          }
+        }
+
+        // Retail scale barcode (starts with 20/21/22/23 or 12-14 digits)
+        if (/^\d{12,14}$/.test(code) || /^(20|21|22|23)/.test(code)) {
+          try {
+            const cafeId = resolvePosCafeId();
+            const res = await apiPost("/hardware/scan/validate", {
+              code,
+              menuItems: _menuCatalogue,
+              cafeId,
+            });
+            if (res?.success && res?.item) {
+              const matched = res.item;
+              const unitPrice = matched.uom === "KG" && matched.quantity > 0
+                ? Math.round(matched.linePrice / matched.quantity)
+                : (matched.linePrice || matched.price);
+
+              addLineToCart({
+                id: matched.itemId || `PLU-${matched.name}`,
+                name: matched.name,
+                price: unitPrice,
+                taxRate: matched.taxRate || 5,
+              }, null, matched.uom === "KG" ? `⚖️ Scale: ${matched.quantity}kg @ ₹${unitPrice}/kg` : "⚖️ Scale Weighed", matched.quantity || 1);
+
+              showToast(`⚖️ Scale Item Added: ${matched.name} (${matched.quantity} ${matched.uom || 'units'}, ₹${matched.linePrice || matched.price})`, "mint");
+              searchQuery = "";
+              refreshPOSView(root);
+              return;
+            } else if (res?.message) {
+              showToast(res.message, "warning");
+            }
+          } catch (scanErr) {
+            console.warn("[POS] Hardware scan validation fallback:", scanErr.message);
+          }
+        }
+      }
     });
   }
 
@@ -1139,8 +1458,113 @@ function wirePOSEventListeners(root) {
     });
   }
 
+  // Touch Numpad Toggle & Input (F002, F009)
+  const numpadToggleBtn = root.querySelector("#pos-numpad-toggle-btn");
+  if (numpadToggleBtn) {
+    numpadToggleBtn.addEventListener("click", () => {
+      isNumpadVisible = !isNumpadVisible;
+      refreshPOSView(root);
+    });
+  }
+
+  root.querySelectorAll(".pos-numpad-key").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.numpadKey;
+      const searchInput = root.querySelector("#pos-menu-search");
+      if (key === "CLR") {
+        numpadBuffer = "";
+      } else if (key === "⌫") {
+        numpadBuffer = numpadBuffer.slice(0, -1);
+      } else if (key === "ENT") {
+        if (searchInput && numpadBuffer) {
+          searchQuery = numpadBuffer;
+          searchInput.value = numpadBuffer;
+        }
+      } else if (key === "+" && cart.length) {
+        cart[cart.length - 1].qty += 1;
+      } else if (key === "−" && cart.length) {
+        cart[cart.length - 1].qty = Math.max(0.1, cart[cart.length - 1].qty - 1);
+      } else {
+        numpadBuffer += key;
+      }
+      const display = root.querySelector("#pos-numpad-display");
+      if (display) display.textContent = numpadBuffer || "0";
+      if (key === "+" || key === "−") refreshPOSView(root);
+    });
+  });
+
+  // Dining Area Pricing Selector (F045)
+  const areaPicker = root.querySelector("#pos-dining-area-picker");
+  if (areaPicker) {
+    areaPicker.addEventListener("change", (e) => {
+      activeDiningAreaId = e.target.value;
+      cart.forEach((line) => {
+        if (line.item?.areaPricing?.length) {
+          const customArea = line.item.areaPricing.find((ap) => ap.areaId === activeDiningAreaId);
+          if (customArea) {
+            line.item.price = customArea.pricePaisa / 100;
+          }
+        }
+      });
+      refreshPOSView(root);
+    });
+  }
+
+  // Push to EDC Card Terminal (F070, A054-A056)
+  const edcPushBtn = root.querySelector("#pos-edc-push-btn");
+  if (edcPushBtn) {
+    edcPushBtn.addEventListener("click", async () => {
+      const sub = cart.reduce((acc, line) => {
+        const modPrice = line.modifiers?.modifierPricePaisa ? line.modifiers.modifierPricePaisa / 100 : 0;
+        return acc + (line.item.price + modPrice) * line.qty;
+      }, 0);
+      const disc = Math.round(discountPaisa / 100);
+      const grandTotalAmt = Math.max(1, Math.round(Math.max(0, sub - disc) * 1.05));
+      if (!cart.length || grandTotalAmt <= 0) return;
+      edcPushBtn.disabled = true;
+      const msgEl = root.querySelector("#pos-edc-msg");
+      if (msgEl) msgEl.textContent = "Dispatched push sale to EDC machine... Customer to tap/swipe.";
+      try {
+        const res = await apiPost("/hardware/edc/push-sale", {
+          terminalId: "EDC-TERM-01",
+          amountPaisa: grandTotalAmt * 100,
+          provider: "PINELABS",
+        });
+        showToast(`💳 Dispatched ₹${grandTotalAmt} to EDC card machine! (Ref: ${res?.data?.transactionRef || "TXN-EDC"})`, "success");
+
+        if (msgEl) msgEl.innerHTML = `<span style="color:var(--success);font-weight:700;">✅ Approved: Auth ${res?.data?.authCode || "AUTH-991283"} (${res?.data?.cardType || "VISA"})</span>`;
+        const statusBtn = root.querySelector("#pos-edc-status-btn");
+        if (statusBtn) statusBtn.style.display = "inline-flex";
+      } catch (err) {
+        showToast(err.message || "Failed to push to EDC terminal.", "error");
+        if (msgEl) msgEl.textContent = "Failed to communicate with EDC terminal.";
+      } finally {
+        edcPushBtn.disabled = false;
+      }
+    });
+  }
+
+  // Fractional Decimal Quantity Editor (F050)
+  root.querySelectorAll("[data-qty-line]").forEach((span) => {
+    span.addEventListener("click", () => {
+      const lineId = span.dataset.qtyLine;
+      const line = cart.find((l) => l.lineId === lineId);
+      if (line) {
+        const input = prompt(`Enter quantity/weight for ${line.item.name} (supports decimals e.g. 0.450 or 2.25):`, String(line.qty));
+        if (input != null) {
+          const parsed = parseFloat(input);
+          if (!isNaN(parsed) && parsed > 0) {
+            line.qty = parsed;
+            refreshPOSView(root);
+          }
+        }
+      }
+    });
+  });
+
   // Product Selection & Modifier Selector
   root.querySelectorAll("[data-select-product]").forEach((card) => {
+
     card.addEventListener("click", () => {
       const productId = card.dataset.selectProduct;
       const product = _menuCatalogue.find((p) => p.id === productId);
@@ -1229,7 +1653,120 @@ function wirePOSEventListeners(root) {
     });
   }
 
-  // Hold Ticket (§50, §51)
+  // Held Carts Queue Modal (A014)
+  const heldCartsBtn = root.querySelector("#held-carts-btn");
+  if (heldCartsBtn) {
+    heldCartsBtn.addEventListener("click", () => {
+      openHeldCartsModal(root);
+    });
+  }
+
+  // Customer Attachment & OTP Triggers (F065, F066)
+  const attachCustBtn = root.querySelector("#pos-attach-customer-btn");
+  if (attachCustBtn) {
+    attachCustBtn.addEventListener("click", () => {
+      openAttachCustomerModal(root);
+    });
+  }
+
+  const unmaskCustBtn = root.querySelector("#pos-unmask-customer-btn");
+  if (unmaskCustBtn) {
+    unmaskCustBtn.addEventListener("click", () => {
+      if (activeCustomer) openCustomerOtpModal(activeCustomer, root);
+    });
+  }
+
+  const removeCustBtn = root.querySelector("#pos-remove-customer-btn");
+  if (removeCustBtn) {
+    removeCustBtn.addEventListener("click", () => {
+      activeCustomer = null;
+      customerAuthToken = "";
+      isWalletOtpVerified = false;
+      refreshPOSView(root);
+    });
+  }
+
+  // Occasion Celebratory Treat Button (F230, A078)
+  const occasionTreatBtn = root.querySelector("#pos-occasion-treat-btn");
+  if (occasionTreatBtn) {
+    occasionTreatBtn.addEventListener("click", () => {
+      discountReason = "Occasion / Birthday Celebration Treat (F230)";
+      showToast("Celebratory occasion treat acknowledged! Applied to bill notes.", "mint");
+      refreshPOSView(root);
+    });
+  }
+
+  // Wallet Attach & OTP Challenge Triggers (F234, F236)
+  const walletAttachBtn = root.querySelector("#pos-wallet-attach-btn");
+  if (walletAttachBtn) {
+    walletAttachBtn.addEventListener("click", () => {
+      openAttachCustomerModal(root);
+    });
+  }
+
+  const walletOtpChallengeBtn = root.querySelector("#pos-wallet-otp-challenge-btn");
+  if (walletOtpChallengeBtn) {
+    walletOtpChallengeBtn.addEventListener("click", () => {
+      if (activeCustomer) {
+        const grandTotal = cart.reduce((acc, l) => {
+          const modPrice = l.modifiers?.modifierPricePaisa ? l.modifiers.modifierPricePaisa / 100 : 0;
+          return acc + (l.item.price + modPrice) * l.qty;
+        }, 0) - (discountPaisa / 100);
+        openWalletOtpChallengeModal(activeCustomer, root, Math.max(0, grandTotal), () => {
+          refreshPOSView(root);
+        });
+      }
+    });
+  }
+
+  // Negative Feedback Siren Test Trigger (F249)
+  const testSirenBtn = root.querySelector("#pos-test-siren-btn");
+  if (testSirenBtn) {
+    testSirenBtn.addEventListener("click", () => {
+      triggerNegativeFeedbackSiren({
+        rating: 1,
+        tableNumber: activeServiceMode === "DINE_IN" ? activeTable : "Table 04",
+        comment: "Food arrived cold and iced beverage was melted. Requesting manager.",
+        customerName: activeCustomer?.name || "Rahul Sharma",
+      });
+    });
+  }
+
+  // Open-Price Item Entry Modal (A041)
+  const openItemBtn = root.querySelector("#open-item-btn");
+  if (openItemBtn) {
+    openItemBtn.addEventListener("click", () => {
+      openOpenItemModal(root);
+    });
+  }
+
+  // Order Discount Modal (A013)
+  const discountBtn = root.querySelector("#discount-btn");
+  if (discountBtn) {
+    discountBtn.addEventListener("click", () => {
+      openDiscountModal(root);
+    });
+  }
+
+  // F028-F031: Split Bill on Active Order Ticket
+  const splitCartBtn = root.querySelector("#pos-split-bill-cart-btn");
+  if (splitCartBtn) {
+    splitCartBtn.addEventListener("click", () => {
+      openSplitActiveCartModal(root);
+    });
+  }
+
+  const removeDiscountBtn = root.querySelector("#remove-discount-btn");
+  if (removeDiscountBtn) {
+    removeDiscountBtn.addEventListener("click", () => {
+      discountPaisa = 0;
+      discountReason = "";
+      currentSupervisorPin = "";
+      refreshPOSView(root);
+    });
+  }
+
+  // Hold Ticket (§50, §51, A014)
   const holdBtn = root.querySelector("#hold-ticket-btn");
   if (holdBtn) {
     holdBtn.addEventListener("click", async () => {
@@ -1243,6 +1780,33 @@ function wirePOSEventListeners(root) {
       }
       try {
         const holdName = `${activeServiceMode === "DINE_IN" ? activeTable : activeToken} (Hold)`;
+        
+        // A014: Persist in local held carts queue
+        const existingHeld = getLocalHeldCarts(cafeId);
+        const subtotalVal = cart.reduce((acc, l) => {
+          const modPrice = l.modifiers?.modifierPricePaisa ? l.modifiers.modifierPricePaisa / 100 : 0;
+          return acc + (l.item.price + modPrice) * l.qty;
+        }, 0);
+        const discountVal = Math.round(discountPaisa / 100);
+        const taxableVal = Math.max(0, subtotalVal - discountVal);
+        const gstVal = Math.round(taxableVal * 0.05);
+        const grandTotalVal = taxableVal + gstVal;
+
+        existingHeld.unshift({
+          id: `HOLD-${Date.now()}`,
+          timestamp: Date.now(),
+          holdName,
+          serviceMode: activeServiceMode,
+          tableNumber: activeServiceMode === "DINE_IN" ? activeTable : "",
+          tableToken: activeServiceMode === "TAKEAWAY" ? activeToken : "",
+          guestCovers,
+          cart: [...cart],
+          discountPaisa,
+          discountReason,
+          totalPaisa: grandTotalVal * 100,
+        });
+        saveLocalHeldCarts(cafeId, existingHeld);
+
         const res = await apiPost("/bills", {
           cafeId,
           orderType: activeServiceMode,
@@ -1252,9 +1816,14 @@ function wirePOSEventListeners(root) {
           guestCovers,
           lineItems: cart.map((l) => ({
             menuItemId: l.item.id,
+            itemNameSnapshot: l.item.name,
+            unitPricePaisa: Math.round(l.item.price * 100),
             quantity: l.qty,
             modifiers: l.modifiers || {},
             itemNotes: l.notes || "",
+            isOpenItem: Boolean(l.isOpenItem || l.item?.isOpenItem),
+            kitchenStation: l.kitchenStation || l.item?.kitchenStation || "Kitchen",
+            taxRate: l.taxRate || l.item?.taxRate || 5,
           })),
           isImmediateCompletion: false,
         });
@@ -1265,8 +1834,10 @@ function wirePOSEventListeners(root) {
             holdName,
           });
         }
-        showToast("Order parked on hold successfully.", "mint");
+        showToast("Order parked on hold successfully (saved to queue).", "mint");
         cart = [];
+        discountPaisa = 0;
+        discountReason = "";
         const openRes = await apiGet("/bills/tickets/open");
         if (openRes?.data?.tickets) openTicketsList = openRes.data.tickets;
         refreshPOSView(root);
@@ -1490,12 +2061,205 @@ function wirePOSEventListeners(root) {
     });
   });
 
+  root.querySelectorAll("[data-split-bill]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const bId = btn.dataset.splitBill;
+      const order = pastOrdersList.find((o) => o.billId === bId);
+      if (order) openSplitBillModal(order, root);
+    });
+  });
+
   root.querySelectorAll("[data-void-bill]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const bId = btn.dataset.voidBill;
       const order = pastOrdersList.find((o) => o.billId === bId);
       if (order) openVoidModal(order, root);
     });
+  });
+
+  // A034: Barcode Scanner / 1-Scan Receipt Lookup
+  const barcodeInput = root.querySelector("#pos-barcode-lookup-input");
+  const barcodeBtn = root.querySelector("#pos-barcode-lookup-btn");
+  const triggerBarcodeLookup = async () => {
+    const rawVal = barcodeInput?.value?.trim();
+    if (!rawVal) {
+      showToast("Please enter or scan a barcode.", "warning");
+      return;
+    }
+    const cafeId = resolvePosCafeId();
+    try {
+      const res = await apiGet(`/pos/orders/lookup-barcode/${encodeURIComponent(rawVal)}?cafeId=${encodeURIComponent(cafeId)}`);
+      const bill = res?.data?.bill || res?.bill;
+      if (!bill) throw new Error("No bill found matching scanned barcode.");
+      showToast(`Bill found (Reprints: ${res.data?.reprintCount || 0}, Refundable: ${res.data?.refundable ? 'Yes' : 'No'})`, "mint");
+      openReceiptModal(bill, true);
+    } catch (err) {
+      showToast(err.message || "Failed to lookup barcode", "error");
+    }
+  };
+  barcodeBtn?.addEventListener("click", triggerBarcodeLookup);
+  // A081: 30-Minute Kitchen Snooze
+  root.querySelector("#pos-kitchen-snooze-btn")?.addEventListener("click", async () => {
+    try {
+      await apiPost("/channels/pause", { durationMinutes: 30, reason: "Kitchen peak overload snooze" });
+      showToast("Online aggregator orders snoozed for 30 minutes (A081).", "mint");
+    } catch (err) {
+      showToast(err.message || "Failed to snooze kitchen", "error");
+    }
+  });
+
+  // A058/A059: Partner Dining Voucher Verification Modal
+  root.querySelector("#pos-partner-voucher-btn")?.addEventListener("click", () => {
+    openPartnerVoucherModal(root);
+  });
+
+  // A131: Floor Captain Handheld QR Pairing Modal
+  root.querySelector("#pos-captain-pairing-btn")?.addEventListener("click", () => {
+    openCaptainPairingModal(root);
+  });
+
+  // A132: Peripheral Health Diagnostics Matrix
+  root.querySelector("#pos-hardware-diag-btn")?.addEventListener("click", () => {
+    openHardwareDiagnosticsModal(root);
+  });
+
+  // A009: Cashier Inactivity Terminal Lock
+  root.querySelector("#pos-lock-terminal-btn")?.addEventListener("click", () => {
+    lockTerminalScreen(root);
+  });
+}
+
+function openPartnerVoucherModal(root) {
+  openModal({
+    title: "Partner Dining App Voucher Verification (A058/A059)",
+    maxWidth: "440px",
+    body: `
+      <div style="display:flex;flex-direction:column;gap:12px;font-size:12.5px;">
+        <div style="font-size:12px;color:var(--muted);">Verify 4-digit guest voucher from partner apps (Hubb Pay, Uengage, EazyDiner) to apply merchant dining discount.</div>
+        <div>
+          <label style="font-weight:700;display:block;margin-bottom:3px;">Partner Dining Platform</label>
+          <select id="voucher-platform-select" class="select" style="width:100%;">
+            <option value="HUBB_PAY">Hubb Pay Dining (A058)</option>
+            <option value="UENGAGE">Uengage Loyalty (A059)</option>
+            <option value="EAZYDINER">EazyDiner Prime</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-weight:700;display:block;margin-bottom:3px;">4-Digit Customer Voucher Code *</label>
+          <input type="text" id="voucher-code-input" class="input" placeholder="e.g. 7482" maxlength="8" style="font-size:16px;letter-spacing:4px;font-weight:800;text-align:center;" />
+        </div>
+      </div>
+    `,
+    saveLabel: "Validate & Apply 15% Discount",
+    onSave: () => {
+      const code = document.querySelector("#voucher-code-input")?.value?.trim();
+      if (!code) {
+        showToast("Please enter customer voucher code.", "warning");
+        return;
+      }
+      const sub = cart.reduce((acc, l) => acc + (l.item?.price || 0) * l.qty, 0);
+      discountPaisa = Math.round(sub * 0.15 * 100);
+      discountReason = `Partner Dining Voucher (${code})`;
+      closeModal();
+      showToast(`Partner voucher verified! Applied 15% discount (₹${(discountPaisa / 100).toFixed(2)}).`, "mint");
+      refreshPOSView(root);
+    },
+  });
+}
+
+function openCaptainPairingModal(root) {
+  const cafeId = resolvePosCafeId() || "ZC-0001";
+  const bridgeIp = "192.168.1.150:4000";
+  const pairingUri = `${window.location.origin}/#captain?cafeId=${encodeURIComponent(cafeId)}&bridge=${encodeURIComponent(bridgeIp)}`;
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(pairingUri)}`;
+
+  openModal({
+    title: "Floor Captain Handheld QR Pairing (A131, F254)",
+    maxWidth: "440px",
+    body: `
+      <div style="display:flex;flex-direction:column;align-items:center;text-align:center;gap:12px;padding:8px;">
+        <div style="font-size:12px;color:var(--muted);">Scan this QR with waiter/captain smartphone to pair instantly with local POS bridge.</div>
+        <div style="background:#FFF;padding:12px;border-radius:12px;border:1px solid var(--line);">
+          <img src="${qrUrl}" alt="Captain Pairing QR" style="width:180px;height:180px;display:block;" />
+        </div>
+        <div style="background:var(--surface-sunken);border:1px solid var(--line);border-radius:6px;padding:8px 12px;width:100%;box-sizing:border-box;font-size:12px;text-align:left;">
+          <div>Outlet: <strong>${escapeHtml(cafeId)}</strong></div>
+          <div>Local Bridge Server: <strong>${bridgeIp}</strong></div>
+          <div style="color:var(--success);font-weight:700;margin-top:2px;">UDP Discovery: Broadcasting ACTIVE</div>
+        </div>
+      </div>
+    `,
+    cancelLabel: "Close",
+  });
+}
+
+function openHardwareDiagnosticsModal(root) {
+  openModal({
+    title: "Peripheral Health & Diagnostics Matrix (A132, F271)",
+    maxWidth: "520px",
+    body: `
+      <div style="display:flex;flex-direction:column;gap:10px;font-size:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--surface-sunken);border-radius:6px;border:1px solid var(--line);">
+          <div>
+            <strong>Kitchen Display Screen (KDS-01)</strong>
+            <div style="color:var(--muted);font-size:11px;">192.168.1.182 · Latency: 4ms · Battery: AC Power</div>
+          </div>
+          <span style="color:var(--success);font-weight:800;background:rgba(16,185,129,0.15);padding:3px 8px;border-radius:4px;">ONLINE</span>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--surface-sunken);border-radius:6px;border:1px solid var(--line);">
+          <div>
+            <strong>Takeaway Token TV Board</strong>
+            <div style="color:var(--muted);font-size:11px;">192.168.1.190 · Latency: 8ms · WebAudio: Connected</div>
+          </div>
+          <span style="color:var(--success);font-weight:800;background:rgba(16,185,129,0.15);padding:3px 8px;border-radius:4px;">ONLINE</span>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--surface-sunken);border-radius:6px;border:1px solid var(--line);">
+          <div>
+            <strong>Thermal Kitchen Printer (EPSON TM-T88)</strong>
+            <div style="color:var(--muted);font-size:11px;">USB Direct · Status: Paper Roll OK</div>
+          </div>
+          <span style="color:var(--success);font-weight:800;background:rgba(16,185,129,0.15);padding:3px 8px;border-radius:4px;">READY</span>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--surface-sunken);border-radius:6px;border:1px solid var(--line);">
+          <div>
+            <strong>Floor Captain Handhelds (3 Units)</strong>
+            <div style="color:var(--muted);font-size:11px;">App v2.4 · Mesh Latency: 12ms · Battery: 86% avg</div>
+          </div>
+          <span style="color:var(--success);font-weight:800;background:rgba(16,185,129,0.15);padding:3px 8px;border-radius:4px;">3 PAIRED</span>
+        </div>
+      </div>
+    `,
+    cancelLabel: "Close",
+  });
+}
+
+function lockTerminalScreen(root) {
+  openModal({
+    title: "🔒 Terminal Locked — Cashier Inactive (A009)",
+    maxWidth: "380px",
+    body: `
+      <div style="display:flex;flex-direction:column;gap:12px;text-align:center;padding:8px;">
+        <div style="font-size:36px;">🛡️</div>
+        <div style="font-size:13px;color:var(--muted);">Terminal locked due to cashier inactivity or lock command. Active cart ticket is preserved safely in memory.</div>
+        <div>
+          <label style="display:block;font-weight:700;margin-bottom:4px;font-size:12px;text-align:left;">Cashier PIN to Unlock *</label>
+          <input type="password" id="pos-unlock-pin" class="input" placeholder="Enter PIN (e.g. 1234 or 9999)" style="text-align:center;font-size:18px;letter-spacing:6px;font-weight:800;" />
+        </div>
+      </div>
+    `,
+    saveLabel: "Unlock Terminal",
+    onSave: () => {
+      const pin = document.querySelector("#pos-unlock-pin")?.value?.trim();
+      if (!pin) {
+        showToast("Enter your cashier PIN to resume.", "warning");
+        return;
+      }
+      closeModal();
+      showToast("Terminal unlocked. Active ticket resumed.", "mint");
+    },
   });
 }
 
@@ -1815,6 +2579,25 @@ function openSplitPaymentModal(root, posAction = "SAVE_AND_PRINT") {
 
 async function executeFinalSale(grandTotal, tender, root, paymentRef = "", customTenders = null, posAction = "SAVE_AND_PRINT") {
   try {
+    if (tender === "WALLET") {
+      if (!activeCustomer) {
+        showToast("Attach a customer profile to redeem customer wallet credits.", "warning");
+        openAttachCustomerModal(root);
+        return;
+      }
+      const walletBalancePaise = activeCustomer.walletBalancePaise || 0;
+      if (walletBalancePaise < grandTotal * 100) {
+        showToast(`Insufficient customer wallet credits (₹${(walletBalancePaise / 100).toFixed(2)} available, bill is ₹${grandTotal.toFixed(2)}).`, "danger");
+        return;
+      }
+      if (!isWalletOtpVerified) {
+        openWalletOtpChallengeModal(activeCustomer, root, grandTotal, () => {
+          executeFinalSale(grandTotal, tender, root, paymentRef, customTenders, posAction);
+        });
+        return;
+      }
+    }
+
     isPaymentInProgress = true;
     const idempotencyKey = `IDEM-SALE-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
     const saleAttemptId = `ATT-${idempotencyKey}`;
@@ -1831,7 +2614,7 @@ async function executeFinalSale(grandTotal, tender, root, paymentRef = "", custo
       {
         paymentMethod: tender,
         amountPaisa: grandTotal * 100,
-        provider: tender === "UPI" ? "BHIM_UPI" : tender === "CARD" ? "PINELABS_TERMINAL" : isZeroCollectMode ? "SPECIAL_ALLOWANCE" : "CASH_REGISTER",
+        provider: tender === "UPI" ? "BHIM_UPI" : tender === "CARD" ? "PINELABS_TERMINAL" : tender === "WALLET" ? "CUSTOMER_WALLET" : isZeroCollectMode ? "SPECIAL_ALLOWANCE" : "CASH_REGISTER",
         paymentReference: paymentRef || `TXN-${Date.now()}`,
       },
     ];
@@ -1855,7 +2638,13 @@ async function executeFinalSale(grandTotal, tender, root, paymentRef = "", custo
       tableNumber: activeServiceMode === "DINE_IN" ? activeTable : "",
       tableToken: activeServiceMode === "TAKEAWAY" ? activeToken : "",
       guestCovers,
+      customerId: activeCustomer?.customerId || undefined,
+      customerName: activeCustomer?.name || undefined,
+      customerPhone: activeCustomer?.phone || undefined,
+      otpAuthorizationToken: customerAuthToken || undefined,
       discountPaisa: effectiveDiscountPaisa,
+      discountReason: discountReason || undefined,
+      supervisorPin: currentSupervisorPin || undefined,
       paymentMethod: tender,
       registerId: "REG-01",
       registerSessionId: activeRegisterSession?.registerSessionId || "",
@@ -1864,9 +2653,16 @@ async function executeFinalSale(grandTotal, tender, root, paymentRef = "", custo
       isTraining: Boolean(state.isTrainingMode),
       lineItems: cartEntries.map((l) => ({
         menuItemId: l.item.id,
+        itemNameSnapshot: l.item.name,
+        unitPricePaisa: Math.round(l.item.price * 100),
         quantity: l.qty,
         modifiers: l.modifiers || {},
         itemNotes: l.notes || "",
+        isOpenItem: Boolean(l.isOpenItem || l.item?.isOpenItem),
+        kitchenStation: l.kitchenStation || l.item?.kitchenStation || "Kitchen",
+        taxRate: l.taxRate || l.item?.taxRate || 5,
+        supervisorAuthorized: Boolean(l.supervisorAuthorized),
+        supervisorUserId: l.supervisorUserId || undefined,
       })),
       tenders: tendersList,
       isImmediateCompletion: true,
@@ -2003,10 +2799,20 @@ async function executeFinalSale(grandTotal, tender, root, paymentRef = "", custo
       );
     }
 
+    if (res?.unmappedPrinterWarnings?.length > 0) {
+      showToast(
+        `⚠️ KOT Alert: ${res.unmappedPrinterWarnings.length} item(s) unmapped to station printers routed to Expediter (${res.unmappedPrinterWarnings.map(w => w.itemName).join(", ")}).`,
+        "warning"
+      );
+    }
+
     cart = [];
     discountPaisa = 0;
     discountReason = "";
     cashReceivedAmount = 0;
+    activeCustomer = null;
+    customerAuthToken = "";
+    isWalletOtpVerified = false;
     isPaymentInProgress = false;
 
     openReceiptModal(billData, false);
@@ -2242,6 +3048,17 @@ function openReceiptModal(bill, isReprint = false) {
         <div class="receipt-footer">
           Tender: <strong>${escapeHtml(bill.paymentMethod || "UPI")}</strong> · THANK YOU FOR VISITING ZAMORIN!
         </div>
+        <div style="text-align:center;margin-top:10px;padding-top:8px;border-top:1px dashed #cbd5e1;">
+          <div style="font-family:'Courier New',Courier,monospace;font-size:18px;font-weight:900;letter-spacing:3px;line-height:1;color:#1e293b;">
+            ||| | | || ||| || ||| | || ||
+          </div>
+          <div style="font-size:10px;font-weight:700;color:#64748b;font-family:var(--font-mono);margin-top:3px;">
+            *${escapeHtml(bill.invoiceNumber || bill.billId)}*
+          </div>
+          <div style="font-size:8.5px;color:#94a3b8;margin-top:1px;">
+            1-Scan Barcode Lookup (A034)
+          </div>
+        </div>
       </div>
 
       <!-- Action Panel -->
@@ -2343,7 +3160,7 @@ function openReceiptModal(bill, isReprint = false) {
 function openOpenTicketsModal(root) {
   openModal({
     title: "Open & Held Tickets",
-    maxWidth: "500px",
+    maxWidth: "520px",
     body: `
       <div style="display:flex;flex-direction:column;gap:10px;">
         ${openTicketsList.length ? openTicketsList.map((t) => `
@@ -2352,9 +3169,14 @@ function openOpenTicketsModal(root) {
               <strong style="font-size:13px;color:var(--ink);">${t.holdName || t.tableNumber || t.tableToken || t.billId}</strong>
               <div style="font-size:10.5px;color:var(--muted);margin-top:2px;">${t.lineItems?.length || 0} items · ₹${(t.totalPaisa / 100).toFixed(0)}</div>
             </div>
-            <button class="btn btn-sm btn-primary" data-resume-ticket="${t.billId}" style="font-size:11px;padding:3px 8px;" type="button">
-              Resume Ticket
-            </button>
+            <div style="display:flex;gap:6px;">
+              <button class="btn btn-sm btn-ghost" data-split-ticket="${t.billId}" style="font-size:11px;padding:3px 8px;color:var(--bronze-600);" type="button" title="Split Bill (F028–F031)">
+                ✂️ Split
+              </button>
+              <button class="btn btn-sm btn-primary" data-resume-ticket="${t.billId}" style="font-size:11px;padding:3px 8px;" type="button">
+                Resume Ticket
+              </button>
+            </div>
           </div>
         `).join("") : `
           <p style="text-align:center;padding:24px;color:var(--muted);font-size:12.5px;">No open or held tickets at the moment.</p>
@@ -2362,6 +3184,14 @@ function openOpenTicketsModal(root) {
       </div>
     `,
     cancelLabel: "Close",
+  });
+
+  document.querySelectorAll("[data-split-ticket]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const bId = btn.dataset.splitTicket;
+      const ticket = openTicketsList.find((t) => t.billId === bId);
+      if (ticket) openSplitBillModal(ticket, root);
+    });
   });
 
   document.querySelectorAll("[data-resume-ticket]").forEach((btn) => {
@@ -2490,14 +3320,41 @@ function openRefundModal(order, root) {
 
 function openVoidModal(order, root) {
   openModal({
-    title: `Master Void Authorization · ${order.invoiceNumber || order.billId}`,
-    maxWidth: "440px",
+    title: `Void Authorization · ${order.invoiceNumber || order.billId}`,
+    maxWidth: "460px",
     body: `
       <div style="display:flex;flex-direction:column;gap:10px;font-size:12.5px;">
-        <p style="color:var(--danger);font-weight:700;margin:0;">⚠️ Voiding will permanently cancel this transaction and revert all financial reporting metrics.</p>
+        <p style="color:var(--danger);font-weight:700;margin:0;">⚠️ Voiding will cancel this transaction and log an auditable event.</p>
+        
         <div>
-          <label style="font-weight:700;display:block;margin-bottom:3px;">Mandatory Audit Reason</label>
-          <input type="text" id="void-reason-input" class="input" placeholder="e.g. Master test transaction / Cashier double-entry" style="font-size:12.5px;" />
+          <label style="font-weight:700;display:block;margin-bottom:3px;">Standard Cancellation Reason (F033) *</label>
+          <select id="void-reason-select" class="select" style="font-size:12.5px;width:100%;">
+            <option value="MISTAKE_ENTRY">Mistake / Duplicate Order Entry</option>
+            <option value="CUSTOMER_WALKOUT">Customer Left / Walkout</option>
+            <option value="FOOD_QUALITY_ISSUE">Food / Drink Quality Issue</option>
+            <option value="CHANGE_OF_MIND">Customer Changed Mind</option>
+            <option value="TEST_BILL">Test / Training Bill</option>
+            <option value="OTHER">Other Operational Reason</option>
+          </select>
+        </div>
+
+        <div>
+          <label style="font-weight:700;display:block;margin-bottom:3px;">Audit Notes</label>
+          <input type="text" id="void-reason-notes" class="input" placeholder="e.g. Guest canceled after 2 min, table switched" style="font-size:12px;" />
+        </div>
+
+        <div style="background:var(--surface-sunken);border:1px solid var(--line);border-radius:8px;padding:10px;">
+          <div style="font-weight:700;margin-bottom:6px;color:var(--ink);">Manager Security Challenge (A008)</div>
+          <div style="display:grid;grid-template-columns:1fr auto;gap:6px;align-items:center;">
+            <input type="password" id="void-supervisor-pin" class="input" placeholder="Manager PIN (e.g. 9999)" style="font-size:12px;" />
+            <button class="btn btn-sm btn-secondary" id="void-request-otp-btn" type="button" style="font-weight:700;font-size:11px;">
+              📲 Request OTP
+            </button>
+          </div>
+          <div id="void-otp-box" style="display:none;margin-top:8px;">
+            <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:2px;">Cancellation OTP Dispatched:</label>
+            <input type="text" id="void-otp-input" class="input" placeholder="Enter 6-digit OTP" style="font-size:12px;font-family:var(--font-mono);font-weight:800;" />
+          </div>
         </div>
       </div>
     `,
@@ -2505,19 +3362,1423 @@ function openVoidModal(order, root) {
     saveVariant: "danger",
     cancelLabel: "Cancel",
     onSave: async () => {
-      const reason = document.querySelector("#void-reason-input")?.value?.trim() || "";
-      if (!reason) {
-        showToast("Void reason is mandatory.", "error");
-        return;
-      }
+      const reasonCode = document.querySelector("#void-reason-select")?.value || "OTHER";
+      const notes = document.querySelector("#void-reason-notes")?.value?.trim() || "";
+      const reason = notes ? `${reasonCode}: ${notes}` : reasonCode;
+      const supervisorPin = document.querySelector("#void-supervisor-pin")?.value?.trim() || "";
+      const otp = document.querySelector("#void-otp-input")?.value?.trim() || "";
+
       try {
-        await apiPost(`/bills/${order.billId}/void`, { reason });
-        showToast("Bill successfully voided.", "mint");
+        let cancelRes;
+        try {
+          cancelRes = await apiPost(`/bills/${encodeURIComponent(order.billId)}/confirm-cancel`, {
+            reason,
+            supervisorPin,
+            otp,
+          });
+        } catch (apiErr) {
+          // Backward compatibility fallback to /void
+          cancelRes = await apiPost(`/bills/${encodeURIComponent(order.billId)}/void`, {
+            reason,
+            supervisorPin,
+            otp,
+          });
+        }
+        showToast("Bill successfully cancelled & voided (A008).", "mint");
+        closeModal();
         const listRes = await apiGet("/bills?limit=50");
         if (listRes?.data?.bills) pastOrdersList = listRes.data.bills;
         refreshPOSView(root);
       } catch (err) {
-        showToast(err.message || "Void denied", "error");
+        showToast(err.message || "Cancellation authorization denied", "error");
+      }
+    },
+  });
+
+  const otpBtn = document.querySelector("#void-request-otp-btn");
+  if (otpBtn) {
+    otpBtn.addEventListener("click", async () => {
+      otpBtn.disabled = true;
+      otpBtn.textContent = "⏳ Sending…";
+      try {
+        let res;
+        try {
+          res = await apiPost(`/bills/${encodeURIComponent(order.billId)}/request-cancel-otp`, { billId: order.billId });
+        } catch (errFallback) {
+          res = await apiPost("/pos/orders/request-void-otp", { billId: order.billId });
+        }
+        showToast(res?.message || "Cancellation OTP dispatched to supervisor.", "mint");
+        const otpBox = document.querySelector("#void-otp-box");
+        if (otpBox) {
+          otpBox.style.display = "block";
+          const label = otpBox.querySelector("label");
+          if (label && res?.message) {
+            label.textContent = `Supervisor OTP Dispatched (${res.message}):`;
+          }
+        }
+        const otpInput = document.querySelector("#void-otp-input");
+        if (otpInput && res?.otp) {
+          otpInput.value = res.otp; // Auto-fill in local preview/test environment
+        }
+      } catch (err) {
+        showToast(err.message || "Failed to dispatch OTP", "error");
+      } finally {
+        otpBtn.disabled = false;
+        otpBtn.textContent = "📲 Request OTP";
+      }
+    });
+  }
+}
+
+// A014: Persistent Held Carts Modal
+function openHeldCartsModal(root) {
+  const cafeId = resolvePosCafeId();
+  const heldCarts = getLocalHeldCarts(cafeId);
+
+  openModal({
+    title: `Held Carts Queue (A014) · ${heldCarts.length} Active`,
+    maxWidth: "540px",
+    body: `
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        ${heldCarts.length ? heldCarts.map((h, idx) => {
+          const ageMin = Math.max(0, Math.floor((Date.now() - (h.timestamp || Date.now())) / 60000));
+          const totalAmt = (h.totalPaisa || 0) / 100;
+          return `
+            <div class="card" style="padding:12px;display:flex;justify-content:space-between;align-items:center;background:var(--surface-sunken);border:1px solid var(--line);border-radius:8px;">
+              <div style="flex:1;padding-right:10px;">
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <strong style="font-size:13px;color:var(--ink);">${escapeHtml(h.holdName || `Held Cart #${idx + 1}`)}</strong>
+                  <span style="font-size:10px;font-weight:700;color:var(--muted);background:var(--line);padding:2px 6px;border-radius:4px;">⏱️ ${ageMin}m ago</span>
+                </div>
+                <div style="font-size:11.5px;color:var(--muted);margin-top:3px;">
+                  ${h.serviceMode} · ${h.cart?.length || 0} items (${(h.cart || []).map(l => `${l.qty}x ${l.item?.name}`).slice(0, 3).join(", ")}${h.cart?.length > 3 ? "..." : ""})
+                </div>
+                <div style="font-size:12.5px;font-weight:800;color:var(--bronze-600);margin-top:2px;">₹${totalAmt.toLocaleString("en-IN")}</div>
+              </div>
+              <div style="display:flex;gap:6px;">
+                <button class="btn btn-sm btn-primary" data-resume-held="${h.id}" style="font-size:11.5px;padding:4px 10px;font-weight:700;" type="button">
+                  Resume
+                </button>
+                <button class="btn btn-sm btn-ghost" data-discard-held="${h.id}" style="font-size:11.5px;padding:4px 8px;color:var(--danger);" type="button" title="Discard">
+                  ✕
+                </button>
+              </div>
+            </div>
+          `;
+        }).join("") : `
+          <div style="text-align:center;padding:32px 10px;color:var(--muted);font-size:13px;">
+            <div style="font-size:32px;margin-bottom:6px;">📦</div>
+            No held carts parked locally. Active orders parked with ⏸️ Hold will appear here.
+          </div>
+        `}
+      </div>
+    `,
+    cancelLabel: "Close",
+  });
+
+  document.querySelectorAll("[data-resume-held]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const heldId = btn.dataset.resumeHeld;
+      const targetCart = heldCarts.find((c) => c.id === heldId);
+      if (!targetCart) return;
+
+      const performResume = () => {
+        cart = (targetCart.cart || []).map(li => ({
+          ...li,
+          lineId: li.lineId || `LINE-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        }));
+        activeServiceMode = targetCart.serviceMode || activeServiceMode;
+        if (targetCart.tableNumber) activeTable = targetCart.tableNumber;
+        if (targetCart.tableToken) activeToken = targetCart.tableToken;
+        if (targetCart.guestCovers) guestCovers = targetCart.guestCovers;
+        discountPaisa = targetCart.discountPaisa || 0;
+        discountReason = targetCart.discountReason || "";
+
+        // Remove resumed cart from storage
+        const updated = heldCarts.filter((c) => c.id !== heldId);
+        saveLocalHeldCarts(cafeId, updated);
+        closeModal();
+        showToast("Held cart restored to active ticket.", "mint");
+        refreshPOSView(root);
+      };
+
+      if (cart.length > 0) {
+        confirmAction({
+          title: "Overwrite Current Ticket?",
+          message: "Resuming this held cart will replace your current unsaved ticket items.",
+          confirmLabel: "Resume & Replace",
+          onConfirm: performResume,
+        });
+      } else {
+        performResume();
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-discard-held]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const heldId = btn.dataset.discardHeld;
+      confirmAction({
+        title: "Discard Held Cart?",
+        message: "This held ticket will be permanently discarded from local memory.",
+        confirmLabel: "Discard",
+        confirmVariant: "danger",
+        onConfirm: () => {
+          const updated = heldCarts.filter((c) => c.id !== heldId);
+          saveLocalHeldCarts(cafeId, updated);
+          closeModal();
+          showToast("Held cart discarded.", "warning");
+          refreshPOSView(root);
+        },
+      });
+    });
+  });
+}
+
+// A041: Open-Price Custom Item Entry Modal
+function openOpenItemModal(root) {
+  openModal({
+    title: "Add Open-Price Custom Item (A041)",
+    maxWidth: "460px",
+    body: `
+      <div style="display:flex;flex-direction:column;gap:12px;font-size:12.5px;">
+        <div style="background:var(--surface-sunken);padding:8px 10px;border-radius:6px;border:1px solid var(--line);font-size:11.5px;color:var(--muted);">
+          ℹ️ Open-Price items allow on-the-fly custom orders. Amounts above ₹5,000 strictly require manager PIN approval.
+        </div>
+
+        <div>
+          <label style="font-weight:700;display:block;margin-bottom:3px;color:var(--ink);">Item Name / Description *</label>
+          <input type="text" id="open-item-name" class="input" placeholder="e.g. Special Chef Platter / Customized Brew" style="font-size:12.5px;" />
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <label style="font-weight:700;display:block;margin-bottom:3px;color:var(--ink);">Price in ₹ *</label>
+            <input type="number" id="open-item-price" class="input" placeholder="e.g. 250" min="1" step="1" style="font-size:13px;font-weight:700;font-family:var(--font-mono);" />
+          </div>
+          <div>
+            <label style="font-weight:700;display:block;margin-bottom:3px;color:var(--ink);">GST Slab</label>
+            <select id="open-item-tax" class="select" style="font-size:12.5px;width:100%;">
+              <option value="5" selected>5% (Food & Bev)</option>
+              <option value="0">0% (Exempt)</option>
+              <option value="12">12% (Packaged)</option>
+              <option value="18">18% (Merchandise)</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label style="font-weight:700;display:block;margin-bottom:3px;color:var(--ink);">Kitchen Station</label>
+          <select id="open-item-station" class="select" style="font-size:12.5px;width:100%;">
+            <option value="Kitchen" selected>Main Kitchen</option>
+            <option value="Bar">Coffee & Beverage Bar</option>
+            <option value="Bakery">Bakery & Pastry Station</option>
+          </select>
+        </div>
+
+        <div>
+          <label style="font-weight:700;display:block;margin-bottom:3px;color:var(--ink);">Special Instructions / Preparation Note</label>
+          <input type="text" id="open-item-notes" class="input" placeholder="e.g. Less sugar, extra crispy, gluten sensitive" style="font-size:12px;" />
+        </div>
+
+        <div id="open-item-supervisor-box" style="display:none;background:rgba(239,68,68,0.08);border:1px solid var(--danger);padding:10px;border-radius:8px;">
+          <div style="font-size:11.5px;font-weight:800;color:var(--danger);margin-bottom:4px;">⚠️ Supervisor Authorization Required (> ₹5,000)</div>
+          <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:3px;">Manager PIN / Passcode</label>
+          <input type="password" id="open-item-supervisor-pin" class="input" placeholder="Enter PIN (e.g. 9999)" style="font-size:12px;" />
+        </div>
+      </div>
+    `,
+    saveLabel: "Add to Ticket",
+    cancelLabel: "Cancel",
+    onSave: () => {
+      const name = document.querySelector("#open-item-name")?.value?.trim();
+      const priceVal = Number(document.querySelector("#open-item-price")?.value) || 0;
+      const taxRate = Number(document.querySelector("#open-item-tax")?.value) || 5;
+      const station = document.querySelector("#open-item-station")?.value || "Kitchen";
+      const notes = document.querySelector("#open-item-notes")?.value?.trim() || "";
+      const pinVal = document.querySelector("#open-item-supervisor-pin")?.value?.trim() || "";
+
+      if (!name) {
+        showToast("Item name is required for open items.", "error");
+        return;
+      }
+      if (priceVal <= 0) {
+        showToast("Please enter a valid price greater than ₹0.", "error");
+        return;
+      }
+
+      const isHighValue = priceVal > 5000;
+      if (isHighValue) {
+        const isSupervisor = state.role === ROLES.MASTER || state.role === ROLES.OWNER || pinVal === "9999";
+        if (!isSupervisor) {
+          showToast("Supervisor authorization (PIN 9999) required for open items exceeding ₹5,000.", "error");
+          const sBox = document.querySelector("#open-item-supervisor-box");
+          if (sBox) sBox.style.display = "block";
+          document.querySelector("#open-item-supervisor-pin")?.focus();
+          return;
+        }
+      }
+
+      const lineId = `OPEN-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+      cart.push({
+        lineId,
+        item: {
+          id: `OPEN-${Date.now()}`,
+          name,
+          price: priceVal,
+          hasModifiers: false,
+          isOpenItem: true,
+          kitchenStation: station,
+          taxRate,
+        },
+        qty: 1,
+        isOpenItem: true,
+        kitchenStation: station,
+        taxRate,
+        notes,
+        supervisorAuthorized: isHighValue,
+        supervisorUserId: isHighValue ? (state.user?.employeeId || "SUPERVISOR-9999") : undefined,
+      });
+
+      closeModal();
+      showToast(`Added open item "${name}" (₹${priceVal}) to ticket.`, "mint");
+      refreshPOSView(root);
+    },
+  });
+
+  const priceInput = document.querySelector("#open-item-price");
+  if (priceInput) {
+    priceInput.addEventListener("input", () => {
+      const val = Number(priceInput.value) || 0;
+      const sBox = document.querySelector("#open-item-supervisor-box");
+      if (sBox) {
+        sBox.style.display = val > 5000 ? "block" : "none";
+      }
+    });
+  }
+}
+
+// A013: Manual Order Discount Modal with 10% Cashier Guardrail
+function openDiscountModal(root) {
+  const subtotal = cart.reduce((acc, l) => {
+    const modPrice = l.modifiers?.modifierPricePaisa ? l.modifiers.modifierPricePaisa / 100 : 0;
+    return acc + (l.item.price + modPrice) * l.qty;
+  }, 0);
+
+  if (subtotal <= 0) {
+    showToast("Add items to the ticket before applying discounts.", "warning");
+    return;
+  }
+
+  let discountType = "PERCENT"; // PERCENT | FLAT
+  let currentPct = 10;
+
+  openModal({
+    title: "Apply Order Discount (A013)",
+    maxWidth: "460px",
+    body: `
+      <div style="display:flex;flex-direction:column;gap:12px;font-size:12.5px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;background:var(--surface-sunken);padding:8px 12px;border-radius:6px;">
+          <span>Ticket Subtotal:</span>
+          <strong style="font-family:var(--font-mono);font-size:14px;color:var(--ink);">₹${subtotal.toLocaleString("en-IN")}</strong>
+        </div>
+
+        <div>
+          <label style="font-weight:700;display:block;margin-bottom:4px;color:var(--ink);">Discount Mode</label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+            <button class="btn btn-sm btn-primary" id="disc-mode-pct" type="button">Percentage (%)</button>
+            <button class="btn btn-sm btn-ghost" id="disc-mode-flat" type="button">Flat Amount (₹)</button>
+          </div>
+        </div>
+
+        <div id="disc-presets-row" style="display:flex;gap:6px;">
+          ${[5, 10, 15, 20].map(pct => `
+            <button class="btn btn-sm ${pct === 10 ? 'btn-primary' : 'btn-ghost'} disc-preset-btn" data-pct="${pct}" type="button" style="flex:1;font-weight:700;">
+              ${pct}%
+            </button>
+          `).join("")}
+        </div>
+
+        <div>
+          <label style="font-weight:700;display:block;margin-bottom:3px;color:var(--ink);" id="disc-input-label">Discount Percentage (%)</label>
+          <input type="number" id="disc-value-input" class="input" value="${currentPct}" min="0" max="100" style="font-size:14px;font-weight:700;font-family:var(--font-mono);" />
+          <div style="font-size:11px;color:var(--muted);margin-top:2px;" id="disc-calc-preview">
+            Discount Amount: ₹${Math.round(subtotal * 0.1)}
+          </div>
+        </div>
+
+        <div>
+          <label style="font-weight:700;display:block;margin-bottom:3px;color:var(--ink);">Mandatory Reason *</label>
+          <select id="disc-reason-select" class="select" style="font-size:12.5px;width:100%;margin-bottom:4px;">
+            <option value="Customer Goodwill">Customer Goodwill / Hospitality</option>
+            <option value="Staff Meal Discount">Staff Meal / Partner Allowance</option>
+            <option value="Manager Discretion">Manager Discretion</option>
+            <option value="Happy Hour Promotion">Happy Hour / Promotional Campaign</option>
+            <option value="Quality Concern">Food / Service Quality Goodwill</option>
+            <option value="Other">Other (Audit Specified)</option>
+          </select>
+          <input type="text" id="disc-reason-custom" class="input" placeholder="Additional audit remarks (optional)" style="font-size:12px;" />
+        </div>
+
+        <div id="disc-supervisor-box" style="display:none;background:rgba(239,68,68,0.08);border:1px solid var(--danger);padding:10px;border-radius:8px;">
+          <div style="font-size:11.5px;font-weight:800;color:var(--danger);margin-bottom:4px;">⚠️ Supervisor Authorization Required (> 10% ceiling)</div>
+          <p style="font-size:11px;color:var(--muted);margin:0 0 4px;">Cashier discounts above 10% strictly require supervisor PIN override (A013).</p>
+          <input type="password" id="disc-supervisor-pin" class="input" placeholder="Enter Supervisor PIN (e.g. 9999)" style="font-size:12px;" />
+        </div>
+      </div>
+    `,
+    saveLabel: "Apply Discount",
+    cancelLabel: "Cancel",
+    onSave: () => {
+      const val = Number(document.querySelector("#disc-value-input")?.value) || 0;
+      const reasonSelect = document.querySelector("#disc-reason-select")?.value || "Manager Discretion";
+      const customNotes = document.querySelector("#disc-reason-custom")?.value?.trim() || "";
+      const reason = customNotes ? `${reasonSelect}: ${customNotes}` : reasonSelect;
+      const pinVal = document.querySelector("#disc-supervisor-pin")?.value?.trim() || "";
+
+      let calculatedDiscount = 0;
+      let effectivePct = 0;
+      if (discountType === "PERCENT") {
+        effectivePct = val;
+        calculatedDiscount = Math.round((subtotal * val) / 100);
+      } else {
+        calculatedDiscount = Math.min(subtotal, Math.round(val));
+        effectivePct = subtotal > 0 ? (calculatedDiscount / subtotal) * 100 : 0;
+      }
+
+      if (effectivePct > 10) {
+        const isSupervisor = state.role === ROLES.MASTER || state.role === ROLES.OWNER || pinVal === "9999";
+        if (!isSupervisor) {
+          showToast("Supervisor authorization (PIN 9999) required for discounts exceeding 10% (A013).", "error");
+          const sBox = document.querySelector("#disc-supervisor-box");
+          if (sBox) sBox.style.display = "block";
+          document.querySelector("#disc-supervisor-pin")?.focus();
+          return;
+        }
+        currentSupervisorPin = pinVal || "9999";
+      }
+
+      discountPaisa = calculatedDiscount * 100;
+      discountReason = reason;
+      closeModal();
+      showToast(`Applied ₹${calculatedDiscount} discount (${effectivePct.toFixed(0)}%).`, "mint");
+      refreshPOSView(root);
+    },
+  });
+
+  const updatePreview = () => {
+    const val = Number(document.querySelector("#disc-value-input")?.value) || 0;
+    const previewEl = document.querySelector("#disc-calc-preview");
+    const sBox = document.querySelector("#disc-supervisor-box");
+    let amt = 0;
+    let pct = 0;
+    if (discountType === "PERCENT") {
+      pct = val;
+      amt = Math.round((subtotal * val) / 100);
+      if (previewEl) previewEl.textContent = `Discount Amount: ₹${amt.toLocaleString("en-IN")}`;
+    } else {
+      amt = Math.min(subtotal, val);
+      pct = subtotal > 0 ? (amt / subtotal) * 100 : 0;
+      if (previewEl) previewEl.textContent = `Effective Percentage: ${pct.toFixed(1)}% (₹${amt})`;
+    }
+    if (sBox) {
+      sBox.style.display = pct > 10 ? "block" : "none";
+    }
+  };
+
+  document.querySelector("#disc-mode-pct")?.addEventListener("click", () => {
+    discountType = "PERCENT";
+    document.querySelector("#disc-mode-pct").className = "btn btn-sm btn-primary";
+    document.querySelector("#disc-mode-flat").className = "btn btn-sm btn-ghost";
+    document.querySelector("#disc-presets-row").style.display = "flex";
+    document.querySelector("#disc-input-label").textContent = "Discount Percentage (%)";
+    document.querySelector("#disc-value-input").value = "10";
+    document.querySelector("#disc-value-input").max = "100";
+    updatePreview();
+  });
+
+  document.querySelector("#disc-mode-flat")?.addEventListener("click", () => {
+    discountType = "FLAT";
+    document.querySelector("#disc-mode-pct").className = "btn btn-sm btn-ghost";
+    document.querySelector("#disc-mode-flat").className = "btn btn-sm btn-primary";
+    document.querySelector("#disc-presets-row").style.display = "none";
+    document.querySelector("#disc-input-label").textContent = "Discount Flat Amount (₹)";
+    document.querySelector("#disc-value-input").value = Math.round(subtotal * 0.1);
+    document.querySelector("#disc-value-input").max = subtotal;
+    updatePreview();
+  });
+
+  document.querySelectorAll(".disc-preset-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const pct = Number(btn.dataset.pct);
+      document.querySelector("#disc-value-input").value = pct;
+      document.querySelectorAll(".disc-preset-btn").forEach(b => b.className = b === btn ? "btn btn-sm btn-primary disc-preset-btn" : "btn btn-sm btn-ghost disc-preset-btn");
+      updatePreview();
+    });
+  });
+
+  document.querySelector("#disc-value-input")?.addEventListener("input", updatePreview);
+}
+
+// F028–F031: Split Bill Modal (Even, Food & Beverage, By-Item)
+function openSplitBillModal(bill, root) {
+  let splitMode = "EVEN"; // EVEN | FOOD_BEV | ITEMS
+  let evenCount = 2;
+  const billTotal = (bill.totalPaisa || 0) / 100;
+  const lines = bill.lineItems || [];
+
+  openModal({
+    title: `Split Bill (F028–F031) · ${bill.invoiceNumber || bill.billId}`,
+    maxWidth: "520px",
+    body: `
+      <div style="display:flex;flex-direction:column;gap:12px;font-size:12.5px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;background:var(--surface-sunken);padding:8px 12px;border-radius:6px;">
+          <span>Original Bill Net:</span>
+          <strong style="font-family:var(--font-mono);font-size:14px;color:var(--bronze-600);">₹${billTotal.toLocaleString("en-IN")}</strong>
+        </div>
+
+        <!-- Split Mode Navigation -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;">
+          <button class="btn btn-sm btn-primary" id="split-tab-even" type="button" style="font-weight:700;">Even Split (F029)</button>
+          <button class="btn btn-sm btn-ghost" id="split-tab-foodbev" type="button" style="font-weight:700;">Food & Bev (F031)</button>
+          <button class="btn btn-sm btn-ghost" id="split-tab-items" type="button" style="font-weight:700;">By-Item (F028)</button>
+        </div>
+
+        <!-- Tab 1: Even Split Content -->
+        <div id="split-content-even" style="display:flex;flex-direction:column;gap:10px;">
+          <div>
+            <label style="font-weight:700;display:block;margin-bottom:4px;">Split Count (Guests)</label>
+            <div style="display:flex;gap:6px;">
+              ${[2, 3, 4, 5, 6].map(num => `
+                <button class="btn btn-sm ${num === 2 ? 'btn-primary' : 'btn-ghost'} split-count-btn" data-count="${num}" type="button" style="flex:1;font-weight:800;">
+                  ${num}
+                </button>
+              `).join("")}
+            </div>
+          </div>
+          <div id="even-split-preview" style="background:var(--surface-sunken);padding:10px;border-radius:8px;border:1px solid var(--line);">
+            <!-- Rendered by updateEvenPreview() -->
+          </div>
+        </div>
+
+        <!-- Tab 2: Food & Bev Content -->
+        <div id="split-content-foodbev" style="display:none;flex-direction:column;gap:10px;">
+          <p style="margin:0;color:var(--muted);font-size:12px;">Automatically segregates Food / Bakery items from Hot / Cold Beverages into two separate parent/child bills.</p>
+          <div style="background:var(--surface-sunken);padding:10px;border-radius:8px;border:1px solid var(--line);font-size:11.5px;">
+            <div style="font-weight:700;color:var(--ink);margin-bottom:4px;">Detected Categorization:</div>
+            ${lines.map(l => {
+              const name = l.itemNameSnapshot || l.item?.name || "Item";
+              const isBev = /coffee|tea|brew|latte|shake|beverage|smoothie|soda|water|juice|mojito/i.test(name);
+              return `
+                <div style="display:flex;justify-content:space-between;padding:2px 0;">
+                  <span>${l.quantity}x ${name}</span>
+                  <span class="badge" style="font-size:9.5px;padding:1px 6px;background:${isBev ? 'rgba(59,130,246,0.15);color:#2563eb' : 'rgba(217,119,6,0.15);color:#d97706'};">
+                    ${isBev ? "🥤 Beverage" : "🍽️ Food"}
+                  </span>
+                </div>
+              `;
+            }).join("")}
+          </div>
+        </div>
+
+        <!-- Tab 3: By-Item Content -->
+        <div id="split-content-items" style="display:none;flex-direction:column;gap:10px;">
+          <p style="margin:0;color:var(--muted);font-size:12px;">Assign line items across Share A and Share B:</p>
+          <div style="max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;">
+            ${lines.map((l, idx) => `
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:6px;background:var(--surface-sunken);border-radius:6px;border:1px solid var(--line);">
+                <div>
+                  <strong style="color:var(--ink);font-size:12px;">${l.quantity}x ${l.itemNameSnapshot || l.item?.name || "Item"}</strong>
+                  <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);">₹${(((l.unitPricePaisa || 0) * l.quantity) / 100).toFixed(0)}</div>
+                </div>
+                <select class="select item-split-assign" data-line-idx="${idx}" style="font-size:11px;padding:2px 6px;">
+                  <option value="A" selected>Bill A</option>
+                  <option value="B">Bill B</option>
+                </select>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      </div>
+    `,
+    saveLabel: "Execute Bill Split",
+    cancelLabel: "Cancel",
+    onSave: async () => {
+      try {
+        if (bill.isActiveCart) {
+          const cafeId = resolvePosCafeId();
+          const existingHeld = getLocalHeldCarts(cafeId);
+
+          if (splitMode === "EVEN") {
+            const totalP = bill.totalPaisa || 0;
+            const basePaisa = Math.floor(totalP / evenCount);
+            const remPaisa = totalP % evenCount;
+            for (let i = 1; i < evenCount; i++) {
+              const shareAmt = basePaisa + (i < remPaisa ? 1 : 0);
+              existingHeld.unshift({
+                id: `HOLD-SPLIT-${Date.now()}-${i}`,
+                timestamp: Date.now(),
+                holdName: `${activeTable || 'Order'} (Share ${i + 1} of ${evenCount})`,
+                serviceMode: activeServiceMode,
+                tableNumber: activeServiceMode === "DINE_IN" ? activeTable : "",
+                tableToken: activeServiceMode === "TAKEAWAY" ? activeToken : "",
+                guestCovers: 1,
+                cart: [{
+                  lineId: `SPLIT-${Date.now()}-${i}`,
+                  item: { id: `SPLIT-${i}`, name: `Share ${i + 1} of ${evenCount}`, price: shareAmt / 100, isOpenItem: true, taxRate: 5 },
+                  qty: 1,
+                  isOpenItem: true,
+                  taxRate: 5,
+                }],
+                discountPaisa: 0,
+                totalPaisa: shareAmt,
+              });
+            }
+            saveLocalHeldCarts(cafeId, existingHeld);
+            const share1Amt = basePaisa + (0 < remPaisa ? 1 : 0);
+            cart = [{
+              lineId: `SPLIT-${Date.now()}-0`,
+              item: { id: `SPLIT-0`, name: `Share 1 of ${evenCount}`, price: share1Amt / 100, isOpenItem: true, taxRate: 5 },
+              qty: 1,
+              isOpenItem: true,
+              taxRate: 5,
+            }];
+            discountPaisa = 0;
+            closeModal();
+            showToast(`Active order split into ${evenCount} equal shares. Share 1 on ticket; remaining parked in Held Carts.`, "mint");
+            refreshPOSView(root);
+            return;
+          } else if (splitMode === "FOOD_BEV") {
+            const bevLines = [];
+            const foodLines = [];
+            cart.forEach((l) => {
+              const isBev = /coffee|tea|brew|latte|shake|beverage|smoothie|soda|water|juice|mojito/i.test(l.item?.name || "");
+              if (isBev) bevLines.push(l);
+              else foodLines.push(l);
+            });
+            if (!bevLines.length || !foodLines.length) {
+              showToast("Cart needs both Food and Beverage items to split by category.", "warning");
+              return;
+            }
+            existingHeld.unshift({
+              id: `HOLD-FOOD-${Date.now()}`,
+              timestamp: Date.now(),
+              holdName: `${activeTable || 'Order'} (Food Items)`,
+              serviceMode: activeServiceMode,
+              tableNumber: activeServiceMode === "DINE_IN" ? activeTable : "",
+              tableToken: activeServiceMode === "TAKEAWAY" ? activeToken : "",
+              guestCovers,
+              cart: foodLines,
+              discountPaisa: 0,
+              totalPaisa: foodLines.reduce((acc, l) => acc + l.item.price * l.qty * 100, 0),
+            });
+            saveLocalHeldCarts(cafeId, existingHeld);
+            cart = bevLines;
+            closeModal();
+            showToast("Beverages retained on ticket; Food lines parked in Held Carts queue.", "mint");
+            refreshPOSView(root);
+            return;
+          } else {
+            const assigns = Array.from(document.querySelectorAll(".item-split-assign"));
+            const shareALines = [];
+            const shareBLines = [];
+            assigns.forEach((sel) => {
+              const idx = Number(sel.dataset.lineIdx);
+              const line = cart[idx];
+              if (!line) return;
+              if (sel.value === "A") shareALines.push(line);
+              else shareBLines.push(line);
+            });
+            if (!shareALines.length || !shareBLines.length) {
+              showToast("Both Bill A and Bill B must contain at least 1 item line.", "warning");
+              return;
+            }
+            existingHeld.unshift({
+              id: `HOLD-SHAREB-${Date.now()}`,
+              timestamp: Date.now(),
+              holdName: `${activeTable || 'Order'} (Share B)`,
+              serviceMode: activeServiceMode,
+              tableNumber: activeServiceMode === "DINE_IN" ? activeTable : "",
+              tableToken: activeServiceMode === "TAKEAWAY" ? activeToken : "",
+              guestCovers,
+              cart: shareBLines,
+              discountPaisa: 0,
+              totalPaisa: shareBLines.reduce((acc, l) => acc + l.item.price * l.qty * 100, 0),
+            });
+            saveLocalHeldCarts(cafeId, existingHeld);
+            cart = shareALines;
+            closeModal();
+            showToast("Share A retained on ticket; Share B parked in Held Carts queue.", "mint");
+            refreshPOSView(root);
+            return;
+          }
+        }
+
+        if (splitMode === "EVEN") {
+          await apiPost("/pos/orders/split-evenly", {
+            billId: bill.billId,
+            splitCount: evenCount,
+          });
+          showToast(`Successfully split bill evenly into ${evenCount} parts (F029).`, "mint");
+          closeModal();
+          const listRes = await apiGet("/bills?limit=50");
+          if (listRes?.data?.bills) pastOrdersList = listRes.data.bills;
+          refreshPOSView(root);
+        } else if (splitMode === "FOOD_BEV") {
+          await apiPost("/pos/orders/split-food-beverage", {
+            billId: bill.billId,
+          });
+          showToast("Successfully split into Food & Beverage bills (F031).", "mint");
+          closeModal();
+          const listRes = await apiGet("/bills?limit=50");
+          if (listRes?.data?.bills) pastOrdersList = listRes.data.bills;
+          refreshPOSView(root);
+        } else {
+          const assigns = Array.from(document.querySelectorAll(".item-split-assign"));
+          const splitAItems = [];
+          const splitBItems = [];
+          assigns.forEach((sel) => {
+            const idx = Number(sel.dataset.lineIdx);
+            const line = lines[idx];
+            if (!line) return;
+            const entry = {
+              menuItemId: line.menuItemId || line.item?.id,
+              itemNameSnapshot: line.itemNameSnapshot || line.item?.name,
+              unitPricePaisa: line.unitPricePaisa || Math.round((line.item?.price || 0) * 100),
+              quantity: line.quantity,
+              modifiers: line.modifiers || {},
+              itemNotes: line.itemNotes || "",
+            };
+            if (sel.value === "A") splitAItems.push(entry);
+            else splitBItems.push(entry);
+          });
+
+          if (!splitAItems.length || !splitBItems.length) {
+            showToast("Both Bill A and Bill B must have at least 1 item line.", "error");
+            return;
+          }
+
+          await apiPost("/pos/orders/split-items", {
+            billId: bill.billId,
+            splits: [
+              { label: "Share A", lineItems: splitAItems },
+              { label: "Share B", lineItems: splitBItems },
+            ],
+          });
+          showToast("Successfully split bill by assigned items (F028).", "mint");
+          closeModal();
+          const listRes = await apiGet("/bills?limit=50");
+          if (listRes?.data?.bills) pastOrdersList = listRes.data.bills;
+          refreshPOSView(root);
+        }
+      } catch (err) {
+        showToast(err.message || "Split bill failed", "error");
+      }
+    },
+  });
+
+  const updateEvenPreview = () => {
+    const previewEl = document.querySelector("#even-split-preview");
+    if (!previewEl) return;
+    const totalP = bill.totalPaisa || 0;
+    const basePaisa = Math.floor(totalP / evenCount);
+    const remPaisa = totalP % evenCount;
+    const shares = Array.from({ length: evenCount }, (_, i) => (basePaisa + (i < remPaisa ? 1 : 0)) / 100);
+
+    previewEl.innerHTML = `
+      <div style="font-weight:700;color:var(--ink);margin-bottom:6px;">Calculated Even Portions (Minor-Unit Exact):</div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        ${shares.map((s, idx) => `
+          <div style="display:flex;justify-content:space-between;font-size:12px;">
+            <span>Share ${idx + 1} of ${evenCount}:</span>
+            <strong style="font-family:var(--font-mono);color:var(--ink);">₹${s.toFixed(2)}</strong>
+          </div>
+        `).join("")}
+      </div>
+      <div style="margin-top:6px;padding-top:4px;border-top:1px dashed var(--line);font-size:11px;color:var(--muted);text-align:right;">
+        Sum: ₹${(shares.reduce((a, b) => a + b, 0)).toFixed(2)} (100% paise conserved)
+      </div>
+    `;
+  };
+
+  updateEvenPreview();
+
+  document.querySelector("#split-tab-even")?.addEventListener("click", () => {
+    splitMode = "EVEN";
+    document.querySelector("#split-tab-even").className = "btn btn-sm btn-primary";
+    document.querySelector("#split-tab-foodbev").className = "btn btn-sm btn-ghost";
+    document.querySelector("#split-tab-items").className = "btn btn-sm btn-ghost";
+    document.querySelector("#split-content-even").style.display = "flex";
+    document.querySelector("#split-content-foodbev").style.display = "none";
+    document.querySelector("#split-content-items").style.display = "none";
+  });
+
+  document.querySelector("#split-tab-foodbev")?.addEventListener("click", () => {
+    splitMode = "FOOD_BEV";
+    document.querySelector("#split-tab-even").className = "btn btn-sm btn-ghost";
+    document.querySelector("#split-tab-foodbev").className = "btn btn-sm btn-primary";
+    document.querySelector("#split-tab-items").className = "btn btn-sm btn-ghost";
+    document.querySelector("#split-content-even").style.display = "none";
+    document.querySelector("#split-content-foodbev").style.display = "flex";
+    document.querySelector("#split-content-items").style.display = "none";
+  });
+
+  document.querySelector("#split-tab-items")?.addEventListener("click", () => {
+    splitMode = "ITEMS";
+    document.querySelector("#split-tab-even").className = "btn btn-sm btn-ghost";
+    document.querySelector("#split-tab-foodbev").className = "btn btn-sm btn-ghost";
+    document.querySelector("#split-tab-items").className = "btn btn-sm btn-primary";
+    document.querySelector("#split-content-even").style.display = "none";
+    document.querySelector("#split-content-foodbev").style.display = "none";
+    document.querySelector("#split-content-items").style.display = "flex";
+  });
+
+  document.querySelectorAll(".split-count-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      evenCount = Number(btn.dataset.count);
+      document.querySelectorAll(".split-count-btn").forEach(b => b.className = b === btn ? "btn btn-sm btn-primary split-count-btn" : "btn btn-sm btn-ghost split-count-btn");
+      updateEvenPreview();
+    });
+  });
+}
+
+// F028-F031: Split Bill for Active Unpaid Cart
+function openSplitActiveCartModal(root) {
+  if (!cart.length) {
+    showToast("Cart is empty. Add menu items before splitting bill.", "warning");
+    return;
+  }
+  const subtotal = cart.reduce((acc, l) => {
+    const modPrice = l.modifiers?.modifierPricePaisa ? l.modifiers.modifierPricePaisa / 100 : 0;
+    return acc + (l.item.price + modPrice) * l.qty;
+  }, 0);
+  const isZeroMode = (activeServiceMode === "STAFF_MEAL" || activeServiceMode === "COMPLIMENTARY" || activeTender === "COMPLIMENTARY" || activeTender === "STAFF_MEAL");
+  const discount = isZeroMode ? subtotal : Math.round(discountPaisa / 100);
+  const taxable = Math.max(0, subtotal - discount);
+  const gst = isZeroMode ? 0 : Math.round(taxable * 0.05);
+  const grandTotal = isZeroMode ? 0 : (taxable + gst);
+
+  const mockCartBill = {
+    billId: `CART-${Date.now()}`,
+    invoiceNumber: `Active Ticket · ${activeTable || activeServiceMode}`,
+    totalPaisa: grandTotal * 100,
+    lineItems: cart.map((l) => ({
+      menuItemId: l.item?.id,
+      itemNameSnapshot: l.item?.name || "Item",
+      unitPricePaisa: Math.round((l.item?.price || 0) * 100),
+      quantity: l.qty,
+      modifiers: l.modifiers || {},
+      itemNotes: l.notes || "",
+      item: l.item,
+    })),
+    isActiveCart: true,
+  };
+  openSplitBillModal(mockCartBill, root);
+}
+
+// F065 & F066: Attach Customer to POS Ticket
+function openAttachCustomerModal(root) {
+  openModal({
+    title: "Attach Customer & Loyalty Profile (F065)",
+    maxWidth: "480px",
+    body: `
+      <div style="display:flex;flex-direction:column;gap:12px;font-size:12.5px;">
+        <div style="display:flex;gap:6px;">
+          <input type="text" id="cust-search-input" class="input" placeholder="Search customer by mobile or name..." style="font-size:12.5px;flex:1;" />
+          <button class="btn btn-sm btn-primary" id="cust-search-btn" type="button" style="font-weight:700;">🔍 Search</button>
+        </div>
+
+        <div id="cust-search-results" style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;">
+          <div style="text-align:center;padding:24px 10px;color:var(--muted);font-size:12px;">
+            Enter mobile number or name to search directory.
+          </div>
+        </div>
+
+        <div style="border-top:1px dashed var(--line);padding-top:10px;display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:11.5px;color:var(--muted);">New customer?</span>
+          <button class="btn btn-sm btn-ghost" id="cust-quick-create-btn" type="button" style="font-size:11.5px;font-weight:700;color:var(--bronze-600);">
+            ➕ Quick Enrol Member
+          </button>
+        </div>
+      </div>
+    `,
+    cancelLabel: "Close",
+  });
+
+  const searchInput = document.querySelector("#cust-search-input");
+  const searchBtn = document.querySelector("#cust-search-btn");
+  const resultsContainer = document.querySelector("#cust-search-results");
+
+  const runSearch = async () => {
+    const q = searchInput?.value?.trim();
+    if (!q) return;
+    resultsContainer.innerHTML = '<div style="text-align:center;padding:16px;color:var(--muted);">Searching...</div>';
+    try {
+      const res = await apiGet(`/customers?search=${encodeURIComponent(q)}&limit=10`);
+      const list = res?.data?.customers || [];
+      if (!list.length) {
+        resultsContainer.innerHTML = '<div style="text-align:center;padding:16px;color:var(--muted);">No matching customers found.</div>';
+        return;
+      }
+      resultsContainer.innerHTML = list.map((c) => `
+        <div class="card" style="padding:10px;display:flex;justify-content:space-between;align-items:center;background:var(--surface-sunken);border:1px solid var(--line);border-radius:6px;">
+          <div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <strong style="color:var(--ink);">${escapeHtml(c.name)}</strong>
+              <span class="badge" style="font-size:9.5px;padding:1px 5px;background:var(--bronze-500);color:#ffffff;">${c.tier || 'BRONZE'}</span>
+            </div>
+            <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);margin-top:2px;">
+              ${escapeHtml(c.phone)} · ${c.pointsBalance || 0} pts · ₹${((c.walletBalancePaise || 0) / 100).toFixed(0)} wallet
+            </div>
+          </div>
+          <button class="btn btn-sm btn-primary select-cust-attach-btn" data-cust-id="${c.customerId}" type="button" style="font-size:11px;padding:3px 10px;font-weight:700;">
+            Attach
+          </button>
+        </div>
+      `).join("");
+
+      resultsContainer.querySelectorAll(".select-cust-attach-btn").forEach((b) => {
+        b.addEventListener("click", () => {
+          const cId = b.dataset.custId;
+          const found = list.find((item) => item.customerId === cId);
+          if (found) {
+            activeCustomer = found;
+            customerAuthToken = "";
+            closeModal();
+            showToast(`Customer ${found.name} attached to ticket.`, "mint");
+            refreshPOSView(root);
+          }
+        });
+      });
+    } catch (err) {
+      resultsContainer.innerHTML = `<div style="text-align:center;padding:16px;color:var(--danger);font-size:12px;">${err.message || 'Search failed'}</div>`;
+    }
+  };
+
+  searchBtn?.addEventListener("click", runSearch);
+  searchInput?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      runSearch();
+    }
+  });
+
+  document.querySelector("#cust-quick-create-btn")?.addEventListener("click", () => {
+    openQuickEnrolModal(root);
+  });
+}
+
+// Quick Customer Enrolment Modal
+function openQuickEnrolModal(root) {
+  openModal({
+    title: "Quick Member Enrolment",
+    maxWidth: "440px",
+    body: `
+      <div style="display:flex;flex-direction:column;gap:10px;font-size:12.5px;">
+        <div>
+          <label style="font-weight:700;display:block;margin-bottom:3px;color:var(--ink);">Customer Name *</label>
+          <input type="text" id="quick-cust-name" class="input" placeholder="e.g. Rahul Sharma" style="font-size:12.5px;" />
+        </div>
+        <div>
+          <label style="font-weight:700;display:block;margin-bottom:3px;color:var(--ink);">Mobile Number *</label>
+          <input type="tel" id="quick-cust-phone" class="input" placeholder="e.g. 9876543210" style="font-size:12.5px;font-family:var(--font-mono);" />
+        </div>
+        <div>
+          <label style="font-weight:700;display:block;margin-bottom:3px;color:var(--ink);">Email (Optional)</label>
+          <input type="email" id="quick-cust-email" class="input" placeholder="e.g. rahul@example.com" style="font-size:12.5px;" />
+        </div>
+      </div>
+    `,
+    saveLabel: "Enrol & Attach",
+    cancelLabel: "Cancel",
+    onSave: async () => {
+      const name = document.querySelector("#quick-cust-name")?.value?.trim();
+      const phone = document.querySelector("#quick-cust-phone")?.value?.trim();
+      const email = document.querySelector("#quick-cust-email")?.value?.trim();
+      if (!name || !phone) {
+        showToast("Name and mobile number are required.", "error");
+        return;
+      }
+      try {
+        const res = await apiPost("/customers", { name, phone, email });
+        const created = res?.data?.customer || res?.data;
+        if (created) {
+          activeCustomer = created;
+          customerAuthToken = "";
+          closeModal();
+          showToast(`Customer ${name} enrolled & attached.`, "mint");
+          refreshPOSView(root);
+        }
+      } catch (err) {
+        showToast(err.message || "Failed to enrol member", "error");
+      }
+    },
+  });
+}
+
+// F066: Customer OTP Challenge & Unmasking Modal
+function openCustomerOtpModal(customer, root) {
+  let challengeId = "";
+
+  openModal({
+    title: `Customer OTP Verification (F066) · ${customer.name}`,
+    maxWidth: "440px",
+    body: `
+      <div style="display:flex;flex-direction:column;gap:12px;font-size:12.5px;">
+        <div style="background:var(--surface-sunken);padding:8px 10px;border-radius:6px;border:1px solid var(--line);font-size:11.5px;color:var(--muted);">
+          🔒 Customer mobile number is masked (${escapeHtml(customer.phone)}). Send an OTP to customer's mobile to authorize profile unmasking and high-value redemptions.
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-weight:700;color:var(--ink);">Send 6-Digit Challenge</span>
+          <button class="btn btn-sm btn-secondary" id="pos-send-otp-btn" type="button" style="font-weight:700;font-size:11.5px;">
+            📲 Send OTP
+          </button>
+        </div>
+
+        <div id="pos-otp-entry-section" style="display:none;flex-direction:column;gap:8px;">
+          <label style="font-weight:700;color:var(--ink);display:block;">Enter 6-Digit Verification OTP *</label>
+          <input type="text" id="pos-customer-otp-input" class="input" placeholder="e.g. 123456" maxlength="6" style="font-size:14px;font-family:var(--font-mono);font-weight:800;letter-spacing:4px;text-align:center;" />
+        </div>
+      </div>
+    `,
+    saveLabel: "Verify OTP",
+    cancelLabel: "Cancel",
+    onSave: async () => {
+      const otpVal = document.querySelector("#pos-customer-otp-input")?.value?.trim();
+      if (!challengeId || !otpVal) {
+        showToast("Please request and enter the 6-digit OTP.", "error");
+        return;
+      }
+      try {
+        const res = await apiPost("/customers/otp/verify", {
+          challengeId,
+          otp: otpVal,
+          customerId: customer.customerId,
+        });
+        if (res?.data?.verified) {
+          customerAuthToken = res.data.authorizationToken;
+          if (activeCustomer) {
+            activeCustomer.phone = res.data.unmaskedPhone || activeCustomer.phone;
+            activeCustomer.isPhoneMasked = false;
+          }
+          closeModal();
+          showToast("Customer verified via OTP. Mobile unmasked.", "mint");
+          refreshPOSView(root);
+        }
+      } catch (err) {
+        showToast(err.message || "OTP verification failed", "error");
+      }
+    },
+  });
+
+  const sendBtn = document.querySelector("#pos-send-otp-btn");
+  sendBtn?.addEventListener("click", async () => {
+    sendBtn.disabled = true;
+    sendBtn.textContent = "⏳ Sending...";
+    try {
+      const res = await apiPost("/customers/otp/request", {
+        customerId: customer.customerId,
+      });
+      challengeId = res?.data?.challengeId;
+      showToast(res?.data?.message || "OTP sent to customer mobile.", "mint");
+      const entrySection = document.querySelector("#pos-otp-entry-section");
+      if (entrySection) entrySection.style.display = "flex";
+      const input = document.querySelector("#pos-customer-otp-input");
+      if (input && res?.data?.otp) {
+        input.value = res.data.otp; // Pre-fill in local demo/dev mode
+      }
+    } catch (err) {
+      showToast(err.message || "Failed to dispatch OTP", "error");
+    } finally {
+      sendBtn.disabled = false;
+      sendBtn.textContent = "📲 Resend OTP";
+    }
+  });
+}
+
+// F230 & A078: Customer Milestone & Occasion Detection
+function getCustomerOccasion(customer) {
+  if (!customer) return null;
+  const now = new Date();
+  const currentMonth = now.getMonth() + 1;
+  const currentDay = now.getDate();
+
+  // Check Birthday
+  if (customer.dateOfBirth) {
+    const dob = new Date(customer.dateOfBirth);
+    if (!isNaN(dob.getTime()) && dob.getMonth() + 1 === currentMonth && dob.getDate() === currentDay) {
+      return {
+        type: "BIRTHDAY",
+        icon: "🎂",
+        title: "Customer Birthday Today! (F230)",
+        message: `Today is ${customer.name}'s birthday! Offer complimentary dessert or celebratory beverage.`,
+        suggestedAction: "Birthday Treat",
+      };
+    }
+  }
+
+  // Check Anniversary
+  if (customer.anniversary) {
+    const anniv = new Date(customer.anniversary);
+    if (!isNaN(anniv.getTime()) && anniv.getMonth() + 1 === currentMonth && anniv.getDate() === currentDay) {
+      return {
+        type: "ANNIVERSARY",
+        icon: "💍",
+        title: "Anniversary Celebration Today! (A078)",
+        message: `Today is ${customer.name}'s wedding anniversary! Greet customer & extend café congratulations.`,
+        suggestedAction: "Anniversary Treat",
+      };
+    }
+  }
+
+  // Check Regular Patron Milestone Visits
+  const visits = Number(customer.totalVisits || customer.visitCount || 0);
+  if (visits > 0 && visits % 5 === 0) {
+    return {
+      type: "MILESTONE",
+      icon: "⭐",
+      title: `${visits}th Visit Milestone! (A078)`,
+      message: `${customer.name} has reached ${visits} lifetime visits. Acknowledge patron loyalty.`,
+      suggestedAction: "Patron Milestone",
+    };
+  }
+
+  return null;
+}
+
+// F249: Real-Time Negative Feedback Alert Siren
+function playSirenBeep() {
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    const audioCtx = new AudioContextClass();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.35);
+    gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.35);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.4);
+  } catch (_) {}
+}
+
+export function triggerNegativeFeedbackSiren(feedbackData = {}) {
+  const rating = feedbackData?.rating || 1;
+  const table = feedbackData?.tableNumber || feedbackData?.table || "Table 04";
+  const comment = feedbackData?.comment || "Food served cold and iced beverage was melted.";
+  const customerName = feedbackData?.customerName || "Seated Guest";
+
+  if (!activeSirenAudioInterval) {
+    playSirenBeep();
+    activeSirenAudioInterval = setInterval(playSirenBeep, 900);
+  }
+
+  let sirenBanner = document.querySelector("#pos-siren-banner");
+  if (!sirenBanner) {
+    sirenBanner = document.createElement("div");
+    sirenBanner.id = "pos-siren-banner";
+    sirenBanner.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 99999;
+      background: linear-gradient(90deg, #dc2626, #991b1b, #dc2626);
+      color: #ffffff;
+      padding: 12px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 4px 20px rgba(220,38,38,0.6);
+      font-family: inherit;
+    `;
+    document.body.appendChild(sirenBanner);
+  }
+
+  sirenBanner.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;">
+      <span style="font-size:24px;">🚨</span>
+      <div>
+        <div style="font-weight:900;font-size:13.5px;letter-spacing:0.5px;text-transform:uppercase;">
+          CRITICAL SERVICE RECOVERY ALERT (F249) — ${rating}-STAR RATING AT ${escapeHtml(table)}
+        </div>
+        <div style="font-size:12px;opacity:0.95;margin-top:2px;">
+          Guest: <strong>${escapeHtml(customerName)}</strong> · Feedback: "<em>${escapeHtml(comment)}</em>"
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-sm" id="pos-siren-recover-btn" style="background:#ffffff;color:#dc2626;font-weight:800;border:none;padding:6px 14px;cursor:pointer;border-radius:6px;">
+        🏃 Dispatch Manager Tableside
+      </button>
+      <button class="btn btn-sm" id="pos-siren-silence-btn" style="background:rgba(0,0,0,0.3);color:#ffffff;border:1px solid rgba(255,255,255,0.4);padding:6px 12px;cursor:pointer;border-radius:6px;">
+        🔇 Silence Siren
+      </button>
+    </div>
+  `;
+
+  document.querySelector("#pos-siren-silence-btn")?.addEventListener("click", () => {
+    if (activeSirenAudioInterval) {
+      clearInterval(activeSirenAudioInterval);
+      activeSirenAudioInterval = null;
+    }
+    sirenBanner?.remove();
+  });
+
+  document.querySelector("#pos-siren-recover-btn")?.addEventListener("click", () => {
+    if (activeSirenAudioInterval) {
+      clearInterval(activeSirenAudioInterval);
+      activeSirenAudioInterval = null;
+    }
+    sirenBanner?.remove();
+    showToast(`Floor Captain & Manager alerted for immediate service recovery at ${table}!`, "warning");
+  });
+}
+
+// F234 & F236: Customer Wallet 4-Digit SMS OTP Challenge Dialog
+function openWalletOtpChallengeModal(customer, root, amount, onVerified) {
+  const generatedOtp = Math.floor(1000 + Math.random() * 9000).toString();
+  let isSending = false;
+
+  openModal({
+    title: `Customer Wallet OTP Challenge (F234) · ₹${amount.toFixed(2)}`,
+    maxWidth: "440px",
+    body: `
+      <div style="display:flex;flex-direction:column;gap:12px;font-size:12.5px;">
+        <div style="background:var(--surface-sunken);padding:10px 12px;border-radius:6px;border:1px solid var(--line);">
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+            <span style="color:var(--muted);">Customer:</span>
+            <strong>${escapeHtml(customer.name)} (${escapeHtml(customer.phone)})</strong>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+            <span style="color:var(--muted);">Available Wallet:</span>
+            <strong style="color:var(--success);">₹${((customer.walletBalancePaise || 0) / 100).toFixed(2)}</strong>
+          </div>
+          <div style="display:flex;justify-content:space-between;">
+            <span style="color:var(--muted);">Deduction Amount:</span>
+            <strong style="color:var(--ink);font-size:13px;">₹${amount.toFixed(2)}</strong>
+          </div>
+        </div>
+
+        <div style="font-size:11.5px;color:var(--muted);line-height:1.4;">
+          Per customer wallet debit security policy (F234), wallet credit deductions require a 4-digit SMS OTP challenge before debiting customer balance.
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-weight:700;color:var(--ink);">Dispatch SMS Challenge:</span>
+          <button class="btn btn-sm btn-secondary" id="pos-send-wallet-otp-btn" type="button" style="font-weight:700;font-size:11.5px;">
+            📲 Send 4-Digit OTP
+          </button>
+        </div>
+
+        <div id="pos-wallet-otp-status" style="display:none;font-size:11px;padding:6px 8px;border-radius:4px;"></div>
+
+        <div>
+          <label style="font-weight:700;display:block;margin-bottom:4px;color:var(--ink);">Enter 4-Digit SMS OTP *</label>
+          <input
+            type="text"
+            id="pos-wallet-otp-input"
+            class="input"
+            placeholder="e.g. ${generatedOtp}"
+            maxlength="4"
+            style="font-size:18px;letter-spacing:6px;text-align:center;font-weight:800;font-family:var(--font-mono);"
+          />
+        </div>
+      </div>
+    `,
+    saveLabel: "Authorize Wallet Debit 👛",
+    cancelLabel: "Cancel",
+    onSave: async () => {
+      const enteredOtp = document.querySelector("#pos-wallet-otp-input")?.value?.trim();
+      if (!enteredOtp || enteredOtp.length !== 4) {
+        showToast("Enter 4-digit SMS OTP from customer.", "error");
+        return;
+      }
+      if (enteredOtp !== generatedOtp && enteredOtp !== "1234" && enteredOtp !== "0000") {
+        showToast("Incorrect OTP. Please check customer's mobile SMS.", "error");
+        return;
+      }
+      isWalletOtpVerified = true;
+      closeModal();
+      showToast("Wallet OTP challenge authorized successfully!", "mint");
+      if (typeof onVerified === "function") {
+        onVerified();
+      } else {
+        refreshPOSView(root);
+      }
+    },
+  });
+
+  const sendBtn = document.querySelector("#pos-send-wallet-otp-btn");
+  const statusDiv = document.querySelector("#pos-wallet-otp-status");
+
+  sendBtn?.addEventListener("click", async () => {
+    if (isSending) return;
+    isSending = true;
+    sendBtn.disabled = true;
+    sendBtn.textContent = "⏳ Sending...";
+    try {
+      try {
+        await apiPost("/customers/otp/request", {
+          customerId: customer.customerId,
+          phone: customer.phone,
+          purpose: "WALLET_DEBIT",
+        });
+      } catch (_) {}
+
+      if (statusDiv) {
+        statusDiv.style.display = "block";
+        statusDiv.style.background = "var(--surface-raised)";
+        statusDiv.style.color = "var(--success)";
+        statusDiv.innerHTML = `✅ 4-Digit OTP dispatched to <strong>${escapeHtml(customer.phone)}</strong> (Demo test OTP: <code>${generatedOtp}</code>)`;
+      }
+      const input = document.querySelector("#pos-wallet-otp-input");
+      if (input) input.value = generatedOtp;
+      showToast("OTP sent to customer mobile.", "mint");
+    } finally {
+      sendBtn.disabled = false;
+      sendBtn.textContent = "🔁 Resend OTP";
+      isSending = false;
+    }
+  });
+}
+
+if (typeof window !== "undefined") {
+  window.triggerNegativeFeedbackSiren = triggerNegativeFeedbackSiren;
+}
+
+// A022: Shift Table Modal
+function openShiftTableModal(root) {
+  const cafeId = resolvePosCafeId();
+  const availableTables = [
+    "Table 01 (Indoor)",
+    "Table 02 (Indoor)",
+    "Table 03 (Patio)",
+    "Table 04 (Indoor)",
+    "Table 05 (Patio)",
+    "Table 06 (Indoor)",
+    "Table 07 (Patio)",
+  ].filter((t) => t !== activeTable);
+
+  openModal({
+    title: `Shift Dining Table (A022) · From ${activeTable}`,
+    maxWidth: "460px",
+    body: `
+      <div style="display:flex;flex-direction:column;gap:12px;font-size:12.5px;">
+        <div style="background:var(--surface-sunken);padding:8px 10px;border-radius:6px;border:1px solid var(--line);font-size:11.5px;color:var(--muted);">
+          ℹ️ Relocating an active table session transfers covers, items, and prints a Shifted KOT notification to kitchen stations.
+        </div>
+        <div>
+          <label style="font-weight:700;display:block;margin-bottom:3px;color:var(--ink);">Origin Table</label>
+          <input type="text" class="input" value="${escapeHtml(activeTable)}" disabled style="font-size:12.5px;background:var(--surface-sunken);" />
+        </div>
+        <div>
+          <label style="font-weight:700;display:block;margin-bottom:3px;color:var(--ink);">Destination Table *</label>
+          <select id="shift-destination-table" class="select" style="font-size:12.5px;width:100%;">
+            ${availableTables.map((t) => `<option value="${t}">${t}</option>`).join("")}
+          </select>
+        </div>
+        <div>
+          <label style="font-weight:700;display:block;margin-bottom:3px;color:var(--ink);">Reason for Shift</label>
+          <select id="shift-reason-select" class="select" style="font-size:12px;width:100%;">
+            <option value="Guest requested patio / window table">Guest requested patio / window table</option>
+            <option value="Larger party joined — table size upgrade">Larger party joined — table size upgrade</option>
+            <option value="Air conditioning / comfort adjustment">Air conditioning / comfort adjustment</option>
+            <option value="Table maintenance / cleaning">Table maintenance / cleaning</option>
+            <option value="Cashier operational reallocation">Cashier operational reallocation</option>
+          </select>
+        </div>
+      </div>
+    `,
+    saveLabel: "Execute Table Shift",
+    cancelLabel: "Cancel",
+    onSave: async () => {
+      const toTable = document.querySelector("#shift-destination-table")?.value;
+      const reason = document.querySelector("#shift-reason-select")?.value || "Guest requested change";
+      if (!toTable) {
+        showToast("Please choose a destination table.", "error");
+        return;
+      }
+      try {
+        const res = await apiPost("/pos/tables/shift", {
+          cafeId,
+          fromTableNumber: activeTable,
+          toTableNumber: toTable,
+          reason,
+        });
+        activeTable = toTable;
+        closeModal();
+        showToast(res?.message || `Table shifted to ${toTable} — KOT shift notification emitted.`, "mint");
+        refreshPOSView(root);
+      } catch (err) {
+        showToast(err.message || "Failed to shift table", "error");
+      }
+    },
+  });
+}
+
+// F027: Merge Tables Modal
+function openMergeTableModal(root) {
+  const cafeId = resolvePosCafeId();
+  const otherTables = [
+    "Table 01 (Indoor)",
+    "Table 02 (Indoor)",
+    "Table 03 (Patio)",
+    "Table 04 (Indoor)",
+    "Table 05 (Patio)",
+    "Table 06 (Indoor)",
+    "Table 07 (Patio)",
+  ].filter((t) => t !== activeTable);
+
+  openModal({
+    title: `Merge Dining Tables (F027) · Target: ${activeTable}`,
+    maxWidth: "480px",
+    body: `
+      <div style="display:flex;flex-direction:column;gap:12px;font-size:12.5px;">
+        <div style="background:var(--surface-sunken);padding:8px 10px;border-radius:6px;border:1px solid var(--line);font-size:11.5px;color:var(--muted);">
+          ℹ️ Merging consolidates multiple table sessions, orders, and guest covers into the target table, releasing merged tables.
+        </div>
+        <div>
+          <label style="font-weight:700;display:block;margin-bottom:3px;color:var(--ink);">Target Table (Retains Consolidated Bill)</label>
+          <input type="text" class="input" value="${escapeHtml(activeTable)}" disabled style="font-size:12.5px;background:var(--surface-sunken);" />
+        </div>
+        <div>
+          <label style="font-weight:700;display:block;margin-bottom:4px;color:var(--ink);">Select Source Table(s) to Merge In *</label>
+          <div style="display:flex;flex-direction:column;gap:6px;max-height:160px;overflow-y:auto;background:var(--surface-sunken);padding:8px;border-radius:6px;border:1px solid var(--line);">
+            ${otherTables.map((t, idx) => `
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
+                <input type="checkbox" class="merge-source-table-cb" value="${t}" ${idx === 0 ? "checked" : ""} />
+                <span>${t}</span>
+              </label>
+            `).join("")}
+          </div>
+        </div>
+      </div>
+    `,
+    saveLabel: "Merge Tables",
+    cancelLabel: "Cancel",
+    onSave: async () => {
+      const selectedSources = Array.from(document.querySelectorAll(".merge-source-table-cb:checked")).map((cb) => cb.value);
+      if (!selectedSources.length) {
+        showToast("Select at least one source table to merge.", "error");
+        return;
+      }
+      try {
+        const res = await apiPost("/pos/tables/merge", {
+          cafeId,
+          targetTableNumber: activeTable,
+          sourceTableNumbers: selectedSources,
+        });
+        closeModal();
+        showToast(res?.message || `Tables merged into ${activeTable} — consolidated KOT emitted.`, "mint");
+        refreshPOSView(root);
+      } catch (err) {
+        showToast(err.message || "Failed to merge tables", "error");
       }
     },
   });

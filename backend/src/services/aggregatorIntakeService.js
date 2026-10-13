@@ -47,15 +47,49 @@ class AggregatorIntakeService {
     cafeId = null,
   }) {
     const normProvider = String(provider).trim().toUpperCase();
-    if (!['ZOMATO', 'SWIGGY'].includes(normProvider)) {
+    if (!['ZOMATO', 'SWIGGY', 'URBANPIPER', 'MAGICPIN'].includes(normProvider)) {
       throw new ApiError(400, 'UNSUPPORTED_PROVIDER', `Aggregator provider ${provider} is not supported.`);
+    }
+
+    const resolvedCafeId = (cafeId || payload.cafeId || 'ZC-0001').trim().toUpperCase();
+
+    // A050 / F062: Failed Menu Publication Alerts
+    if (
+      payload.eventType === 'MENU_REJECTION' ||
+      payload.event === 'MENU_SYNC_FAILED' ||
+      payload.qcStatus === 'REJECTED' ||
+      (payload.rejectionReason && !payload.externalOrderId)
+    ) {
+      const reason = payload.rejectionReason || payload.message || 'Image/Quality Check Rejected by Partner';
+      const affectedItem = payload.itemId || payload.menuItemId || payload.itemName || 'Menu Item';
+      console.warn(`[AGGREGATOR] ${normProvider} menu publication rejected for ${resolvedCafeId}:`, reason);
+
+      try {
+        const { NotificationService } = require('./NotificationService');
+        if (typeof NotificationService?.broadcastNotification === 'function') {
+          NotificationService.broadcastNotification({
+            organisationId,
+            cafeId: resolvedCafeId,
+            type: 'MENU_SYNC_FAILED',
+            title: `Menu Publication Rejected by ${normProvider}`,
+            message: `Item: ${affectedItem}. Reason: ${reason}`,
+            metadata: { provider: normProvider, rejectionReason: reason, payload },
+          });
+        }
+      } catch (_) {}
+
+      return {
+        status: 'MENU_SYNC_REJECTION_LOGGED',
+        provider: normProvider,
+        cafeId: resolvedCafeId,
+        rejectionReason: reason,
+        item: affectedItem,
+      };
     }
 
     if (!payload || !payload.externalOrderId) {
       throw new ApiError(400, 'INVALID_PAYLOAD', 'Payload must contain externalOrderId.');
     }
-
-    const resolvedCafeId = (cafeId || payload.cafeId || 'ZC-0001').trim().toUpperCase();
 
     // Check channel configuration and webhook signature
     const channelConfig = await OnlineChannelConfig.findOne({
@@ -65,6 +99,19 @@ class AggregatorIntakeService {
 
     const providerConfig = channelConfig?.aggregators?.[normProvider.toLowerCase()];
     const configuredSecret = providerConfig?.webhookSecret || process.env[`${normProvider}_WEBHOOK_SECRET`];
+
+    // Check if store is paused for this aggregator (F088 / A081 Store Overload Pause)
+    if (providerConfig?.storeStatus === 'PAUSED') {
+      const now = new Date();
+      if (!providerConfig.pausedUntil || new Date(providerConfig.pausedUntil) > now) {
+        return {
+          status: 'STORE_PAUSED_REJECTED',
+          message: `Store is temporarily paused for ${normProvider} due to: ${providerConfig.pauseReason || 'Kitchen Overload'}.`,
+          pausedUntil: providerConfig.pausedUntil,
+          provider: normProvider,
+        };
+      }
+    }
 
     // If signature provided, verify it. If unconfigured in prod, classify dependency.
     if (signature && configuredSecret) {
@@ -318,6 +365,178 @@ class AggregatorIntakeService {
       reconciliationStatus: newStatus,
       reviewRequired: hasDiscrepancy,
     };
+  }
+
+  /**
+   * Pause aggregator store for kitchen overload (F088 / A081)
+   */
+  static async pauseAggregatorStore({
+    organisationId,
+    cafeId,
+    provider = 'ALL',
+    durationMinutes = 30,
+    reason = 'KITCHEN_OVERLOAD',
+    auth = null,
+  }) {
+    if (!organisationId || !cafeId) {
+      throw new ApiError(400, 'VALIDATION_FAILED', 'organisationId and cafeId are required.');
+    }
+
+    const duration = Math.max(0, parseInt(durationMinutes, 10) || 0);
+    const pausedUntil = duration > 0 ? new Date(Date.now() + duration * 60 * 1000) : null;
+    const normProvider = String(provider || 'ALL').trim().toUpperCase();
+
+    let config = await OnlineChannelConfig.findOne({ organisationId, cafeId });
+    if (!config) {
+      config = await OnlineChannelConfig.create({
+        organisationId,
+        cafeId,
+        aggregators: {
+          zomato: { isEnabled: true, storeStatus: 'ONLINE' },
+          swiggy: { isEnabled: true, storeStatus: 'ONLINE' },
+        },
+      });
+    }
+
+    const providersToUpdate = normProvider === 'ALL' ? ['zomato', 'swiggy'] : [normProvider.toLowerCase()];
+    for (const p of providersToUpdate) {
+      if (config.aggregators && config.aggregators[p]) {
+        config.aggregators[p].storeStatus = 'PAUSED';
+        config.aggregators[p].pausedUntil = pausedUntil;
+        config.aggregators[p].pauseReason = reason;
+      }
+    }
+
+    config.markModified('aggregators');
+    await config.save();
+
+    if (auth) {
+      await auditService.recordAuditEvent({
+        organisationId,
+        cafeId,
+        actorUserId: auth.userId,
+        actorRole: auth.role || 'STAFF',
+        module: 'OPERATIONS',
+        action: 'AGGREGATOR_STORE_PAUSED',
+        entityType: 'OnlineChannelConfig',
+        entityId: cafeId,
+        reason: reason || 'KITCHEN_OVERLOAD',
+        metadata: {
+          provider: normProvider,
+          durationMinutes: duration,
+          pausedUntil,
+        },
+      });
+    }
+
+    return {
+      cafeId,
+      provider: normProvider,
+      storeStatus: 'PAUSED',
+      pausedUntil,
+      durationMinutes: duration,
+      reason,
+      activeChannels: providersToUpdate,
+    };
+  }
+
+  /**
+   * Resume aggregator store to online (F088 / A081)
+   */
+  static async resumeAggregatorStore({
+    organisationId,
+    cafeId,
+    provider = 'ALL',
+    auth = null,
+  }) {
+    if (!organisationId || !cafeId) {
+      throw new ApiError(400, 'VALIDATION_FAILED', 'organisationId and cafeId are required.');
+    }
+
+    const normProvider = String(provider || 'ALL').trim().toUpperCase();
+    let config = await OnlineChannelConfig.findOne({ organisationId, cafeId });
+    if (!config) {
+      return { cafeId, provider: normProvider, storeStatus: 'ONLINE' };
+    }
+
+    const providersToUpdate = normProvider === 'ALL' ? ['zomato', 'swiggy'] : [normProvider.toLowerCase()];
+    for (const p of providersToUpdate) {
+      if (config.aggregators && config.aggregators[p]) {
+        config.aggregators[p].storeStatus = 'ONLINE';
+        config.aggregators[p].pausedUntil = null;
+        config.aggregators[p].pauseReason = null;
+      }
+    }
+
+    config.markModified('aggregators');
+    await config.save();
+
+    if (auth) {
+      await auditService.recordAuditEvent({
+        organisationId,
+        cafeId,
+        actorUserId: auth.userId,
+        actorRole: auth.role || 'STAFF',
+        module: 'OPERATIONS',
+        action: 'AGGREGATOR_STORE_RESUMED',
+        entityType: 'OnlineChannelConfig',
+        entityId: cafeId,
+        metadata: { provider: normProvider },
+      });
+    }
+
+    return {
+      cafeId,
+      provider: normProvider,
+      storeStatus: 'ONLINE',
+      resumedAt: new Date(),
+    };
+  }
+
+  /**
+   * Get aggregator live store pause status and auto-resume if time elapsed (F088 / A081)
+   */
+  static async getAggregatorStoreStatus({ organisationId, cafeId }) {
+    if (!organisationId || !cafeId) {
+      throw new ApiError(400, 'VALIDATION_FAILED', 'organisationId and cafeId are required.');
+    }
+
+    let config = await OnlineChannelConfig.findOne({ organisationId, cafeId });
+    if (!config) {
+      return { zomato: { storeStatus: 'ONLINE' }, swiggy: { storeStatus: 'ONLINE' } };
+    }
+
+    const now = new Date();
+    let modified = false;
+    const result = {};
+
+    for (const p of ['zomato', 'swiggy']) {
+      const agg = config.aggregators?.[p];
+      if (agg) {
+        if (agg.storeStatus === 'PAUSED' && agg.autoResume && agg.pausedUntil && new Date(agg.pausedUntil) <= now) {
+          agg.storeStatus = 'ONLINE';
+          agg.pausedUntil = null;
+          agg.pauseReason = null;
+          modified = true;
+        }
+
+        const remainingMs = agg.pausedUntil ? Math.max(0, new Date(agg.pausedUntil).getTime() - now.getTime()) : null;
+        result[p] = {
+          storeStatus: agg.storeStatus,
+          isEnabled: agg.isEnabled,
+          pausedUntil: agg.pausedUntil,
+          remainingMinutes: remainingMs !== null ? Math.ceil(remainingMs / 60000) : null,
+          pauseReason: agg.pauseReason,
+        };
+      }
+    }
+
+    if (modified) {
+      config.markModified('aggregators');
+      await config.save();
+    }
+
+    return result;
   }
 }
 

@@ -20,6 +20,7 @@ const BILL_STATUSES = [
   'REFUNDED',            // Fully refunded
   'VOIDED',              // Audited cancellation/void
   'PAYMENT_REVERSED',    // Payment reversed by processor
+  'SPLIT_CLOSED',        // Original bill split into child bills
 ];
 
 const PAYMENT_METHODS = [
@@ -50,6 +51,7 @@ const TAX_CLASSIFICATIONS = [
   'GST_28',
   'EXEMPT',
   'NIL',
+  'STATE_VAT',
 ];
 
 const modifierSnapshotSchema = new mongoose.Schema(
@@ -103,6 +105,17 @@ const billLineItemSchema = new mongoose.Schema(
       trim: true,
       maxlength: 500,
       default: '',
+    },
+
+    isOpenItem: {
+      type: Boolean,
+      default: false,
+    },
+
+    kitchenStation: {
+      type: String,
+      trim: true,
+      default: 'KITCHEN',
     },
 
     taxRatePercent: {
@@ -170,6 +183,16 @@ const billLineItemSchema = new mongoose.Schema(
     },
 
     comboSnapshot: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+
+    pizzaConfig: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+
+    liquorClassification: {
       type: mongoose.Schema.Types.Mixed,
       default: null,
     },
@@ -609,6 +632,27 @@ const billSchema = new mongoose.Schema(
       default: '',
     },
 
+    // A017 / F213: Mandatory Waiter/Server Assignee
+    assignedStaffId: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: null,
+      index: true,
+    },
+
+    assignedStaffName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+
+    // A012 / F078: Charge-edit lock flag
+    chargesLocked: {
+      type: Boolean,
+      default: false,
+    },
+
     customerName: {
       type: String,
       trim: true,
@@ -694,7 +738,95 @@ const billSchema = new mongoose.Schema(
       default: 0,
     },
 
+    jurisdiction: {
+      type: String,
+      enum: ['IN_GST', 'UAE_FTA_VAT', 'KSA_ZATCA_PHASE2'],
+      default: 'IN_GST',
+      index: true,
+    },
+
+    vatPaisa: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+
+    vatRegistrationNumber: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+
+    zatcaInvoiceHash: {
+      type: String,
+      default: null,
+    },
+
+    zatcaDigitalSignature: {
+      type: String,
+      default: null,
+    },
+
+    zatcaTlvQrBase64: {
+      type: String,
+      default: null,
+    },
+
+    loyaltyOptOut: {
+      type: Boolean,
+      default: false,
+    },
+
+    tenderSurchargePaisa: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+
+    bilingualArabic: {
+      type: Boolean,
+      default: false,
+    },
+
+    deliveryLocalityZone: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+
+    deliveryFeePaisa: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+
     discountPaisa: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+
+    // Food vs Liquor Split Invoice separation (F031)
+    isLiquorInvoice: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    // Pre-Tax vs Post-Tax Tip Base & Surcharge (F074, F075)
+    tipCalculationBase: {
+      type: String,
+      enum: ['PRE_TAX_SUBTOTAL', 'POST_TAX_GRAND_TOTAL'],
+      default: 'PRE_TAX_SUBTOTAL',
+    },
+
+    tipPercentage: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+
+    tipPaisa: {
       type: Number,
       min: 0,
       default: 0,
@@ -840,6 +972,34 @@ const billSchema = new mongoose.Schema(
 
     voidedAt: {
       type: Date,
+      default: null,
+    },
+
+    parentSplitBillId: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+
+    childSplitBillIds: {
+      type: [String],
+      default: [],
+    },
+
+    supervisorAuthorized: {
+      type: Boolean,
+      default: false,
+    },
+
+    supervisorUserId: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+
+    cancellationOtp: {
+      type: String,
+      trim: true,
       default: null,
     },
 
@@ -1000,6 +1160,18 @@ billSchema.pre('validate', function normaliseBillFields() {
   if (this.paymentMethod) this.paymentMethod = this.paymentMethod.trim().toUpperCase();
   if (this.paymentStatus) this.paymentStatus = this.paymentStatus.trim().toUpperCase();
   if (this.orderType) this.orderType = this.orderType.trim().toUpperCase();
+  if (this.jurisdiction) this.jurisdiction = this.jurisdiction.trim().toUpperCase();
+
+  // Benchmark A121 & F147: Strict Mutually Exclusive VAT vs GST Boundary Guardrail
+  if (this.jurisdiction === 'UAE_FTA_VAT' || this.jurisdiction === 'KSA_ZATCA_PHASE2') {
+    if ((this.cgstPaisa || 0) > 0 || (this.sgstPaisa || 0) > 0 || (this.igstPaisa || 0) > 0) {
+      throw new Error('STATUTORY_BOUNDARY_VIOLATION: GCC VAT invoices cannot contain Indian GST CGST/SGST/IGST components (A121).');
+    }
+  } else if (this.jurisdiction === 'IN_GST') {
+    if ((this.vatPaisa || 0) > 0) {
+      throw new Error('STATUTORY_BOUNDARY_VIOLATION: Indian GST invoices cannot contain GCC VAT components (A121).');
+    }
+  }
 });
 
 const Bill =

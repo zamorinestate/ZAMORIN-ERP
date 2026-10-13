@@ -97,6 +97,17 @@ const listMenuItems = asyncHandler(async (request, response) => {
   if (concept && concept !== 'ALL') filter.conceptEligibility = { $in: [concept, 'SHARED'] };
   if (category && category !== 'ALL') filter.category = category;
 
+  // Benchmark A042 & F004: Physical Counter Menu Isolation (filter by allowed categories)
+  if (request.query.allowedCategories) {
+    const cats = String(request.query.allowedCategories)
+      .split(',')
+      .map((c) => c.trim().toUpperCase())
+      .filter(Boolean);
+    if (cats.length > 0) {
+      filter.category = { $in: cats };
+    }
+  }
+
   if (search && search.trim()) {
     const q = search.trim();
     filter.$or = [
@@ -352,6 +363,56 @@ const retireMenuItem = asyncHandler(async (request, response) => {
   return response.status(200).json({ message: `Menu item ${menuItemId} retired.` });
 });
 
+/**
+ * A052 / F042: Variation Removal with History Guard
+ * Block variant deletion if active bills or BOM recipes reference it.
+ */
+const deleteMenuItemVariant = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const { menuItemId, variantId } = request.params;
+  const { Bill } = require('../models/Bill');
+
+  const item = await MenuItem.findOne({ organisationId, menuItemId });
+  if (!item) {
+    throw new ApiError(404, 'MENU_ITEM_NOT_FOUND', `Menu item ${menuItemId} not found.`);
+  }
+
+  const variantIndex = (item.variants || []).findIndex(
+    (v) => String(v._id) === variantId || v.variantId === variantId || v.name?.toLowerCase() === variantId.toLowerCase()
+  );
+  if (variantIndex === -1) {
+    throw new ApiError(404, 'VARIANT_NOT_FOUND', `Variant ${variantId} not found on item.`);
+  }
+
+  const targetVariant = item.variants[variantIndex];
+  const variantName = targetVariant.name;
+
+  // History Guard: Check active open bills referencing this variant
+  const activeBill = await Bill.findOne({
+    organisationId,
+    status: 'OPEN',
+    'lineItems.itemId': menuItemId,
+    'lineItems.variant': variantName,
+  }).lean();
+
+  if (activeBill) {
+    throw new ApiError(
+      409,
+      'VARIANT_IN_USE_ACTIVE_ORDER',
+      `Cannot delete variant "${variantName}" because open bill ${activeBill.billId} references it.`
+    );
+  }
+
+  item.variants.splice(variantIndex, 1);
+  item.lastModifiedByUserId = request.auth.userId;
+  await item.save();
+
+  return response.status(200).json({
+    success: true,
+    message: `Variant "${variantName}" safely removed from item ${menuItemId}.`,
+  });
+});
+
 // ── 3. Recipe Master & Sub-Recipes ───────────────────────────────────────────
 const listRecipes = asyncHandler(async (request, response) => {
   const { organisationId } = request.auth;
@@ -504,13 +565,24 @@ const createCombo = asyncHandler(async (request, response) => {
   const count = await ComboDefinition.countDocuments({ organisationId });
   const comboId = `CMB-${String(count + 1).padStart(4, '0')}`;
 
+  const normalizedGroups = groups.map((g) => ({
+    groupName: g.groupName || g.name || 'Combo Slot',
+    requiredCount: Number(g.requiredCount || g.minSelections || 1),
+    choices: (g.choices || g.items || []).map((c) => ({
+      menuItemId: c.menuItemId,
+      choiceName: c.choiceName || c.name || c.menuItemId,
+      surchargePaisa: Number(c.surchargePaisa || c.pricePaisa || 0),
+      isDefault: Boolean(c.isDefault),
+    })),
+  }));
+
   const combo = await ComboDefinition.create({
     comboId,
     organisationId,
     name: name.trim(),
     pricingType,
     basePricePaisa: parseInt(basePricePaisa, 10),
-    groups,
+    groups: normalizedGroups,
     status: 'ACTIVE',
   });
 
@@ -807,6 +879,274 @@ const getMenuAnalytics = asyncHandler(async (request, response) => {
   });
 });
 
+const exportRecipeWorkbook = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const [recipes, items] = await Promise.all([
+    Recipe.find({ organisationId, status: { $ne: 'SUPERSEDED' } }).lean(),
+    MenuItem.find({ organisationId, status: 'ACTIVE' }).lean(),
+  ]);
+
+  const rows = [];
+  for (const item of items) {
+    const itemRecipe = recipes.find((r) => r.recipeId === item.primaryRecipeId);
+    if (itemRecipe && itemRecipe.ingredients?.length) {
+      for (const ing of itemRecipe.ingredients) {
+        rows.push({
+          menuItemId: item.menuItemId,
+          itemCode: item.itemCode || item.menuItemId,
+          itemName: item.name,
+          recipeId: itemRecipe.recipeId,
+          recipeName: itemRecipe.name,
+          ingredientName: ing.ingredientName,
+          inventoryItemId: ing.inventoryItemId || '',
+          quantity: ing.quantity,
+          uom: ing.uom,
+          lossFactorPercent: ing.lossFactorPercent || 0,
+          costPaisa: ing.costPaisa || 0,
+        });
+      }
+    } else {
+      rows.push({
+        menuItemId: item.menuItemId,
+        itemCode: item.itemCode || item.menuItemId,
+        itemName: item.name,
+        recipeId: item.primaryRecipeId || '',
+        recipeName: '',
+        ingredientName: '',
+        inventoryItemId: '',
+        quantity: 0,
+        uom: '',
+        lossFactorPercent: 0,
+        costPaisa: 0,
+      });
+    }
+  }
+
+  return response.status(200).json({
+    success: true,
+    totalRows: rows.length,
+    rows,
+    // A044 / F045: Menu Backup with Area Availability Worksheet
+    areaAvailabilityWorksheet: items.map((it) => ({
+      menuItemId: it.menuItemId,
+      itemName: it.name,
+      category: it.category,
+      availableCafeIds: it.availableCafeIds || [],
+      isAvailable: Boolean(it.isAvailable),
+      kioskAvailable: it.kioskAvailable !== false,
+      isOpenPrice: Boolean(it.isOpenPrice),
+    })),
+    exportedAt: new Date().toISOString(),
+  });
+});
+
+const importRecipeWorkbook = asyncHandler(async (request, response) => {
+  const { organisationId, userId } = request.auth;
+  const { rows } = request.body;
+
+  if (!Array.isArray(rows) || !rows.length) {
+    throw new ApiError(400, 'VALIDATION_FAILED', 'Workbook rows array is required.');
+  }
+
+  const recipeMap = new Map();
+  for (const row of rows) {
+    if (!row.recipeId && !row.menuItemId) continue;
+    const key = row.recipeId || row.menuItemId;
+    if (!recipeMap.has(key)) recipeMap.set(key, []);
+    if (row.ingredientName && Number(row.quantity) > 0) {
+      recipeMap.get(key).push({
+        ingredientName: String(row.ingredientName).trim(),
+        inventoryItemId: row.inventoryItemId ? String(row.inventoryItemId).trim() : null,
+        quantity: Number(row.quantity),
+        uom: String(row.uom || 'GRAM').trim().toUpperCase(),
+        lossFactorPercent: Number(row.lossFactorPercent) || 0,
+        costPaisa: Number(row.costPaisa) || 0,
+      });
+    }
+  }
+
+  let updatedCount = 0;
+  for (const [key, ingredients] of recipeMap.entries()) {
+    let recipe = await Recipe.findOne({ organisationId, recipeId: key });
+    if (recipe) {
+      recipe.ingredients = ingredients;
+      recipe.version += 1;
+      await recipe.save();
+      updatedCount++;
+    } else if (ingredients.length > 0) {
+      const item = await MenuItem.findOne({ organisationId, menuItemId: key });
+      if (item) {
+        const count = await Recipe.countDocuments({ organisationId });
+        const recipeId = `RCP-${String(count + 1).padStart(4, '0')}`;
+        recipe = await Recipe.create({
+          recipeId,
+          organisationId,
+          name: `${item.name} Recipe`,
+          version: 1,
+          ingredients,
+          status: 'APPROVED',
+          createdByUserId: userId,
+        });
+        item.primaryRecipeId = recipeId;
+        await item.save();
+        updatedCount++;
+      }
+    }
+  }
+
+  return response.status(200).json({
+    success: true,
+    message: `Recipe workbook imported successfully. ${updatedCount} recipes updated.`,
+    updatedCount,
+    updatedRecipesCount: updatedCount,
+  });
+});
+
+const aiSuggestRecipe = asyncHandler(async (request, response) => {
+  const { itemName, category = 'COFFEE' } = request.body;
+  if (!itemName) {
+    throw new ApiError(400, 'VALIDATION_FAILED', 'Item name is required for AI recipe suggestion.');
+  }
+
+  const nameLower = itemName.toLowerCase();
+  let ingredients = [];
+
+  if (nameLower.includes('latte') || nameLower.includes('cappuccino') || nameLower.includes('flat white')) {
+    ingredients = [
+      { ingredientName: 'Specialty Espresso Beans', quantity: 18, uom: 'GRAM', lossFactorPercent: 2, estimatedCostPaisa: 2800 },
+      { ingredientName: 'Full Cream Milk', quantity: 220, uom: 'ML', lossFactorPercent: 5, estimatedCostPaisa: 1540 },
+      { ingredientName: 'Raw Cane Sugar Sachet', quantity: 1, uom: 'PIECE', lossFactorPercent: 0, estimatedCostPaisa: 150 },
+      { ingredientName: 'Branded 8oz Paper Cup & Lid', quantity: 1, uom: 'PIECE', lossFactorPercent: 1, estimatedCostPaisa: 450 },
+    ];
+  } else if (nameLower.includes('cold brew') || nameLower.includes('iced')) {
+    ingredients = [
+      { ingredientName: 'Coarse Ground Arabica Beans', quantity: 35, uom: 'GRAM', lossFactorPercent: 4, estimatedCostPaisa: 4200 },
+      { ingredientName: 'Filtered Ambient Water', quantity: 280, uom: 'ML', lossFactorPercent: 2, estimatedCostPaisa: 50 },
+      { ingredientName: 'Clear Glass/Plastic Cold Cup & Straw', quantity: 1, uom: 'PIECE', lossFactorPercent: 1, estimatedCostPaisa: 550 },
+    ];
+  } else if (nameLower.includes('sandwich') || nameLower.includes('wrap') || nameLower.includes('burger')) {
+    ingredients = [
+      { ingredientName: 'Artisan Sourdough / Bun', quantity: 2, uom: 'PIECE', lossFactorPercent: 2, estimatedCostPaisa: 2400 },
+      { ingredientName: nameLower.includes('chicken') ? 'Marinated Herb Chicken Breast' : 'Malabar Spiced Paneer', quantity: 90, uom: 'GRAM', lossFactorPercent: 5, estimatedCostPaisa: 4500 },
+      { ingredientName: 'Cultured Table Butter', quantity: 15, uom: 'GRAM', lossFactorPercent: 2, estimatedCostPaisa: 900 },
+      { ingredientName: 'Fresh Iceberg Lettuce & Tomatoes', quantity: 30, uom: 'GRAM', lossFactorPercent: 8, estimatedCostPaisa: 600 },
+      { ingredientName: 'Eco Kraft Food Wrapper', quantity: 1, uom: 'PIECE', lossFactorPercent: 0, estimatedCostPaisa: 250 },
+    ];
+  } else if (nameLower.includes('cake') || nameLower.includes('brownie') || nameLower.includes('pastry')) {
+    ingredients = [
+      { ingredientName: 'Refined Cake Flour / Premix', quantity: 80, uom: 'GRAM', lossFactorPercent: 3, estimatedCostPaisa: 800 },
+      { ingredientName: 'Belgian Dark Couverture Chocolate', quantity: 40, uom: 'GRAM', lossFactorPercent: 2, estimatedCostPaisa: 3800 },
+      { ingredientName: 'Dairy Whipping Cream', quantity: 50, uom: 'ML', lossFactorPercent: 4, estimatedCostPaisa: 1600 },
+      { ingredientName: 'Bakery Slice Box & Fork', quantity: 1, uom: 'PIECE', lossFactorPercent: 0, estimatedCostPaisa: 350 },
+    ];
+  } else {
+    ingredients = [
+      { ingredientName: 'Primary Raw Food Ingredient', quantity: 100, uom: 'GRAM', lossFactorPercent: 5, estimatedCostPaisa: 2500 },
+      { ingredientName: 'Signature House Sauce / Dressing', quantity: 25, uom: 'ML', lossFactorPercent: 3, estimatedCostPaisa: 800 },
+      { ingredientName: 'Standard Packaging Chit & Pouch', quantity: 1, uom: 'PIECE', lossFactorPercent: 1, estimatedCostPaisa: 300 },
+    ];
+  }
+
+  const totalCostPaisa = ingredients.reduce((sum, ing) => sum + (ing.estimatedCostPaisa || 0), 0);
+
+  return response.status(200).json({
+    success: true,
+    suggestedRecipe: {
+      recipeName: `${itemName} Standard Recipe`,
+      category,
+      batchYield: 1,
+      yieldUom: 'PORTION',
+      ingredients,
+      totalCostPaisa,
+      recommendedPricePaisa: totalCostPaisa * 3.5,
+      notes: 'AI culinary heuristic generated based on standard F&B thermodynamic yield and portioning.',
+    },
+  });
+});
+
+// Benchmark A104 & F160: Global Recipe Component Substitution Handler
+const substituteRecipeIngredientHandler = asyncHandler(async (request, response) => {
+  const { fromIngredientId, toIngredientId, toIngredientName, ratioMultiplier, cafeId } = request.body;
+  const result = await MenuService.substituteRecipeIngredient({
+    organisationId: request.auth.organisationId,
+    fromIngredientId,
+    toIngredientId,
+    toIngredientName,
+    ratioMultiplier,
+    cafeId,
+    performedByUserId: request.auth.userId,
+  });
+  return response.status(200).json(result);
+});
+
+// Benchmark A050 & F062: Aggregator Menu Quality-Check Failure Center Handler
+const aggregatorQcAuditHandler = asyncHandler(async (request, response) => {
+  const { cafeId } = request.query;
+  const result = await MenuService.auditAggregatorMenuQuality({
+    organisationId: request.auth.organisationId,
+    cafeId,
+  });
+  return response.status(200).json(result);
+});
+
+// Benchmark A040 & F043: Bulk Add-on to Menu Item Excel Mapper (Export)
+const exportBulkModifierMappingHandler = asyncHandler(async (request, response) => {
+  const items = await MenuItem.find({ organisationId: request.auth.organisationId, status: 'ACTIVE' })
+    .select('menuItemId name category modifierGroupIds currentPricePaisa')
+    .lean();
+  const modGroups = await ModifierGroup.find({ organisationId: request.auth.organisationId }).lean();
+  const groupMap = {};
+  modGroups.forEach((g) => { groupMap[g.modifierGroupId] = g.name; });
+
+  const mappingData = items.map((i) => ({
+    menuItemId: i.menuItemId,
+    name: i.name,
+    category: i.category,
+    priceRupees: (i.currentPricePaisa / 100).toFixed(2),
+    assignedModifierGroupIds: (i.modifierGroupIds || []).join(','),
+    assignedModifierGroupNames: (i.modifierGroupIds || []).map((id) => groupMap[id] || id).join('; '),
+  }));
+
+  return response.status(200).json({
+    success: true,
+    totalItems: mappingData.length,
+    availableModifierGroups: modGroups.map((g) => ({ id: g.modifierGroupId, name: g.name })),
+    mappingData,
+  });
+});
+
+// Benchmark A040 & F043: Bulk Add-on to Menu Item Excel Mapper (Import)
+const importBulkModifierMappingHandler = asyncHandler(async (request, response) => {
+  const { mappings = [] } = request.body;
+  if (!Array.isArray(mappings) || mappings.length === 0) {
+    throw new ApiError(400, 'INVALID_MAPPINGS', 'Array of { menuItemId, modifierGroupIds } is required.');
+  }
+
+  let updatedCount = 0;
+  for (const m of mappings) {
+    if (!m.menuItemId) continue;
+    const cleanId = String(m.menuItemId).trim().toUpperCase();
+    const groupIds = Array.isArray(m.modifierGroupIds)
+      ? m.modifierGroupIds.map((id) => String(id).trim().toUpperCase())
+      : String(m.modifierGroupIds || '')
+          .split(',')
+          .map((id) => id.trim().toUpperCase())
+          .filter(Boolean);
+
+    await MenuItem.updateOne(
+      { organisationId: request.auth.organisationId, menuItemId: cleanId },
+      { $set: { modifierGroupIds: groupIds } }
+    );
+    updatedCount++;
+  }
+
+  return response.status(200).json({
+    success: true,
+    updatedCount,
+    message: `Successfully mapped modifier groups across ${updatedCount} menu items (A040).`,
+  });
+});
+
 module.exports = {
   getMenuOverview,
   listMenuItems,
@@ -814,6 +1154,7 @@ module.exports = {
   createMenuItem,
   updateMenuItem,
   retireMenuItem,
+  deleteMenuItemVariant,
   listRecipes,
   getRecipeDetail,
   createRecipe,
@@ -834,4 +1175,11 @@ module.exports = {
   simulateEffectiveMenu,
   getMenuIntegrityAudit,
   getMenuAnalytics,
+  exportRecipeWorkbook,
+  importRecipeWorkbook,
+  aiSuggestRecipe,
+  substituteRecipeIngredientHandler,
+  aggregatorQcAuditHandler,
+  exportBulkModifierMappingHandler,
+  importBulkModifierMappingHandler,
 };

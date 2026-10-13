@@ -19,6 +19,7 @@ const KDS_STATUSES = [
   'COLLECTED',
   'CANCELLED',
   'VOIDED',
+  'HELD_AWAITING_PAYMENT',
 ];
 
 const PREP_STATIONS = [
@@ -207,6 +208,31 @@ const kdsTicketSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
+
+    // A019: KOT ticket number for direct lookup
+    kotNumber: {
+      type: String,
+      trim: true,
+      default: null,
+      index: true,
+    },
+
+    // A032 / F271-F275: Windows KDS Virtual Brand Metadata & Partner Checklist
+    virtualBrandName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    isAllVeg: {
+      type: Boolean,
+      default: false,
+    },
+    partnerChecklist: [
+      {
+        item: { type: String, trim: true },
+        checked: { type: Boolean, default: false },
+      },
+    ],
 
     tags: [
       {

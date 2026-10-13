@@ -107,6 +107,20 @@ const recipeSchema = new mongoose.Schema(
       index: true,
     },
 
+    outputItemId: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: null,
+      index: true,
+    },
+
+    shelfLifeDays: {
+      type: Number,
+      default: 3,
+      min: 0,
+    },
+
     conceptEligibility: {
       type: String,
       enum: ['CAFE', 'RESTAURANT', 'SHARED'],

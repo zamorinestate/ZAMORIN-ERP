@@ -78,6 +78,11 @@ const pickupTokenSchema = new mongoose.Schema(
       trim: true,
       default: 'Counter A',
     },
+    // A035 / F276: Complimentary Orders badge on Token Display
+    isComplimentary: {
+      type: Boolean,
+      default: false,
+    },
     assignedAt: {
       type: Date,
       default: Date.now,

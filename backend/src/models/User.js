@@ -16,6 +16,7 @@ const ACCOUNT_STATUSES = [
   'LOCKED',
   'SUSPENDED',
   'DISABLED',
+  'INACTIVE',
   'ARCHIVED',
 ];
 
@@ -625,6 +626,22 @@ const userSchema = new mongoose.Schema(
       uppercase: true,
       default: null,
       index: true,
+    },
+
+    // A013 / F076: Cashier manual discount ceiling percentage (0-100)
+    maxDiscountPercent: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: 100,
+    },
+
+    // A009: Cashier idle session inactivity timeout in minutes
+    idleTimeoutMinutes: {
+      type: Number,
+      min: 1,
+      max: 480,
+      default: 30,
     },
 
     workerType: {

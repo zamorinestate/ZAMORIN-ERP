@@ -139,4 +139,21 @@ router.post(
   OwnerRiskAuditController.reviewAnomaly
 );
 
+// Anti-Fraud Governance & Anomaly Detection Controls (F207 / A083 / F350)
+router.post(
+  '/anti-fraud/reprint',
+  authorize('AUDIT_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STAFF'] }),
+  OwnerRiskAuditController.recordBillReprint
+);
+router.post(
+  '/anti-fraud/evaluate-shift',
+  authorize('AUDIT_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  OwnerRiskAuditController.evaluateCashierShift
+);
+router.post(
+  '/anti-fraud/role-permission-audit',
+  authorize('AUDIT_WRITE', { allowedRoles: ['MASTER', 'OWNER'] }),
+  OwnerRiskAuditController.recordRolePermissionAudit
+);
+
 module.exports = router;

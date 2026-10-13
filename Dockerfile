@@ -4,12 +4,12 @@ FROM node:24-alpine AS base
 WORKDIR /app
 
 # Install backend dependencies
-COPY backend/package*.json ./backend/
-RUN cd backend && npm ci --only=production
+COPY Backend/package*.json ./Backend/
+RUN cd Backend && npm ci --only=production
 
 # Copy backend source code
-COPY backend ./backend
-COPY frontend ./frontend
+COPY Backend ./Backend
+COPY Frontend ./Frontend
 
 ENV NODE_ENV=production
 ENV PORT=4000
@@ -17,4 +17,4 @@ ENV TZ=Asia/Kolkata
 
 EXPOSE 4000 3000
 
-CMD ["node", "backend/src/scripts/startProd.js"]
+CMD ["node", "Backend/src/scripts/startProd.js"]

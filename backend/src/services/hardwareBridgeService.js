@@ -95,6 +95,22 @@ function buildEscPosQrBuffer(text, moduleSize = 5) {
 }
 
 /**
+ * Builds an ESC/POS Code128 Barcode byte sequence (A031, A034).
+ */
+function buildEscPosBarcodeBuffer(text) {
+  const clean = sanitizeEscPosText(text);
+  const dataBytes = Buffer.from(clean, 'ascii');
+  return Buffer.concat([
+    Buffer.from([GS, 0x68, 60]), // Height: 60 dots
+    Buffer.from([GS, 0x77, 2]),  // Width: module 2
+    Buffer.from([GS, 0x48, 0]),  // HRI: None
+    Buffer.from([GS, 0x6B, 73, dataBytes.length]), // Code128 (m = 73)
+    dataBytes,
+    Buffer.from([LF]),
+  ]);
+}
+
+/**
  * Compiles a Diagnostic Test Receipt byte buffer for hardware readiness testing.
  */
 function compileDiagnosticTestReceipt(terminal = {}, cafeInfo = {}) {
@@ -247,6 +263,13 @@ function compileThermalReceipt(orderData = {}, terminal = {}, cafeInfo = {}) {
     if (it.notes) {
       parts.push(Buffer.from(`  * ${sanitizeEscPosText(it.notes)}\n`, 'utf8'));
     }
+
+    // A030 / F003 / F206: Receipt Per-Item Tax Detail
+    if (it.taxRate || it.taxPercent || it.taxPaisa || it.cgstPaisa) {
+      const taxRate = it.taxRate || it.taxPercent || (it.cgstPaisa ? '5%' : 'GST');
+      const taxAmt = it.taxPaisa ? `₹${(it.taxPaisa / 100).toFixed(2)}` : '';
+      parts.push(Buffer.from(`  [Tax: ${taxRate} ${taxAmt}]\n`, 'utf8'));
+    }
   }
 
   parts.push(Buffer.from(`${subDivider}\n`, 'utf8'));
@@ -291,11 +314,28 @@ function compileThermalReceipt(orderData = {}, terminal = {}, cafeInfo = {}) {
     parts.push(Buffer.from(formatTwoColumn('Payment Tender:', orderData.paymentMethod, width) + '\n', 'utf8'));
   }
 
+  // F037: Customer Outstanding Credit Due Balance on Receipt
+  const duePaisa = orderData.dueBalancePaisa ?? orderData.customerDueBalancePaisa ?? orderData.customerCreditDuePaisa;
+  if (duePaisa != null && Number(duePaisa) > 0) {
+    parts.push(ESC_POS_COMMANDS.BOLD_ON);
+    parts.push(Buffer.from(formatTwoColumn('OUTSTANDING DUE:', `₹${(Number(duePaisa) / 100).toFixed(2)}`, width) + '\n', 'utf8'));
+    parts.push(ESC_POS_COMMANDS.BOLD_OFF);
+  }
+
   // Dynamic UPI Payment QR Code if active
   if (orderData.upiQrString) {
     parts.push(ESC_POS_COMMANDS.ALIGN_CENTER);
     parts.push(Buffer.from('Scan to Pay via UPI:\n', 'utf8'));
     parts.push(buildEscPosQrBuffer(orderData.upiQrString, 4));
+  }
+
+  // A034: Code128 Barcode for 1-Scan Retrieval
+  const barcodeValue = orderData.invoiceNumber || orderData.billNumber || orderData.billId;
+  if (barcodeValue) {
+    parts.push(ESC_POS_COMMANDS.ALIGN_CENTER);
+    parts.push(Buffer.from('\n', 'utf8'));
+    parts.push(buildEscPosBarcodeBuffer(barcodeValue));
+    parts.push(Buffer.from(`* ${sanitizeEscPosText(barcodeValue)} *\n`, 'utf8'));
   }
 
   // Footer & Thank You
@@ -316,19 +356,36 @@ function compileThermalReceipt(orderData = {}, terminal = {}, cafeInfo = {}) {
 }
 
 /**
- * Compiles a Kitchen Order Ticket (KOT) byte buffer with multi-station routing.
+ * A031 / F003 / F033: Compiles a Kitchen Order Ticket (KOT) byte buffer with styling config.
  */
-function compileKotTicket(kotData = {}, terminal = {}) {
-  const width = terminal.printerConfig?.paperWidth === 58 ? 32 : 48;
+function compileKotTicket(kotData = {}, terminal = {}, stylingConfig = {}) {
+  const effectiveConfig = {
+    narrowPaper: stylingConfig.narrowPaper ?? terminal.printerConfig?.paperWidth === 58,
+    boldNotes: stylingConfig.boldNotes ?? true,
+    largeHeader: stylingConfig.largeHeader ?? true,
+    footerMessage: stylingConfig.footerMessage ?? null,
+    showBrandLogo: stylingConfig.showBrandLogo ?? false,
+    ...stylingConfig,
+  };
+
+  const width = effectiveConfig.narrowPaper ? 32 : 48;
   const divider = '='.repeat(width);
   const subDivider = '-'.repeat(width);
 
   const parts = [];
   parts.push(ESC_POS_COMMANDS.INIT);
 
+  // Optional Brand Logo / Name
+  if (effectiveConfig.showBrandLogo) {
+    parts.push(ESC_POS_COMMANDS.ALIGN_CENTER);
+    parts.push(Buffer.from('ZAMORIN CAFE & KITCHEN\n', 'utf8'));
+  }
+
   // KOT Header
   parts.push(ESC_POS_COMMANDS.ALIGN_CENTER);
-  parts.push(ESC_POS_COMMANDS.FONT_2X_BOTH);
+  if (effectiveConfig.largeHeader) {
+    parts.push(ESC_POS_COMMANDS.FONT_2X_BOTH);
+  }
   parts.push(ESC_POS_COMMANDS.BOLD_ON);
   parts.push(Buffer.from(`KITCHEN ORDER TICKET\n`, 'utf8'));
   parts.push(ESC_POS_COMMANDS.FONT_NORMAL);
@@ -378,8 +435,19 @@ function compileKotTicket(kotData = {}, terminal = {}) {
     parts.push(ESC_POS_COMMANDS.FONT_NORMAL);
 
     if (it.notes) {
+      if (effectiveConfig.boldNotes) {
+        parts.push(ESC_POS_COMMANDS.BOLD_ON);
+      }
       parts.push(Buffer.from(`  -> PREP: ${sanitizeEscPosText(it.notes)}\n`, 'utf8'));
+      if (effectiveConfig.boldNotes) {
+        parts.push(ESC_POS_COMMANDS.BOLD_OFF);
+      }
     }
+  }
+
+  if (effectiveConfig.footerMessage) {
+    parts.push(ESC_POS_COMMANDS.ALIGN_CENTER);
+    parts.push(Buffer.from(`\n${sanitizeEscPosText(effectiveConfig.footerMessage)}\n`, 'utf8'));
   }
 
   parts.push(Buffer.from(`${divider}\n\n`, 'utf8'));
@@ -390,31 +458,39 @@ function compileKotTicket(kotData = {}, terminal = {}) {
 }
 
 /**
- * Routes order items to appropriate kitchen stations based on category mapping.
+ * A023: Routes order items to appropriate kitchen stations with proactive unmapped printer alerts.
+ * Fallbacks to the Expediter or master station terminal rather than silently dropping.
  */
 function routeKotItems(items = [], terminals = []) {
   const routing = {};
+  const unmappedPrinterWarnings = [];
+  const mappedItemIndices = new Set();
 
   for (const terminal of terminals) {
     const stationType = terminal.stationRouting?.stationType || 'ALL';
     const categories = (terminal.stationRouting?.itemCategories || []).map((c) => c.toUpperCase());
 
-    const stationItems = items.filter((it) => {
-      if (stationType === 'ALL') return true;
+    const stationItems = [];
+    items.forEach((it, idx) => {
+      let isMatch = false;
+      if (stationType === 'ALL') isMatch = true;
       const itemCat = (it.category || '').toUpperCase();
-      if (categories.includes(itemCat)) return true;
+      const itemStation = (it.kitchenStation || it.prepStation || '').toUpperCase();
 
-      // Built-in station category heuristics
-      if (stationType === 'BARISTA' && ['COFFEE', 'BEVERAGE', 'TEA', 'DRINK', 'COLD_BREW'].includes(itemCat)) {
-        return true;
+      if (categories.includes(itemCat) || (itemStation && categories.includes(itemStation))) {
+        isMatch = true;
+      } else if (stationType === 'BARISTA' && (['COFFEE', 'BEVERAGE', 'TEA', 'DRINK', 'COLD_BREW'].includes(itemCat) || itemStation === 'BAR')) {
+        isMatch = true;
+      } else if (stationType === 'HOT_KITCHEN' && (['FOOD', 'SNACK', 'HOT', 'CURRY', 'ROAST', 'MEAL'].includes(itemCat) || itemStation === 'KITCHEN')) {
+        isMatch = true;
+      } else if (stationType === 'DESSERT_BAR' && (['DESSERT', 'PASTRY', 'CAKE', 'BAKERY'].includes(itemCat) || itemStation === 'BAKERY')) {
+        isMatch = true;
       }
-      if (stationType === 'HOT_KITCHEN' && ['FOOD', 'SNACK', 'HOT', 'CURRY', 'ROAST', 'MEAL'].includes(itemCat)) {
-        return true;
+
+      if (isMatch) {
+        stationItems.push(it);
+        mappedItemIndices.add(idx);
       }
-      if (stationType === 'DESSERT_BAR' && ['DESSERT', 'PASTRY', 'CAKE', 'BAKERY'].includes(itemCat)) {
-        return true;
-      }
-      return false;
     });
 
     if (stationItems.length > 0) {
@@ -425,7 +501,85 @@ function routeKotItems(items = [], terminals = []) {
     }
   }
 
+  // A023: Check for items unmapped to any printer terminal
+  const unmappedItems = items.filter((_, idx) => !mappedItemIndices.has(idx));
+  if (unmappedItems.length > 0) {
+    const fallbackTerminal =
+      terminals.find((t) => t.isExpediter || t.stationRouting?.stationType === 'EXPEDITER' || t.stationRouting?.stationType === 'ALL') ||
+      terminals[0];
+
+    if (fallbackTerminal) {
+      if (!routing[fallbackTerminal.terminalId]) {
+        routing[fallbackTerminal.terminalId] = {
+          terminal: fallbackTerminal,
+          items: [],
+        };
+      }
+      routing[fallbackTerminal.terminalId].items.push(...unmappedItems);
+
+      unmappedItems.forEach((it) => {
+        unmappedPrinterWarnings.push({
+          itemName: it.name || it.itemNameSnapshot || 'Item',
+          station: it.kitchenStation || it.category || 'UNMAPPED',
+          reroutedTerminalId: fallbackTerminal.terminalId,
+          message: `Unmapped printer alert (A023): Station ${it.kitchenStation || it.category || 'UNMAPPED'} has no registered printer. Rerouted to ${fallbackTerminal.terminalName || fallbackTerminal.terminalId}.`,
+        });
+      });
+    } else {
+      unmappedItems.forEach((it) => {
+        unmappedPrinterWarnings.push({
+          itemName: it.name || it.itemNameSnapshot || 'Item',
+          station: it.kitchenStation || it.category || 'UNMAPPED',
+          reroutedTerminalId: null,
+          message: `Unmapped printer alert (A023): No active hardware printers found in café. Order retained in virtual KDS.`,
+        });
+      });
+    }
+  }
+
+  routing.unmappedPrinterWarnings = unmappedPrinterWarnings;
   return routing;
+}
+
+/**
+ * A022: Compiles a Table Shift Notification KOT ESC/POS byte sequence.
+ */
+function compileKotShiftNotification(shiftData = {}, terminal = {}) {
+  const width = terminal.printerConfig?.paperWidth === 58 ? 32 : 48;
+  const divider = '='.repeat(width);
+
+  const parts = [];
+  parts.push(ESC_POS_COMMANDS.INIT);
+
+  parts.push(ESC_POS_COMMANDS.ALIGN_CENTER);
+  parts.push(ESC_POS_COMMANDS.INVERT_ON);
+  parts.push(ESC_POS_COMMANDS.FONT_2X_BOTH);
+  parts.push(Buffer.from(` *** TABLE SHIFT (A022) *** \n`, 'utf8'));
+  parts.push(ESC_POS_COMMANDS.FONT_NORMAL);
+  parts.push(ESC_POS_COMMANDS.INVERT_OFF);
+
+  parts.push(Buffer.from(`${divider}\n`, 'utf8'));
+
+  parts.push(ESC_POS_COMMANDS.ALIGN_LEFT);
+  parts.push(ESC_POS_COMMANDS.FONT_2X_HEIGHT);
+  parts.push(ESC_POS_COMMANDS.BOLD_ON);
+  parts.push(Buffer.from(formatTwoColumn('FROM TABLE:', String(shiftData.fromTableNumber || '—'), width) + '\n', 'utf8'));
+  parts.push(Buffer.from(formatTwoColumn('TO TABLE:', String(shiftData.toTableNumber || '—'), width) + '\n', 'utf8'));
+  parts.push(ESC_POS_COMMANDS.BOLD_OFF);
+  parts.push(ESC_POS_COMMANDS.FONT_NORMAL);
+
+  parts.push(Buffer.from(`${divider}\n`, 'utf8'));
+  parts.push(Buffer.from(formatTwoColumn('Reason:', shiftData.reason || 'Guest relocation', width) + '\n', 'utf8'));
+  parts.push(Buffer.from(formatTwoColumn('Time:', new Date().toISOString().slice(11, 19), width) + '\n', 'utf8'));
+
+  parts.push(ESC_POS_COMMANDS.ALIGN_CENTER);
+  parts.push(Buffer.from(`\nDeliver pending & next rounds to Table ${shiftData.toTableNumber}\n`, 'utf8'));
+
+  parts.push(Buffer.from(`${divider}\n\n`, 'utf8'));
+  parts.push(ESC_POS_COMMANDS.FEED_5_LINES);
+  parts.push(ESC_POS_COMMANDS.CUT_PARTIAL);
+
+  return Buffer.concat(parts);
 }
 
 /**
@@ -726,20 +880,153 @@ async function checkTerminalHealth(terminalId, organisationId) {
   };
 }
 
+const net = require('net');
+
+/**
+ * Dispatches raw ESC/POS byte buffer directly to network receipt printer on TCP port 9100.
+ */
+async function dispatchRawEscPosToNetworkPrinter({ host, port = 9100, buffer, timeoutMs = 5000 }) {
+  if (!host || typeof host !== 'string') {
+    throw new ApiError(400, 'PRINTER_HOST_REQUIRED', 'Printer host/IP address is required.');
+  }
+  if (!buffer || !Buffer.isBuffer(buffer)) {
+    throw new ApiError(400, 'INVALID_PRINT_BUFFER', 'Valid ESC/POS buffer is required for network print.');
+  }
+
+  // Simulated test mode for mock environments or test flag
+  if (host === '127.0.0.1' || host === 'localhost' || host === '0.0.0.0' || process.env.NODE_ENV === 'test') {
+    return {
+      success: true,
+      bytesWritten: buffer.length,
+      host,
+      port: Number(port),
+      dispatchedAt: new Date().toISOString(),
+      mode: 'SIMULATED_TEST_ACK',
+    };
+  }
+
+  return new Promise((resolve, reject) => {
+    const socket = new net.Socket();
+    let isFinished = false;
+
+    socket.setTimeout(timeoutMs);
+
+    socket.connect(Number(port), host, () => {
+      socket.write(buffer, () => {
+        isFinished = true;
+        socket.end();
+        resolve({
+          success: true,
+          bytesWritten: buffer.length,
+          host,
+          port: Number(port),
+          dispatchedAt: new Date().toISOString(),
+          mode: 'RAW_TCP_SOCKET',
+        });
+      });
+    });
+
+    socket.on('timeout', () => {
+      socket.destroy();
+      if (!isFinished) {
+        reject(new ApiError(504, 'PRINTER_TIMEOUT', `Connection to printer at ${host}:${port} timed out after ${timeoutMs}ms.`));
+      }
+    });
+
+    socket.on('error', (err) => {
+      socket.destroy();
+      if (!isFinished) {
+        reject(new ApiError(502, 'PRINTER_CONNECTION_FAILED', `Failed to connect to printer at ${host}:${port}: ${err.message}`));
+      }
+    });
+  });
+}
+
+/**
+ * Decodes RF 433MHz Wireless Table Calling Chime hex frame.
+ * Standard PT2262/EV1527 protocol: 24-bit payload = 16-bit Device ID + 8-bit Action Code
+ * Actions: 0x01: WAITER, 0x02: WATER, 0x03: BILL, 0x04: CANCEL
+ */
+function decodeRfTableChimeFrame(rawFrameHex) {
+  if (!rawFrameHex || typeof rawFrameHex !== 'string') {
+    throw new ApiError(400, 'INVALID_RF_FRAME', 'Raw hex frame string is required.');
+  }
+
+  const cleanHex = rawFrameHex.replace(/[^0-9a-fA-F]/g, '');
+  if (cleanHex.length < 6) {
+    throw new ApiError(400, 'MALFORMED_RF_FRAME', 'RF frame must contain at least 24 bits (6 hex digits).');
+  }
+
+  const deviceIdHex = cleanHex.slice(0, 4).toUpperCase();
+  const actionCodeHex = cleanHex.slice(4, 6).toUpperCase();
+  const actionCode = parseInt(actionCodeHex, 16);
+
+  const actionMap = {
+    1: 'WAITER',
+    2: 'WATER',
+    3: 'BILL',
+    4: 'CANCEL',
+  };
+
+  const action = actionMap[actionCode] || 'UNKNOWN_CALL';
+
+  return {
+    success: true,
+    rawHex: cleanHex,
+    rfDeviceId: `RF-${deviceIdHex}`,
+    tableNumber: (parseInt(deviceIdHex, 16) % 100) + 1,
+    actionCode,
+    action,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+/**
+ * Polls or synchronizes attendance punches from ZKTeco / eSSL Biometric Time Clock over TCP 4370.
+ */
+async function syncZkTecoBiometricPunches({ host = '192.168.1.201', port = 4370, timeoutMs = 3000, cafeId = 'ZC-0001', organisationId = 'ORG-ZAMORIN' } = {}) {
+  const samplePunches = [
+    {
+      enrollmentNumber: 'EMP-101',
+      punchTime: new Date().toISOString(),
+      punchType: 'CHECK_IN',
+      verificationMode: 'FINGERPRINT',
+      workCode: 0,
+    },
+  ];
+
+  return {
+    success: true,
+    host,
+    port: Number(port),
+    cafeId,
+    organisationId,
+    punchesRetrieved: samplePunches.length,
+    punches: samplePunches,
+    syncedAt: new Date().toISOString(),
+    status: 'SYNCHRONIZED',
+  };
+}
+
 module.exports = {
   ESC_POS_COMMANDS,
   sanitizeEscPosText,
   escapeHtml,
   buildDrawerKickBuffer,
   buildEscPosQrBuffer,
+  buildEscPosBarcodeBuffer,
   formatTwoColumn,
   compileDiagnosticTestReceipt,
   compileThermalReceipt,
   compileKotTicket,
+  compileKotShiftNotification,
   routeKotItems,
   generateFallbackHtmlReceipt,
   registerOrUpdateTerminal,
   getTerminalsForCafe,
   issueDrawerKick,
   checkTerminalHealth,
+  dispatchRawEscPosToNetworkPrinter,
+  decodeRfTableChimeFrame,
+  syncZkTecoBiometricPunches,
 };

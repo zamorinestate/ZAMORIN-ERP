@@ -99,16 +99,26 @@ class ProcurementDispatchService {
       },
     ];
 
+    const upiQrString = `upi://pay?pa=zamorin.procure@icici&pn=ZamorinCafe&am=${((rev.totalPaisa || 0) / 100).toFixed(2)}&cu=INR&tn=${order.purchaseOrderId}`;
+
     const pdfResult = generatePdf({
       reportTitle: `PURCHASE ORDER — ${order.purchaseOrderId} (Rev ${rev.revisionNumber})`,
       reportCode: 'ZAMORIN-PO-OFFICIAL',
-      qrCodeData: `https://zamorin.local/procurement/verify?po=${order.purchaseOrderId}&rev=${rev.revisionNumber}`,
+      qrCodeData: upiQrString,
       scope: `Café: ${order.cafeId} | Vendor: ${order.vendorNameSnapshot || order.vendorId}`,
       period: `Order Date: ${order.orderDate || new Date().toISOString().slice(0, 10)}`,
       columns,
       rows,
       kpiCards,
       cafeId: order.cafeId,
+      // A033 / F178-F184: Inventory Document Branding & UPI Payment QR
+      branding: {
+        brandName: 'Zamorin Café & Artisanal Roastery',
+        logoUrl: '/assets/zamorin-logo.png',
+        legalName: 'Zamorin Hospitality Pvt Ltd',
+        gstin: '32AABCU9603R1ZM',
+        upiQrString,
+      },
       sensitivityLevel: 'OFFICIAL_COMMERCIAL_ORDER',
       runId: `${order.purchaseOrderId}-R${rev.revisionNumber}`,
     });

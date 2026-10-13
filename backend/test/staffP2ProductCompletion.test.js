@@ -143,6 +143,7 @@ test('Staff P2 Product Completion & Hardening Suite', async (suite) => {
         auth: {
           userId: `usr_${role.toLowerCase()}_001`,
           role,
+          isPrimaryMaster: role === 'MASTER',
           organisationId: 'org_zamorin_001',
         },
         headers: {},

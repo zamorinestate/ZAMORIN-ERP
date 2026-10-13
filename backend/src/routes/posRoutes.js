@@ -23,6 +23,23 @@ const {
   reviewOfflineOrder,
   handlePaymentCallback,
   correctTender,
+  splitBillByItemsController,
+  splitBillEvenlyController,
+  splitBillFoodBeverageController,
+  splitBillFoodBarController,
+  lookupItemByShortcodeController,
+  issueSmartCardController,
+  topupSmartCardController,
+  debitSmartCardController,
+  refundSmartCardController,
+  getSmartCardBalanceController,
+  getSmartCardLiabilityReportController,
+  registerDailyProductionBatchController,
+  getDailyProductionRegisterController,
+  requestVoidOtpController,
+  lookupBarcodeOrderController,
+  mergeTablesPosController,
+  shiftTablePosController,
 } = require('../controllers/posController');
 
 const router = express.Router();
@@ -66,6 +83,39 @@ router.get('/orders/last/:cafeId', getLastCommittedBill);
 router.post('/payments/callback', handlePaymentCallback);
 router.post('/payments/callback/:provider', handlePaymentCallback);
 router.post('/orders/:billId/tender-correction', correctTender);
+
+// P22: FOH Split Bills & Void Challenges
+router.post('/orders/split-by-items', splitBillByItemsController);
+router.post('/orders/split-items', splitBillByItemsController);
+router.post('/orders/split-evenly', splitBillEvenlyController);
+router.post('/orders/split-food-beverage', splitBillFoodBeverageController);
+router.post('/orders/split-food-bar', splitBillFoodBarController);
+router.post('/orders/request-void-otp', requestVoidOtpController);
+
+// P23: Table Merging (F027), Shifted KOTs (A022), Barcode Lookup (A034), Shortcode (F044)
+router.post('/tables/merge', mergeTablesPosController);
+router.post('/tables/shift', shiftTablePosController);
+router.get('/orders/lookup-barcode/:barcode', lookupBarcodeOrderController);
+router.get('/orders/lookup-barcode', lookupBarcodeOrderController);
+router.get('/advance-orders/by-slip/:slipNumber', (req, res, next) => {
+  const { getAdvanceDepositBySlip } = require('../controllers/financeController');
+  return getAdvanceDepositBySlip(req, res, next);
+});
+router.get('/items/shortcode/:shortcode', lookupItemByShortcodeController);
+router.get('/items/shortcode', lookupItemByShortcodeController);
+
+// F085: Food Court Prepaid Smart Card Engine
+router.post('/smart-card/issue', issueSmartCardController);
+router.post('/smart-card/topup', topupSmartCardController);
+router.post('/smart-card/debit', debitSmartCardController);
+router.post('/smart-card/refund', refundSmartCardController);
+router.get('/smart-card/liability-report', getSmartCardLiabilityReportController);
+router.get('/smart-card/:cardUid/balance', getSmartCardBalanceController);
+router.get('/smart-card/balance', getSmartCardBalanceController);
+
+// F137–F140: Daily Finished-Item Batch Register
+router.post('/production/daily-register', registerDailyProductionBatchController);
+router.get('/production/daily-register', getDailyProductionRegisterController);
 
 // REC-04B: Transaction status & unknown-outcome recovery
 router.get('/orders/status/:transactionId', getOrderStatusByIdempotency);

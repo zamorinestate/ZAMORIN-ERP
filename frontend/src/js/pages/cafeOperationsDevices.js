@@ -75,6 +75,9 @@ export function renderCafeOperationsDevices(subroute) {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
             Refresh Fleet
           </button>
+          <button class="btn btn-primary" id="btn-prep-label-studio" type="button" title="Thermal Prep Sticky Label Studio (F178-F184)" style="display:flex; align-items:center; gap:6px; font-weight:700;">
+            🏷️ Sticky Label Studio (F178–F184)
+          </button>
         </div>
       </div>
 
@@ -122,6 +125,177 @@ export function wireCafeOperationsDevices(root, subroute) {
     showToast("Refreshing fleet and session status...");
     loadFleetData(root);
   });
+
+  // Sticky Label Studio (F178-F184)
+  root.querySelector("#btn-prep-label-studio")?.addEventListener("click", () => {
+    openPrepLabelStudioModal();
+  });
+}
+
+function openPrepLabelStudioModal() {
+  openModal({
+    title: "Thermal Prep Sticky Label Studio (F178–F184)",
+    maxWidth: "680px",
+    body: `
+      <div style="display:flex; flex-direction:column; gap:14px; font-size:12.5px; color:var(--ink);">
+        <div style="background:var(--surface-sunken); padding:10px 12px; border-radius:6px; border:1px solid var(--line); font-size:11.5px; color:var(--muted);">
+          ℹ️ Generates high-density thermal sticky labels (ESC/POS & ZPL) for in-house bakery prep, cold brew bottles, vacuum packs, and FSSAI allergen compliance.
+        </div>
+
+        <div style="display:grid; grid-template-columns:1.5fr 1fr; gap:12px;">
+          <div>
+            <label style="font-weight:700; display:block; margin-bottom:3px;">Item / Preparation Name *</label>
+            <input type="text" id="label-item-name" class="input" value="Cold Brew Concentrate (Single Origin)" style="width:100%; box-sizing:border-box; font-size:12.5px; font-weight:700;" />
+          </div>
+          <div>
+            <label style="font-weight:700; display:block; margin-bottom:3px;">Batch Number *</label>
+            <input type="text" id="label-batch-num" class="input" value="BATCH-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-01" style="width:100%; box-sizing:border-box; font-size:12.5px; font-family:var(--font-mono);" />
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;">
+          <div>
+            <label style="font-weight:700; display:block; margin-bottom:3px;">Shelf Life (Hours)</label>
+            <input type="number" id="label-shelf-life" class="input" value="72" min="1" max="720" style="width:100%; box-sizing:border-box; font-size:12px; font-weight:700;" />
+          </div>
+          <div>
+            <label style="font-weight:700; display:block; margin-bottom:3px;">Storage Condition</label>
+            <select id="label-storage-cond" class="select" style="width:100%; font-size:12px;">
+              <option value="REFRIGERATED (2°C - 4°C)" selected>Refrigerated (2°C - 4°C)</option>
+              <option value="FROZEN (-18°C)">Frozen (-18°C)</option>
+              <option value="AMBIENT DRY (< 25°C)">Ambient Dry (< 25°C)</option>
+              <option value="COOL & DRY (15°C - 20°C)">Cool & Dry (15°C - 20°C)</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-weight:700; display:block; margin-bottom:3px;">Net Weight / Vol</label>
+            <input type="text" id="label-net-wt" class="input" value="500 ml" style="width:100%; box-sizing:border-box; font-size:12px;" />
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div>
+            <label style="font-weight:700; display:block; margin-bottom:3px;">Retail MRP (₹)</label>
+            <input type="number" id="label-mrp" class="input" value="380" min="0" style="width:100%; box-sizing:border-box; font-size:12px; font-weight:700;" />
+          </div>
+          <div>
+            <label style="font-weight:700; display:block; margin-bottom:3px;">Prepared By Station / Person</label>
+            <input type="text" id="label-prep-by" class="input" value="Artisanal Roastery Lab" style="width:100%; box-sizing:border-box; font-size:12px;" />
+          </div>
+        </div>
+
+        <div>
+          <label style="font-weight:700; display:block; margin-bottom:4px;">Declared Allergens</label>
+          <div style="display:flex; gap:12px; flex-wrap:wrap; background:var(--surface-sunken); padding:8px 12px; border-radius:6px; border:1px solid var(--line);">
+            ${["Gluten", "Dairy", "Tree Nuts", "Soy", "Egg", "None / Nil"].map((a, i) => `
+              <label style="display:flex; align-items:center; gap:4px; font-size:12px; cursor:pointer;">
+                <input type="checkbox" class="label-allergen-cb" value="${a}" ${i === 5 ? "checked" : ""} />
+                <span>${a}</span>
+              </label>
+            `).join("")}
+          </div>
+        </div>
+
+        <button class="btn btn-secondary" id="btn-generate-prep-label" type="button" style="padding:8px 14px; font-weight:700; font-size:12px; align-self:flex-start;">
+          👁️ Preview Label (ESC/POS & ZPL)
+        </button>
+
+        <div id="prep-label-preview-container" style="display:none; flex-direction:column; gap:10px; border-top:1px dashed var(--line); padding-top:12px;">
+        </div>
+      </div>
+    `,
+    saveLabel: "🖨️ Print Label via Thermal Station",
+    cancelLabel: "Close",
+    onSave: async (modalEl) => {
+      const itemName = modalEl.querySelector("#label-item-name")?.value?.trim();
+      const batchNumber = modalEl.querySelector("#label-batch-num")?.value?.trim();
+      const shelfLifeHours = Number(modalEl.querySelector("#label-shelf-life")?.value) || 48;
+      const storageCondition = modalEl.querySelector("#label-storage-cond")?.value || "REFRIGERATED (2°C - 4°C)";
+      const netWeight = modalEl.querySelector("#label-net-wt")?.value?.trim() || "";
+      const mrp = Number(modalEl.querySelector("#label-mrp")?.value) || 0;
+      const preparedBy = modalEl.querySelector("#label-prep-by")?.value?.trim() || "Kitchen Team";
+      const allergens = Array.from(modalEl.querySelectorAll(".label-allergen-cb:checked")).map(cb => cb.value).filter(v => v !== "None / Nil");
+
+      try {
+        const res = await apiPost("/hardware/prep-label", {
+          itemName,
+          batchNumber,
+          shelfLifeHours,
+          storageCondition,
+          netWeight,
+          mrpPaisa: mrp * 100,
+          preparedBy,
+          allergens,
+        });
+
+        showToast(`Sticky label queued for printer (${res.data?.batch || batchNumber}). ESC/POS buffer emitted.`, "mint");
+        window.print();
+        return true;
+      } catch (err) {
+        showToast(err.message || "Failed to generate prep label", "coral");
+        return false;
+      }
+    },
+  });
+
+  setTimeout(() => {
+    document.getElementById("btn-generate-prep-label")?.addEventListener("click", async () => {
+      const container = document.getElementById("prep-label-preview-container");
+      if (!container) return;
+
+      const itemName = document.getElementById("label-item-name")?.value?.trim() || "Item";
+      const batchNumber = document.getElementById("label-batch-num")?.value?.trim() || "BATCH-01";
+      const shelfLifeHours = Number(document.getElementById("label-shelf-life")?.value) || 48;
+      const storageCondition = document.getElementById("label-storage-cond")?.value || "REFRIGERATED";
+      const netWeight = document.getElementById("label-net-wt")?.value?.trim() || "";
+      const mrp = Number(document.getElementById("label-mrp")?.value) || 0;
+      const preparedBy = document.getElementById("label-prep-by")?.value?.trim() || "Prep Team";
+      const allergens = Array.from(document.querySelectorAll(".label-allergen-cb:checked")).map(cb => cb.value).filter(v => v !== "None / Nil");
+
+      try {
+        const res = await apiPost("/hardware/prep-label", {
+          itemName,
+          batchNumber,
+          shelfLifeHours,
+          storageCondition,
+          netWeight,
+          mrpPaisa: mrp * 100,
+          preparedBy,
+          allergens,
+        });
+
+        const data = res?.data || {};
+        container.style.display = "flex";
+        container.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px;">
+            <div style="flex:1; background:#FFFFFF; border:2px solid #16223F; border-radius:6px; padding:12px; font-family:'Courier New', monospace; font-size:11px; line-height:1.4; color:#000000; box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+              <div style="text-align:center; font-weight:bold; font-size:12px; border-bottom:1px solid #000; padding-bottom:4px; margin-bottom:6px;">
+                ZAMORIN CAFE & ARTISANAL ROASTERY
+              </div>
+              <div><strong>ITEM:</strong> ${escapeHtml(data.itemName || itemName)}</div>
+              <div><strong>BATCH:</strong> ${escapeHtml(data.batch || batchNumber)}</div>
+              <div><strong>PACKED:</strong> ${escapeHtml(data.formattedPrepDate || 'Now')}</div>
+              <div style="color:#B91C1C; font-weight:bold;"><strong>USE BY:</strong> ${escapeHtml(data.formattedExpiryDate || 'In 48h')}</div>
+              <div><strong>STORAGE:</strong> ${escapeHtml(data.storageCondition || storageCondition)}</div>
+              <div><strong>ALLERGENS:</strong> ${data.allergens?.length ? escapeHtml(data.allergens.join(', ')) : 'NIL'}</div>
+              ${netWeight ? `<div><strong>NET WT:</strong> ${escapeHtml(netWeight)}</div>` : ''}
+              ${mrp > 0 ? `<div><strong>MRP:</strong> ₹${mrp.toFixed(2)} (INCL. TAXES)</div>` : ''}
+              <div style="font-size:9.5px; margin-top:4px; border-top:1px dashed #666; padding-top:4px;">
+                FSSAI LIC: 10020042000123 · PREP: ${escapeHtml(preparedBy)}
+              </div>
+            </div>
+
+            <div style="flex:1; display:flex; flex-direction:column; gap:6px;">
+              <span style="font-weight:700; font-size:11px; color:var(--muted);">ZPL (Zebra Direct Thermal Code):</span>
+              <textarea readonly style="width:100%; height:130px; font-family:monospace; font-size:10px; background:var(--surface-sunken); border:1px solid var(--line); border-radius:6px; padding:6px; resize:none;">${escapeHtml(data.zplString || '^XA^FDZAMORIN^FS^XZ')}</textarea>
+            </div>
+          </div>
+        `;
+      } catch (err) {
+        showToast(err.message || "Failed to compile label", "coral");
+      }
+    });
+  }, 50);
 }
 
 async function openDiagnosticModal() {
@@ -915,6 +1089,9 @@ function renderPeripheralsView() {
     else if (dev.deviceType === "WEIGHING_SCALE") typeIcon = "⚖️";
     else if (dev.deviceType === "BARCODE_SCANNER") typeIcon = "📷";
     else if (dev.deviceType === "PAYMENT_TERMINAL") typeIcon = "💳";
+    else if (dev.deviceType === "BIOMETRIC_SCANNER") typeIcon = "👆";
+    else if (dev.deviceType === "SOUNDBOX") typeIcon = "🔊";
+    else if (dev.deviceType === "CALLER_ID_MODEM") typeIcon = "📞";
 
     const statusBadge = dev.healthStatus === "ONLINE"
       ? '<span class="status success">ONLINE</span>'
@@ -943,8 +1120,15 @@ function renderPeripheralsView() {
     } else if (dev.deviceType === "BARCODE_SCANNER") {
       actionButton = `<button class="btn btn-sm btn-secondary" data-peripheral-action="test-scan" data-id="${escapeHtml(dev.deviceId)}">Test Scan</button>`;
     } else if (dev.deviceType === "PAYMENT_TERMINAL") {
-      actionButton = `<button class="btn btn-sm btn-secondary" data-peripheral-action="test-terminal" data-id="${escapeHtml(dev.deviceId)}">Check POS</button>`;
+      actionButton = `<button class="btn btn-sm btn-secondary" data-peripheral-action="push-edc" data-id="${escapeHtml(dev.deviceId)}">Push ₹10</button>`;
+    } else if (dev.deviceType === "BIOMETRIC_SCANNER") {
+      actionButton = `<button class="btn btn-sm btn-secondary" data-peripheral-action="test-biometric" data-id="${escapeHtml(dev.deviceId)}">Test Scanner</button>`;
+    } else if (dev.deviceType === "SOUNDBOX") {
+      actionButton = `<button class="btn btn-sm btn-secondary" data-peripheral-action="test-soundbox" data-id="${escapeHtml(dev.deviceId)}">Test Audio</button>`;
+    } else if (dev.deviceType === "CALLER_ID_MODEM") {
+      actionButton = `<button class="btn btn-sm btn-secondary" data-peripheral-action="test-caller-id" data-id="${escapeHtml(dev.deviceId)}">Simulate Call</button>`;
     }
+
 
     return `
       <tr style="border-bottom:1px solid var(--border-subtle);">
@@ -1055,8 +1239,27 @@ async function wirePeripheralsView(root) {
         } else if (action === "test-terminal" || action === "diagnostic") {
           const res = await apiPost(`/hardware/devices/${deviceId}/diagnostic`, {});
           showToast(`✅ Device self-test: ${res?.data?.healthStatus || "ONLINE"} (${res?.data?.durationMs || 0}ms)`, "success");
+        } else if (action === "push-edc") {
+          showToast(`Pushing ₹10.00 to EDC Terminal ${deviceId}...`, "info");
+          const res = await apiPost("/hardware/edc/push-sale", { terminalId: deviceId, amountPaisa: 1000, provider: "PINELABS" });
+          showToast(`💳 EDC Sale Pushed: ${res?.data?.status} (${res?.data?.transactionRef})`, "success");
+        } else if (action === "test-biometric") {
+          showToast(`Diagnosing Biometric Scanner ${deviceId}...`, "info");
+          const res = await apiPost("/hardware/biometric/device-test", { model: "MANTRA_MFS100" });
+          showToast(`👆 Biometric: ${res?.data?.status || "ONLINE"} (Driver: ${res?.data?.driverStatus || "ACTIVE"})`, "success");
+        } else if (action === "test-soundbox") {
+          showToast(`Triggering test speech broadcast on Soundbox ${deviceId}...`, "info");
+          const res = await apiPost("/hardware/soundbox/broadcast", { amountPaisa: 12000, language: "en", terminalId: deviceId });
+          showToast(`🔊 Soundbox: Broadcast "${res?.data?.speechText}" dispatched!`, "success");
+        } else if (action === "test-caller-id") {
+          const phone = prompt("Simulate incoming caller phone number:", "9876543210");
+          if (phone) {
+            const res = await apiPost("/hardware/caller-id/incoming", { phoneNumber: phone, rawCallerName: "Valued Guest" });
+            showToast(`📞 Caller ID: ${res?.data?.customerName} (${res?.data?.customerPhone}) pop-up dispatched!`, "success");
+          }
         }
       } catch (err) {
+
         showToast(err.message || "Action failed.", "error");
       } finally {
         btn.disabled = false;
@@ -1093,8 +1296,12 @@ function openAddPeripheralModal(root) {
           <option value="BARCODE_SCANNER">Barcode / QR Scanner</option>
           <option value="WEIGHING_SCALE">Weighing Scale (Serial Protocol)</option>
           <option value="PAYMENT_TERMINAL">Payment Terminal / EDC</option>
+          <option value="BIOMETRIC_SCANNER">Biometric Fingerprint Scanner (Mantra/Morpho)</option>
+          <option value="SOUNDBOX">Spoken UPI Soundbox (Paytm/PhonePe)</option>
+          <option value="CALLER_ID_MODEM">Caller ID USB Modem (AT+VCID)</option>
           <option value="CUSTOMER_DISPLAY">Customer Pole Display</option>
         </select>
+
       </div>
 
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px;">

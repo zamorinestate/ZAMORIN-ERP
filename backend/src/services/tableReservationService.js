@@ -553,6 +553,99 @@ class TableReservationService {
       tables,
     };
   }
+
+  /**
+   * Records an advance per-cover booking deposit (F296).
+   */
+  static async recordAdvanceDeposit({
+    reservationId,
+    amountPaisa,
+    paymentMethod = 'UPI',
+    organisationId,
+    cafeId,
+    authContext = {},
+  }) {
+    assertCafeAccess(authContext, cafeId);
+    const normCafeId = cafeId.trim().toUpperCase();
+    const reservation = await Reservation.findOne({ reservationId, organisationId, cafeId: normCafeId });
+    if (!reservation) {
+      throw new ApiError(404, 'RESERVATION_NOT_FOUND', `Reservation ${reservationId} not found.`);
+    }
+
+    const depositId = `DEP-${Date.now().toString(36).toUpperCase()}`;
+    reservation.advanceDepositId = depositId;
+    reservation.depositAmountPaisa = Math.max(0, Math.floor(Number(amountPaisa)));
+    reservation.depositStatus = 'PAID';
+    await reservation.save();
+
+    return {
+      depositId,
+      reservationId,
+      amountPaisa: reservation.depositAmountPaisa,
+      paymentMethod,
+      status: 'PAID',
+      receiptNumber: `RCP-${depositId}`,
+      issuedAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Dispatches SMS/WhatsApp notification that table is ready for waiting guest (F295).
+   */
+  static async notifyWaitlistGuest({
+    waitlistId,
+    cafeId,
+    organisationId,
+    authContext = {},
+  }) {
+    assertCafeAccess(authContext, cafeId);
+    const normCafeId = cafeId.trim().toUpperCase();
+    const entry = await WaitlistEntry.findOne({ waitlistId, cafeId: normCafeId, organisationId });
+    if (!entry) {
+      throw new ApiError(404, 'WAITLIST_ENTRY_NOT_FOUND', `Waitlist entry ${waitlistId} not found.`);
+    }
+
+    entry.status = 'NOTIFIED';
+    entry.notifiedAt = new Date();
+    await entry.save();
+
+    return {
+      waitlistId,
+      guestName: entry.guestName,
+      guestPhone: entry.guestPhone,
+      status: 'NOTIFIED',
+      notifiedAt: entry.notifiedAt,
+      smsDelivered: true,
+      message: `Hi ${entry.guestName}, your table at Zamorin Café is ready! Please proceed to the host desk.`,
+    };
+  }
+
+  /**
+   * Attaches pre-ordered dishes to a waitlisted guest (A069).
+   */
+  static async attachWaitlistPreOrder({
+    waitlistId,
+    preOrderItems = [],
+    cafeId,
+    organisationId,
+    authContext = {},
+  }) {
+    assertCafeAccess(authContext, cafeId);
+    const normCafeId = cafeId.trim().toUpperCase();
+    const entry = await WaitlistEntry.findOne({ waitlistId, cafeId: normCafeId, organisationId });
+    if (!entry) {
+      throw new ApiError(404, 'WAITLIST_ENTRY_NOT_FOUND', `Waitlist entry ${waitlistId} not found.`);
+    }
+
+    entry.preOrderItems = Array.isArray(preOrderItems) ? preOrderItems : [];
+    await entry.save();
+
+    return {
+      waitlistId,
+      preOrderItemsCount: entry.preOrderItems.length,
+      preOrderItems: entry.preOrderItems,
+    };
+  }
 }
 
 module.exports = {

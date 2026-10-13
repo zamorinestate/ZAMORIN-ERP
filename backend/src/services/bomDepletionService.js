@@ -156,17 +156,23 @@ class BomDepletionService {
           current.totalQuantityRequired += ing.quantityRequired;
           aggregatedRequirements.set(ing.inventoryItemId, current);
         }
-      } else if (menuItem && menuItem.linkedInventoryItemId) {
-        // Direct 1:1 inventory item link
-        const directItemId = normalizeId(menuItem.linkedInventoryItemId);
-        const current = aggregatedRequirements.get(directItemId) || {
-          itemId: directItemId,
-          ingredientName: menuItem.name,
-          uom: 'UNIT',
-          totalQuantityRequired: 0,
-        };
-        current.totalQuantityRequired += quantity;
-        aggregatedRequirements.set(directItemId, current);
+      } else if (
+        menuItem &&
+        (menuItem.autoDeductInventory || menuItem.linkedInventoryItemId || menuItem.inventoryItemId)
+      ) {
+        // Direct non-recipe auto-deduct item (F042)
+        const directItemId = normalizeId(menuItem.inventoryItemId || menuItem.linkedInventoryItemId);
+        if (directItemId) {
+          const mult = Math.max(0.001, Number(menuItem.recipeDeductionBaseQuantity) || 1);
+          const current = aggregatedRequirements.get(directItemId) || {
+            itemId: directItemId,
+            ingredientName: menuItem.name,
+            uom: 'UNIT',
+            totalQuantityRequired: 0,
+          };
+          current.totalQuantityRequired += (quantity * mult);
+          aggregatedRequirements.set(directItemId, current);
+        }
       }
 
       // Check ServiceModeBOM packaging items for applicable service mode
@@ -531,6 +537,99 @@ class BomDepletionService {
       success: true,
       modifiedCount,
       modifiedRecipeIds,
+    };
+  }
+
+  /**
+   * Recursively computes standard and theoretical BOM cost with yield loss factor adjustments (F038).
+   */
+  static async calculateRecipeCost(recipeId, organisationId, currentDepth = 0, visited = new Set()) {
+    if (currentDepth > 5) {
+      throw new ApiError(400, 'MAX_RECIPE_DEPTH_EXCEEDED', `Recipe hierarchy exceeded maximum recursion depth of 5 at recipe ${recipeId}.`);
+    }
+
+    const normRecipeId = normalizeId(recipeId);
+    if (visited.has(normRecipeId)) {
+      throw new ApiError(400, 'RECIPE_CYCLE_DETECTED', `Circular dependency detected in recipe BOM: ${normRecipeId}.`);
+    }
+    visited.add(normRecipeId);
+
+    const recipe = await Recipe.findOne({
+      recipeId: normRecipeId,
+      organisationId,
+    }).lean();
+
+    if (!recipe) {
+      throw new ApiError(404, 'RECIPE_NOT_FOUND', `Recipe ${recipeId} not found.`);
+    }
+
+    let totalCostPaisa = 0;
+    const costedIngredients = [];
+    const { GlobalInventoryItem } = require('../models/GlobalInventoryItem');
+
+    for (const ing of recipe.ingredients || []) {
+      const baseQty = Number(ing.quantity) || 0;
+      const lossFactor = Math.min(99, Math.max(0, Number(ing.lossFactorPercent) || 0));
+      const adjustedQty = lossFactor > 0 ? baseQty / (1 - lossFactor / 100) : baseQty;
+
+      let unitCostPaisa = 0;
+      let ingCostPaisa = 0;
+
+      if (ing.subRecipeId) {
+        const subCost = await this.calculateRecipeCost(
+          ing.subRecipeId,
+          organisationId,
+          currentDepth + 1,
+          new Set(visited)
+        );
+        unitCostPaisa = subCost.portionCostPaisa || subCost.totalCostPaisa || 0;
+        ingCostPaisa = Math.round(unitCostPaisa * adjustedQty);
+        costedIngredients.push({
+          subRecipeId: ing.subRecipeId,
+          name: ing.ingredientName,
+          baseQuantity: baseQty,
+          quantityRequired: Number(adjustedQty.toFixed(4)),
+          uom: ing.uom,
+          lossFactorPercent: lossFactor,
+          unitCostPaisa,
+          totalCostPaisa: ingCostPaisa,
+          isSubRecipe: true,
+          nestedBreakdown: subCost,
+        });
+      } else if (ing.inventoryItemId) {
+        const item = await GlobalInventoryItem.findOne({
+          organisationId,
+          itemId: normalizeId(ing.inventoryItemId),
+        }).lean();
+        unitCostPaisa = item?.unitCostPaisa || item?.standardCostPaisa || item?.lastPurchasePricePaisa || 0;
+        ingCostPaisa = Math.round(unitCostPaisa * adjustedQty);
+        costedIngredients.push({
+          inventoryItemId: normalizeId(ing.inventoryItemId),
+          name: ing.ingredientName,
+          baseQuantity: baseQty,
+          quantityRequired: Number(adjustedQty.toFixed(4)),
+          uom: ing.uom,
+          lossFactorPercent: lossFactor,
+          unitCostPaisa,
+          totalCostPaisa: ingCostPaisa,
+          isSubRecipe: false,
+        });
+      }
+
+      totalCostPaisa += ingCostPaisa;
+    }
+
+    const batchYield = Math.max(0.01, Number(recipe.batchYield) || 1);
+    const portionCostPaisa = Math.round(totalCostPaisa / batchYield);
+
+    return {
+      recipeId: recipe.recipeId,
+      name: recipe.name,
+      batchYield,
+      yieldUom: recipe.yieldUom || 'PORTION',
+      totalCostPaisa,
+      portionCostPaisa,
+      ingredients: costedIngredients,
     };
   }
 }

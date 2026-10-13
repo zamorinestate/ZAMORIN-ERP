@@ -2084,6 +2084,8 @@ async function renderWastageTab(wrap) {
             <label style="font-size:11.5px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:6px;">Quick Reason Presets</label>
             <div style="display:flex; flex-wrap:wrap; gap:6px;">
               <button type="button" class="badge-tag badge-neutral btn-quick-reason" data-reason="SPILLED" style="cursor:pointer; border:1px solid var(--line);">☕ Spilled / Drop</button>
+              <button type="button" class="badge-tag badge-neutral btn-quick-reason" data-reason="BURNT_BATCH" style="cursor:pointer; border:1px solid var(--line);">🔥 Burnt Batch</button>
+              <button type="button" class="badge-tag badge-neutral btn-quick-reason" data-reason="QUALITY_REJECT" style="cursor:pointer; border:1px solid var(--line);">🚫 Quality Reject</button>
               <button type="button" class="badge-tag badge-neutral btn-quick-reason" data-reason="EXPIRED" style="cursor:pointer; border:1px solid var(--line);">⏳ Expired on Shelf</button>
               <button type="button" class="badge-tag badge-neutral btn-quick-reason" data-reason="DAMAGED_PACKAGING" style="cursor:pointer; border:1px solid var(--line);">📦 Damaged Packaging</button>
               <button type="button" class="badge-tag badge-neutral btn-quick-reason" data-reason="PREPARATION_LOSS" style="cursor:pointer; border:1px solid var(--line);">🍳 Prep Waste</button>
@@ -2113,11 +2115,12 @@ async function renderWastageTab(wrap) {
                 <label class="form-label" style="font-size:12px; font-weight:700; color:var(--ink);">Reason Code</label>
                 <select id="sel-waste-reason" name="reasonCode" class="form-input" style="width:100%;" required>
                   <option value="SPILLED">Spilled / Barista Accident</option>
+                  <option value="BURNT_BATCH">Burnt Batch / Kitchen Error</option>
+                  <option value="QUALITY_REJECT">Quality Rejection / Spoiled</option>
                   <option value="EXPIRED">Expired on Shelf</option>
                   <option value="DAMAGED_PACKAGING">Damaged Packaging</option>
                   <option value="PREPARATION_LOSS">Preparation Loss</option>
                   <option value="CONTAMINATION">Contamination</option>
-                  <option value="QUALITY_REJECTION">Quality Rejection</option>
                 </select>
               </div>
             </div>

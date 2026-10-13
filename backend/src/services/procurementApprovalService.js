@@ -80,9 +80,44 @@ function computeFingerprint(payload) {
 
 class ProcurementApprovalService {
   /**
+   * Evaluates the tiered approval authority level required for a PO based on total amount (F046-F055).
+   */
+  static evaluateApprovalTier(totalPaisa) {
+    const amt = Number(totalPaisa || 0);
+    if (amt <= 2500000) { // <= ₹25,000
+      return {
+        tier: 'TIER_1_LOW',
+        tierName: 'Standard Café Operations Approval',
+        thresholdPaisa: 2500000,
+        allowedRoles: ['CAFE_ADMIN', 'OWNER', 'MASTER'],
+        requiresOwner: false,
+        requiresMaster: false,
+      };
+    }
+    if (amt <= 10000000) { // ₹25,001 to ₹1,00,000
+      return {
+        tier: 'TIER_2_MID',
+        tierName: 'Owner Strategic Approval Required',
+        thresholdPaisa: 10000000,
+        allowedRoles: ['OWNER', 'MASTER'],
+        requiresOwner: true,
+        requiresMaster: false,
+      };
+    }
+    return {
+      tier: 'TIER_3_HIGH',
+      tierName: 'Primary Master Dual-Custody Approval Required',
+      thresholdPaisa: Infinity,
+      allowedRoles: ['MASTER'],
+      requiresOwner: false,
+      requiresMaster: true,
+    };
+  }
+
+  /**
    * Asserts user account and role authority at the mutation boundary.
    */
-  static async assertPurchasingAuthority(auth, cafeId, action = 'APPROVE') {
+  static async assertPurchasingAuthority(auth, cafeId, action = 'APPROVE', orderTotalPaisa = null) {
     if (!auth || !auth.userId) {
       throw new ApiError(401, 'UNAUTHORIZED', 'Authentication is required.');
     }
@@ -104,9 +139,19 @@ class ProcurementApprovalService {
       throw new ApiError(403, 'FORBIDDEN_ROLE', 'Staff members are strictly excluded from purchasing operations.');
     }
 
-    // Rule: Owner is strategic/read-only by default; purchasing mutation authority is prohibited
+    // Multi-tier Rule for Owner persona (F046-F055)
     if (role === 'OWNER') {
-      throw new ApiError(403, 'FORBIDDEN_ROLE', 'Owner persona is strategic/read-only for procurement mutations. Purchasing authority belongs to Café Operations or Primary Master.');
+      if (action === 'APPROVE' && orderTotalPaisa !== null) {
+        const tier = this.evaluateApprovalTier(orderTotalPaisa);
+        if (tier.allowedRoles.includes('OWNER')) {
+          return { authorized: true, isPrimaryMaster: false, isOwnerApproved: true, user };
+        }
+      }
+      throw new ApiError(
+        403,
+        'FORBIDDEN_ROLE',
+        'Owner persona is strategic/read-only for draft mutations. Mid-value POs (₹25k-₹100k) may be approved by Owner, while higher requires Primary Master.'
+      );
     }
 
     // Rule: Primary Master has org-wide exception and approval authority
@@ -125,6 +170,18 @@ class ProcurementApprovalService {
       const hasCafeAccess = primaryCafe === cleanTargetCafe || assignedCafes.includes(cleanTargetCafe);
       if (!hasCafeAccess) {
         throw new ApiError(403, 'CROSS_CAFE_ACCESS_DENIED', `User ${user.userId} does not have purchasing authority for café ${cleanTargetCafe}.`);
+      }
+
+      // Check tier limit for CAFE_ADMIN
+      if (action === 'APPROVE' && orderTotalPaisa !== null) {
+        const tier = this.evaluateApprovalTier(orderTotalPaisa);
+        if (!tier.allowedRoles.includes('CAFE_ADMIN')) {
+          throw new ApiError(
+            403,
+            'APPROVAL_THRESHOLD_EXCEEDED',
+            `Order total ₹${(orderTotalPaisa / 100).toLocaleString('en-IN')} exceeds Café Operations financial authority limit (₹25,000). Requires ${tier.tierName}.`
+          );
+        }
       }
 
       return { authorized: true, isPrimaryMaster: false, user };

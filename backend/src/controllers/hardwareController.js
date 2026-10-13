@@ -4,7 +4,12 @@ const { asyncHandler } = require('../utils/asyncHandler');
 const { ApiError } = require('../utils/ApiError');
 const hardwareBridgeService = require('../services/hardwareBridgeService');
 const { HardwareTerminal } = require('../models/HardwareTerminal');
-const { Cafe } = require('../models/Cafe');
+const { RetailScaleAndPrepLabelService } = require('../services/retailScaleAndPrepLabelService');
+const { BiometricFingerprintAdapter } = require('../services/hardwareAdapters/BiometricFingerprintAdapter');
+const { EdcTerminalAdapter } = require('../services/hardwareAdapters/EdcTerminalAdapter');
+const { SoundboxAdapter } = require('../services/hardwareAdapters/SoundboxAdapter');
+const { CallerIdModemAdapter } = require('../services/hardwareAdapters/CallerIdModemAdapter');
+const { KdsStationService } = require('../services/kdsStationService');
 
 /**
  * Retrieve all registered hardware terminals for a café.
@@ -143,6 +148,7 @@ const routeKotTickets = asyncHandler(async (req, res) => {
     cafeId,
     totalStations: Object.keys(dispatched).length,
     stations: dispatched,
+    unmappedPrinterWarnings: routedStations.unmappedPrinterWarnings || [],
   });
 });
 
@@ -302,6 +308,253 @@ const validateBarcodeScan = asyncHandler(async (req, res) => {
   return res.status(result.success ? 200 : 400).json(result);
 });
 
+/**
+ * Generate thermal prep sticky label for packaging / batches (F178-F184)
+ */
+const generatePrepStickyLabel = asyncHandler(async (req, res) => {
+  const result = RetailScaleAndPrepLabelService.generatePrepStickyLabel(req.body);
+  return res.status(200).json({ success: true, data: result });
+});
+
+/**
+ * Validate and record shift opening / closing checklist (F326-F333)
+ */
+const submitShiftChecklist = asyncHandler(async (req, res) => {
+  const { shiftType, checklistItems, supervisorNotes, cafeId } = req.body;
+  const targetCafeId = cafeId || req.auth.primaryCafeId || req.auth.cafeId || 'ZC-0001';
+  const result = await RetailScaleAndPrepLabelService.submitShiftChecklist({
+    organisationId: req.auth.organisationId,
+    cafeId: targetCafeId,
+    shiftType,
+    checklistItems,
+    actorUserId: req.auth.userId,
+    supervisorNotes,
+    auth: req.auth,
+  });
+  return res.status(200).json({ success: true, data: result });
+});
+
+/**
+ * Biometric Fingerprint Enrollment (F015, A010)
+ */
+const enrollBiometricFingerprint = asyncHandler(async (req, res) => {
+  const { userId, sampleBase64, deviceModel } = req.body;
+  const result = await BiometricFingerprintAdapter.enrollFingerprint({
+    userId,
+    organisationId: req.auth.organisationId,
+    cafeId: req.auth.cafeId || 'ZC-0001',
+    sampleBase64,
+    deviceModel,
+    enrolledByUserId: req.auth.userId,
+  });
+  return res.status(200).json({ success: true, data: result });
+});
+
+/**
+ * Biometric Fingerprint Verification (F015, A010)
+ */
+const verifyBiometricFingerprint = asyncHandler(async (req, res) => {
+  const { enrolledTemplateHash, probeSampleBase64, userId, qualityScore } = req.body;
+  const result = BiometricFingerprintAdapter.verifyFingerprint({
+    enrolledTemplateHash,
+    probeSampleBase64,
+    userId: userId || req.auth.userId,
+    organisationId: req.auth.organisationId,
+    qualityScore,
+  });
+  return res.status(200).json({ success: true, data: result });
+});
+
+/**
+ * Push Sale to EDC Card Terminal (F070, A054-A056)
+ */
+const pushEdcSale = asyncHandler(async (req, res) => {
+  const { terminalId, amountPaisa, invoiceNumber, provider, merchantId } = req.body;
+  const result = await EdcTerminalAdapter.pushSaleToEdc({
+    terminalId,
+    amountPaisa,
+    invoiceNumber,
+    provider,
+    merchantId,
+  });
+  return res.status(200).json({ success: true, data: result });
+});
+
+/**
+ * Poll Status of EDC Card Terminal (F070, A054-A056)
+ */
+const getEdcStatus = asyncHandler(async (req, res) => {
+  const { transactionRef } = req.params;
+  const result = EdcTerminalAdapter.getEdcStatus(transactionRef);
+  return res.status(200).json({ success: true, data: result });
+});
+
+/**
+ * Cancel Sale on EDC Card Terminal (F070, A054-A056)
+ */
+const cancelEdcSale = asyncHandler(async (req, res) => {
+  const { transactionRef } = req.params;
+  const result = EdcTerminalAdapter.cancelEdcSale(transactionRef);
+  return res.status(200).json({ success: true, data: result });
+});
+
+/**
+ * Broadcast Spoken UPI Soundbox Payment (A057)
+ */
+const broadcastSoundboxPayment = asyncHandler(async (req, res) => {
+  const { amountPaisa, paymentProvider, reference, language, terminalId } = req.body;
+  const result = SoundboxAdapter.broadcastPaymentAnnouncement({
+    amountPaisa,
+    paymentProvider,
+    reference,
+    language: language || 'en',
+    terminalId: terminalId || 'SOUNDBOX-MAIN',
+  });
+  return res.status(200).json({ success: true, data: result });
+});
+
+/**
+ * Handle Caller ID Modem Incoming Call (F097)
+ */
+const handleCallerIdEvent = asyncHandler(async (req, res) => {
+  const { phoneNumber, rawCallerName } = req.body;
+  const result = await CallerIdModemAdapter.handleIncomingCall({
+    phoneNumber,
+    rawCallerName,
+    organisationId: req.auth.organisationId,
+    cafeId: req.auth.cafeId,
+  });
+  return res.status(200).json({ success: true, data: result });
+});
+
+/**
+ * Retrieve Virtual KDS Tickets (Category 3)
+ */
+const getVirtualKdsTickets = asyncHandler(async (req, res) => {
+  const cafeId = req.params.cafeId || req.auth.cafeId || req.auth.primaryCafeId;
+  const station = req.query.station || 'ALL';
+  const result = KdsStationService.getActiveTickets(cafeId, station);
+  return res.status(200).json({ success: true, data: result });
+});
+
+/**
+ * Bump / Complete Virtual KDS Ticket (Category 3)
+ */
+const bumpVirtualKdsTicket = asyncHandler(async (req, res) => {
+  const { chitId } = req.params;
+  const result = KdsStationService.bumpTicket(chitId, req.auth.userId);
+  return res.status(200).json({ success: true, data: result });
+});
+
+/**
+ * Recall Bumped Virtual KDS Ticket (Category 3)
+ */
+const recallVirtualKdsTicket = asyncHandler(async (req, res) => {
+  const chitId = req.query.chitId || null;
+  const result = KdsStationService.recallTicket(chitId);
+  return res.status(200).json({ success: true, data: result });
+});
+
+// ── Hardware Bridge Extension Controllers ─────────────────────────────────────
+
+/**
+ * Dispatch raw ESC/POS byte stream to a network (TCP 9100) thermal printer.
+ * Body: { printerIp, printerPort?, base64Payload }
+ */
+const dispatchNetworkPrint = asyncHandler(async (req, res) => {
+  const { printerIp, printerPort = 9100, base64Payload } = req.body;
+  if (!printerIp || !base64Payload) {
+    throw new ApiError(400, 'MISSING_PARAMS', 'printerIp and base64Payload are required.');
+  }
+  const buffer = Buffer.from(base64Payload, 'base64');
+  const result = await hardwareBridgeService.dispatchRawEscPosToNetworkPrinter({
+    printerIp,
+    printerPort: Number(printerPort),
+    rawBuffer: buffer,
+  });
+  return res.status(200).json({ success: true, data: result });
+});
+
+/**
+ * Decode incoming RF 433 MHz wireless table-calling chime hex frame.
+ * Body: { rawFrameHex }
+ */
+const decodeRfChime = asyncHandler(async (req, res) => {
+  const { rawFrameHex } = req.body;
+  if (!rawFrameHex) {
+    throw new ApiError(400, 'MISSING_PARAMS', 'rawFrameHex is required.');
+  }
+  const result = hardwareBridgeService.decodeRfTableChimeFrame(rawFrameHex);
+  return res.status(200).json({ success: true, data: result });
+});
+
+/**
+ * Sync attendance punches from ZKTeco / eSSL biometric time clock via TCP 4370.
+ * Body: { host?, port?, timeoutMs?, cafeId?, organisationId? }
+ */
+const syncBiometricClock = asyncHandler(async (req, res) => {
+  const {
+    host = '192.168.1.201',
+    port = 4370,
+    timeoutMs = 3000,
+    cafeId,
+    organisationId,
+  } = req.body;
+  const result = await hardwareBridgeService.syncZkTecoBiometricPunches({
+    host,
+    port: Number(port),
+    timeoutMs: Number(timeoutMs),
+    cafeId: cafeId || req.auth.cafeId || 'ZC-0001',
+    organisationId: organisationId || req.auth.organisationId,
+  });
+  return res.status(200).json({ success: true, data: result });
+});
+
+/**
+ * Read / stream from RS-232 serial weighing scale (e.g. COM1, /dev/ttyUSB0).
+ * Body: { port?, baudRate?, protocol?, simulatedPayload? }
+ */
+const streamSerialScale = asyncHandler(async (req, res) => {
+  const { port = 'COM1', baudRate = 9600, protocol = 'TOLEDO', simulatedPayload } = req.body;
+  const result = await WeighingScaleAdapter.readSerialScaleStream({
+    port,
+    baudRate: Number(baudRate),
+    protocol,
+    simulatedPayload: simulatedPayload || null,
+  });
+  return res.status(result.success ? 200 : 400).json(result);
+});
+
+/**
+ * A019: KOT-Number Lookup
+ * Search by KOT ticket number or ticketId to retrieve kitchen ticket details.
+ */
+const lookupKotByNumber = asyncHandler(async (req, res) => {
+  const { kotNumber } = req.params;
+  const orgId = req.auth?.organisationId || 'ORG-ZAMORIN';
+  const cafeId = req.query.cafeId || req.auth?.cafeId;
+  const { KdsTicket } = require('../models/KdsTicket');
+
+  const query = {
+    organisationId: orgId,
+    $or: [
+      { kotNumber: String(kotNumber).trim() },
+      { ticketId: String(kotNumber).trim().toUpperCase() },
+      { orderNumber: String(kotNumber).trim() },
+    ],
+  };
+  if (cafeId && cafeId !== '*') {
+    query.cafeId = cafeId.toUpperCase();
+  }
+
+  const ticket = await KdsTicket.findOne(query).lean();
+  if (!ticket) {
+    return res.status(404).json({ success: false, message: `KOT #${kotNumber} not found.` });
+  }
+
+  return res.status(200).json({ success: true, data: ticket });
+});
+
 module.exports = {
   getCafeTerminals,
   saveTerminalConfig,
@@ -319,5 +572,23 @@ module.exports = {
   generateReadinessSlip,
   parseScaleReading,
   validateBarcodeScan,
+  generatePrepStickyLabel,
+  submitShiftChecklist,
+  enrollBiometricFingerprint,
+  verifyBiometricFingerprint,
+  pushEdcSale,
+  getEdcStatus,
+  cancelEdcSale,
+  broadcastSoundboxPayment,
+  handleCallerIdEvent,
+  getVirtualKdsTickets,
+  bumpVirtualKdsTicket,
+  recallVirtualKdsTicket,
+  // Hardware Bridge Extensions
+  dispatchNetworkPrint,
+  decodeRfChime,
+  syncBiometricClock,
+  streamSerialScale,
+  lookupKotByNumber,
 };
 

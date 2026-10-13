@@ -48,6 +48,8 @@ const {
   recordBankDeposit,
   confirmBankDeposit,
   getCustodyBalances,
+  getDailyPayoutSummary,
+  getAdvanceDepositBySlip,
 } = require('../controllers/financeController');
 
 const router = express.Router();
@@ -333,11 +335,20 @@ router.get(
   getGstr1Report
 );
 
-// 16. Daily Till Reconciliation & Z-Report Settlement (Stage 08)
+// 16. Daily Till Reconciliation & Z-Report Settlement (Stage 08 / A053 Blind Close)
 router.post(
   '/reconciliation/z-report',
-  authorize('FINANCE:WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  authorize('FINANCE:WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
   commitZReport
+);
+
+router.post(
+  '/reconciliation/z-report/blind-close',
+  authorize('FINANCE:WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  (req, res, next) => {
+    req.body.isBlindClose = true;
+    return commitZReport(req, res, next);
+  }
 );
 
 // 17. REC-17 Vendor Accounts Payable Ledger & Subledger
@@ -349,6 +360,13 @@ router.get(
   '/advance-deposits',
   authorize('FINANCE:READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
   listAdvanceDeposits
+);
+
+// A020 / F108: Advance-Slip Lookup
+router.get(
+  '/advance-deposits/by-slip/:slipNumber',
+  authorize('FINANCE:READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STAFF'] }),
+  getAdvanceDepositBySlip
 );
 
 router.post(
@@ -392,6 +410,13 @@ router.get(
   '/cash/custody-balances',
   authorize('FINANCE:READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
   getCustodyBalances
+);
+
+// A001: Finance Daily Payout Summary Dashboard
+router.get(
+  '/daily-payout-summary',
+  authorize('FINANCE:READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  getDailyPayoutSummary
 );
 
 module.exports = router;

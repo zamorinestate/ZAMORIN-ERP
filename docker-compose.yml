@@ -50,7 +50,7 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - ./frontend:/usr/share/caddy
+      - ./Frontend:/usr/share/caddy
     command: caddy file-server --listen :3000
 
 volumes:

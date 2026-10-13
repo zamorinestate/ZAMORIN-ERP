@@ -104,6 +104,10 @@ const waitlistEntrySchema = new mongoose.Schema(
       trim: true,
       default: '',
     },
+    preOrderItems: {
+      type: Array,
+      default: [],
+    },
     createdByUserId: {
       type: String,
       trim: true,

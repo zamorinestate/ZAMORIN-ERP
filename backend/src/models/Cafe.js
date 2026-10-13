@@ -287,6 +287,31 @@ const cafeSchema = new mongoose.Schema(
       max: 12,
     },
 
+    // Payment-Gated Kitchen Dispatch (F036)
+    paymentGatedKitchenDispatch: {
+      type: Boolean,
+      default: false,
+    },
+
+    // Mandatory Tender Selection Mode (F011)
+    mandatoryTenderSelection: {
+      type: Boolean,
+      default: false,
+    },
+
+    // Pre-Tax vs Post-Tax Tip Base (F074, F075)
+    tipCalculationBase: {
+      type: String,
+      enum: ['PRE_TAX_SUBTOTAL', 'POST_TAX_GRAND_TOTAL'],
+      default: 'PRE_TAX_SUBTOTAL',
+    },
+
+    // Irreversible Historical Stock Freeze Date (F188–F191)
+    historicalStockFreezeDate: {
+      type: Date,
+      default: null,
+    },
+
     legalConstitution: {
       constitution: {
         type: String,

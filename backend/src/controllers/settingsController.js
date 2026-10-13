@@ -1798,6 +1798,87 @@ async function updateSecurityPolicy(req, res) {
   });
 }
 
+// ── Google Business Profile Dashboard (A005 & A006) ─────────────────────────
+const gbpService = require('../services/googleBusinessProfileService');
+
+async function getGoogleBusinessSummary(req, res, next) {
+  try {
+    const organisationId = req.user?.organisationId || 'ORG-ZAMORIN';
+    const cafeId = req.query.cafeId || req.user?.primaryCafeId || 'ZC-0001';
+    const summary = await gbpService.getProfileSummary({ organisationId, cafeId });
+    return res.status(200).json({ success: true, data: summary });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function connectGoogleBusinessProfile(req, res, next) {
+  try {
+    const organisationId = req.user?.organisationId || 'ORG-ZAMORIN';
+    const { cafeId, locationId, displayName, accountName, primaryPhone, addressLine } = req.body;
+    const result = await gbpService.upsertProfileConnection({
+      organisationId,
+      cafeId: cafeId || req.user?.primaryCafeId || 'ZC-0001',
+      locationId,
+      displayName,
+      accountName,
+      primaryPhone,
+      addressLine,
+    });
+    return res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function syncGoogleReviews(req, res, next) {
+  try {
+    const organisationId = req.user?.organisationId || 'ORG-ZAMORIN';
+    const { cafeId, reviews } = req.body;
+    const result = await gbpService.syncReviews({
+      organisationId,
+      cafeId: cafeId || req.user?.primaryCafeId || 'ZC-0001',
+      reviews,
+    });
+    return res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function replyGoogleReview(req, res, next) {
+  try {
+    const organisationId = req.user?.organisationId || 'ORG-ZAMORIN';
+    const { reviewId } = req.params;
+    const { cafeId, comment } = req.body;
+    const result = await gbpService.replyToReview({
+      organisationId,
+      cafeId: cafeId || req.user?.primaryCafeId || 'ZC-0001',
+      reviewId,
+      comment,
+      repliedByUserId: req.user?.userId || 'SYSTEM',
+    });
+    return res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function updateGoogleBusinessMetrics(req, res, next) {
+  try {
+    const organisationId = req.user?.organisationId || 'ORG-ZAMORIN';
+    const { cafeId, metrics } = req.body;
+    const result = await gbpService.recordInsightsMetrics({
+      organisationId,
+      cafeId: cafeId || req.user?.primaryCafeId || 'ZC-0001',
+      metrics,
+    });
+    return res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getSettingsOverview,
   getMyProfile,
@@ -1835,6 +1916,11 @@ module.exports = {
   updateManageSupportTicket,
   addSupportTicketReply,
   addEmployeeSupportTicketReply,
+  getGoogleBusinessSummary,
+  connectGoogleBusinessProfile,
+  syncGoogleReviews,
+  replyGoogleReview,
+  updateGoogleBusinessMetrics,
 };
 
 

@@ -304,6 +304,43 @@ const routeStationMenuItem = asyncHandler(async (request, response) => {
   return response.status(200).json(result);
 });
 
+/**
+ * F272: Aggregated Item Batch View for line cook bulk prep
+ */
+const getAggregatedItems = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const cafeId = resolveEffectiveCafeScope(request);
+  const { prepStation } = request.query;
+
+  const result = await KdsService.getAggregatedItemBatchView({
+    organisationId,
+    cafeId,
+    prepStation,
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+/**
+ * F036: Release payment-gated held tickets
+ */
+const releaseHeldTickets = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const cafeId = resolveEffectiveCafeScope(request);
+  const { billId } = request.body || {};
+
+  const result = await KdsService.releaseHeldTicketsForBill({
+    organisationId,
+    cafeId,
+    billId,
+  });
+
+  return response.status(200).json(result);
+});
+
 module.exports = {
   listTickets,
   getTicket,
@@ -315,4 +352,6 @@ module.exports = {
   listStations,
   createStation,
   routeStationMenuItem,
+  getAggregatedItems,
+  releaseHeldTickets,
 };

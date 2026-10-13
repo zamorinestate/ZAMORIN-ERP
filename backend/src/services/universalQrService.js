@@ -279,6 +279,53 @@ class UniversalQrService {
       }
     });
   }
+
+  /**
+   * A038 / F260: Batch QR Download Filter by Area
+   * Generates or fetches QR records batch filtered by dining area or service zone.
+   */
+  static async batchGenerateQrByArea({
+    organisationId = 'ORG-ZAMORIN',
+    cafeId,
+    areaFilter = null,
+    subOrderType = null,
+  }) {
+    const { UniversalQrRecord } = require('../models/UniversalQrRecord');
+    const filter = {
+      organisationId,
+      status: 'ACTIVE',
+    };
+    if (cafeId && cafeId !== '*') {
+      filter.cafeId = cafeId.toUpperCase();
+    }
+    if (areaFilter) {
+      filter.$or = [
+        { 'metadata.area': new RegExp(areaFilter, 'i') },
+        { 'metadata.section': new RegExp(areaFilter, 'i') },
+        { 'metadata.diningArea': new RegExp(areaFilter, 'i') },
+      ];
+    }
+    if (subOrderType) {
+      filter['metadata.subOrderType'] = subOrderType;
+    }
+
+    const records = await UniversalQrRecord.find(filter).lean();
+    return {
+      success: true,
+      count: records.length,
+      areaFilter: areaFilter || 'ALL',
+      subOrderType: subOrderType || 'ALL',
+      records: records.map((r) => ({
+        qrId: r.qrId,
+        targetType: r.targetType,
+        targetEntityId: r.targetEntityId,
+        area: r.metadata?.area || r.metadata?.diningArea || 'Default',
+        section: r.metadata?.section || '',
+        qrSvgUrl: `/api/v1/qr/${r.qrId}/svg`,
+        cardPdfUrl: `/api/v1/qr/${r.qrId}/card.pdf`,
+      })),
+    };
+  }
 }
 
 module.exports = {

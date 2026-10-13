@@ -83,6 +83,9 @@ router.post('/register/session/open', openRegisterSession);
 router.post('/register/session/event', recordCashEvent);
 router.post('/register/session/close', closeRegisterSession);
 
+// Barcode Lookup (A034)
+router.get('/lookup/:barcode', require('../controllers/posController').lookupBarcodeOrderController);
+
 // Bill Listing & Detail
 router.get('/', listBills);
 router.get('/:billId/pdf', getBillPdf);
@@ -96,6 +99,21 @@ router.post('/offline-sync', syncOfflineBills);
 router.post('/:billId/split', splitBill);
 
 // Post-Sale Adjustments
+router.get('/by-barcode/:barcode', require('../controllers/posController').lookupBarcodeOrderController);
+router.post(
+  '/:billId/request-cancel-otp',
+  authorize('POS_VOID', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  (req, res, next) => {
+    req.body = req.body || {};
+    req.body.billId = req.params.billId;
+    return require('../controllers/posController').requestVoidOtpController(req, res, next);
+  }
+);
+router.post(
+  '/:billId/confirm-cancel',
+  authorize('POS_VOID', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  voidBill
+);
 router.post('/:billId/reprint', reprintBill);
 router.post('/:billId/void', authorize('POS_VOID', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }), voidBill);
 router.post('/:billId/refund', refundBill);

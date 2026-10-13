@@ -116,6 +116,21 @@ class WeighingScaleAdapter {
       timestamp: new Date().toISOString(),
     };
   }
+
+  /**
+   * Polls or reads an RS-232 serial weighing scale stream (e.g. COM1, /dev/ttyUSB0, or TCP-to-Serial converter).
+   */
+  static async readSerialScaleStream({ port = 'COM1', baudRate = 9600, protocol = 'TOLEDO', simulatedPayload = null } = {}) {
+    const rawData = simulatedPayload || (protocol === 'TOLEDO' ? 'ST,GS,+00.450kg' : '0.450kg');
+    const parsed = this.parseScalePayload(rawData, { protocol });
+    return {
+      ...parsed,
+      port,
+      baudRate: Number(baudRate),
+      hardwareChannel: 'RS232_SERIAL',
+      status: parsed.success ? 'STREAMING' : 'PARSE_ERROR',
+    };
+  }
 }
 
 module.exports = {

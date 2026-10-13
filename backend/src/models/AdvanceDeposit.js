@@ -357,6 +357,30 @@ const advanceDepositSchema = new mongoose.Schema(
       trim: true,
       default: '',
     },
+
+    // Deferred Advance Stock Consumption (F114–F116)
+    plannedItems: [
+      {
+        menuItemId: { type: String, trim: true, uppercase: true },
+        name: { type: String, trim: true },
+        quantity: { type: Number, default: 1 },
+      },
+    ],
+    stockConsumptionStatus: {
+      type: String,
+      enum: ['PENDING', 'CONSUMED', 'NOT_APPLICABLE'],
+      default: 'PENDING',
+      index: true,
+    },
+    stockConsumedAt: {
+      type: Date,
+      default: null,
+    },
+    stockConsumedByUserId: {
+      type: String,
+      trim: true,
+      default: null,
+    },
   },
   {
     timestamps: true,

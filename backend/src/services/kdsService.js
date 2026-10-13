@@ -250,6 +250,8 @@ class KdsService {
     specialInstructions = '',
     targetPrepTimeMinutes = 15,
     splitByStation = true,
+    paymentStatus = null,
+    paymentGatedKitchenDispatch = false,
   }) {
     if (!organisationId || !cafeId) {
       throw new Error('OrganisationId and CafeId are strictly required for KDS ticket routing.');
@@ -260,6 +262,12 @@ class KdsService {
 
     const cleanOrg = organisationId.trim().toUpperCase();
     const cleanCafe = cafeId.trim().toUpperCase();
+
+    // F036: Payment-Gated Kitchen Dispatch check
+    let initialStatus = 'RECEIVED';
+    if (paymentGatedKitchenDispatch && paymentStatus && paymentStatus !== 'PAID') {
+      initialStatus = 'HELD_AWAITING_PAYMENT';
+    }
 
     // Fetch café's configured prep stations
     const cafeStations = await this.listCafeStations({ organisationId: cleanOrg, cafeId: cleanCafe });
@@ -303,7 +311,7 @@ class KdsService {
           tableNumber,
           diningOption,
           prepStation: station,
-          status: 'RECEIVED',
+          status: initialStatus,
           priority,
           targetPrepTimeMinutes,
           items: stationItems,
@@ -325,7 +333,7 @@ class KdsService {
           tableNumber,
           diningOption,
           prepStation: 'EXPEDITER',
-          status: 'RECEIVED',
+          status: initialStatus,
           priority,
           targetPrepTimeMinutes,
           items: allNormalizedItems,
@@ -347,10 +355,10 @@ class KdsService {
         tableNumber,
         diningOption,
         prepStation: 'ALL',
-        status: 'RECEIVED',
+        status: initialStatus,
         priority,
         targetPrepTimeMinutes,
-        items: normalizedItems,
+        items: allNormalizedItems,
         specialInstructions,
         receivedAt: new Date(),
       });
@@ -653,6 +661,88 @@ class KdsService {
     }
 
     return metrics;
+  }
+
+  /**
+   * F036: Release Payment-Gated Held Kitchen Tickets
+   */
+  static async releaseHeldTicketsForBill({ organisationId, cafeId, billId }) {
+    if (!billId) {
+      throw new Error('billId is required to release held tickets.');
+    }
+    const cleanOrg = organisationId.trim().toUpperCase();
+    const cleanCafe = cafeId.trim().toUpperCase();
+
+    const result = await KdsTicket.updateMany(
+      {
+        organisationId: cleanOrg,
+        cafeId: cleanCafe,
+        billId,
+        status: 'HELD_AWAITING_PAYMENT',
+      },
+      {
+        $set: { status: 'RECEIVED', receivedAt: new Date() },
+      }
+    );
+
+    return {
+      success: true,
+      billId,
+      releasedCount: result.modifiedCount || 0,
+    };
+  }
+
+  /**
+   * F272: KDS Aggregated Item Batch View
+   * Groups pending items across active tickets for batch line cooking.
+   */
+  static async getAggregatedItemBatchView({ organisationId, cafeId, prepStation = null }) {
+    const cleanOrg = organisationId.trim().toUpperCase();
+    const cleanCafe = cafeId.trim().toUpperCase();
+    const query = {
+      organisationId: cleanOrg,
+      cafeId: cleanCafe,
+      status: { $in: ['RECEIVED', 'PREPARING'] },
+    };
+    if (prepStation && prepStation !== 'ALL') {
+      query.prepStation = prepStation.trim().toUpperCase();
+    }
+    const tickets = await KdsTicket.find(query);
+    const itemMap = new Map();
+
+    for (const t of tickets) {
+      for (const it of t.items) {
+        if (it.isVoided || it.status === 'COMPLETED') continue;
+        const key = `${it.itemId}_${it.variant || ''}_${it.prepStation || t.prepStation}`;
+        if (!itemMap.has(key)) {
+          itemMap.set(key, {
+            itemId: it.itemId,
+            name: it.name,
+            variant: it.variant || '',
+            prepStation: it.prepStation || t.prepStation,
+            totalPendingQuantity: 0,
+            ticketIds: [],
+          });
+        }
+        const agg = itemMap.get(key);
+        agg.totalPendingQuantity += Number(it.quantity) || 1;
+        if (!agg.ticketIds.includes(t.ticketId)) {
+          agg.ticketIds.push(t.ticketId);
+        }
+      }
+    }
+
+    const items = Array.from(itemMap.values()).map((v) => ({
+      ...v,
+      ticketCount: v.ticketIds.length,
+    }));
+
+    return {
+      cafeId: cleanCafe,
+      prepStation: prepStation || 'ALL',
+      activeTicketCount: tickets.length,
+      aggregatedItems: items,
+    };
   }
 }
 

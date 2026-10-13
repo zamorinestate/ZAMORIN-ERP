@@ -264,6 +264,9 @@ export function renderTasks({ title } = {}) {
           <button class="btn btn-secondary" id="compliance-report-btn" type="button" style="font-weight:600; display:flex; align-items:center; gap:6px;">
             📊 Compliance Report
           </button>
+          <button class="btn btn-secondary" id="shift-checklist-btn" type="button" style="font-weight:600; display:flex; align-items:center; gap:6px;" title="Shift Opening & Closing SOP Checklist (F326-F333)">
+            📋 Shift SOP Checklist (F326–F333)
+          </button>
           <button class="btn btn-secondary" id="refresh-tasks-btn" type="button" title="Refresh task queue" aria-label="Refresh Tasks" style="font-weight:600; display:flex; align-items:center; gap:6px;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
             Refresh Tasks
@@ -612,6 +615,14 @@ function wireTaskEventListeners(root) {
           Refresh Tasks
         `;
       }
+    });
+  }
+
+  // Shift Opening & Closing SOP Checklist (F326-F333)
+  const shiftChecklistBtn = root.querySelector("#shift-checklist-btn");
+  if (shiftChecklistBtn) {
+    shiftChecklistBtn.addEventListener("click", () => {
+      openShiftSopChecklistModal(root);
     });
   }
 
@@ -1756,6 +1767,135 @@ function openSubmitEvidenceModal(task, root) {
         );
       });
     }
+  }, 50);
+}
+
+function openShiftSopChecklistModal(root) {
+  let activeShiftType = "OPENING";
+
+  const openingItems = [
+    { code: "DRAWER_FLOAT_COUNTED", label: "Drawer Float Counted & Physical Till Verified (₹2,000 float)" },
+    { code: "COFFEE_MACHINE_CALIBRATED", label: "Espresso Group Heads Purged & Grinder Dose Calibrated" },
+    { code: "MILK_TEMPERATURE_CHECKED", label: "Under-Counter Milk Fridge Temperature Logged (< 4°C)" },
+    { code: "EQUIPMENT_POWERED_ON", label: "Water Filtration, Ice Machine & POS Terminals Online" },
+    { code: "DISPLAY_CABINETS_STOCKED", label: "Ambient & Chilled Viennoiserie Display Cabinets Stocked" },
+  ];
+
+  const closingItems = [
+    { code: "REGISTER_SETTLED_ZREPORT", label: "Blind Cash Drawer Closed & End-of-Day Z-Report Reconciled" },
+    { code: "STEAM_WANDS_PURGED_CLEANED", label: "Espresso Steam Wands Purged, Cafiza Chemical Backflush Run" },
+    { code: "PERISHABLES_STORED_COVERED", label: "Unsold Perishables Weighed for Wastage & Cold Stored (< 4°C)" },
+    { code: "DRAWER_COUNT_VERIFIED", label: "Final Vault Drop Count Sealed & Safe Combination Engaged" },
+    { code: "POWER_EQUIPMENT_OFF", label: "Display Lights, POS Terminals & Heavy Equipment Shutdown" },
+  ];
+
+  openModal({
+    title: "Shift Opening & Closing SOP Checklist (F326–F333)",
+    maxWidth: "560px",
+    body: `
+      <div style="display:flex; flex-direction:column; gap:14px; font-size:12.5px; color:var(--ink);">
+        <div style="background:var(--surface-sunken); padding:10px 12px; border-radius:6px; border:1px solid var(--line); font-size:11.5px; color:var(--muted);">
+          ℹ️ Mandatory operational governance checks enforced before opening sales register or concluding daily cafe operations. Fail-closed: all 5 mandatory checks must pass.
+        </div>
+
+        <div>
+          <label style="font-weight:700; display:block; margin-bottom:6px;">Select Shift Lifecycle Phase *</label>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+            <button class="btn btn-sm btn-primary shift-type-pill" id="shift-type-opening-btn" data-type="OPENING" type="button" style="font-weight:700;">
+              ☀️ Morning Shift Opening
+            </button>
+            <button class="btn btn-sm btn-ghost shift-type-pill" id="shift-type-closing-btn" data-type="CLOSING" type="button" style="font-weight:700;">
+              🌙 Night Shift Closing
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label style="font-weight:700; display:block; margin-bottom:6px;">Mandatory SOP Controls (<span id="shift-item-count">5</span> items)</label>
+          <div id="shift-checklist-items-container" style="display:flex; flex-direction:column; gap:8px; max-height:240px; overflow-y:auto; background:var(--surface-sunken); padding:10px; border-radius:8px; border:1px solid var(--line);">
+          </div>
+        </div>
+
+        <div>
+          <label style="font-weight:700; display:block; margin-bottom:4px;">Supervisor Notes & Observations (Optional)</label>
+          <textarea id="shift-supervisor-notes" class="input" rows="2" placeholder="e.g. Grinder burrs adjusted for high ambient humidity, all checks verified." style="width:100%; box-sizing:border-box; font-size:12px;"></textarea>
+        </div>
+      </div>
+    `,
+    saveLabel: "Submit Certified Shift Checklist",
+    cancelLabel: "Cancel",
+    onSave: async (modalEl) => {
+      const itemsList = activeShiftType === "OPENING" ? openingItems : closingItems;
+      const checkedStatuses = itemsList.map(it => {
+        const cb = modalEl.querySelector(`.shift-chk-item[data-code="${it.code}"]`);
+        return {
+          code: it.code,
+          name: it.label,
+          status: cb && cb.checked ? "PASS" : "FAIL",
+          completed: Boolean(cb && cb.checked),
+        };
+      });
+
+      const missing = checkedStatuses.filter(it => it.status !== "PASS");
+      if (missing.length > 0) {
+        showToast(`All ${itemsList.length} mandatory ${activeShiftType} SOP controls must be completed.`, "coral");
+        return false;
+      }
+
+      const notes = modalEl.querySelector("#shift-supervisor-notes")?.value?.trim() || "";
+      const cafeId = selectedCafeFilter !== "ALL" ? selectedCafeFilter : (state.currentCafeId || state.user?.primaryCafeId || "ZC-0001");
+
+      try {
+        const res = await apiPost("/hardware/shift-checklist", {
+          shiftType: activeShiftType,
+          checklistItems: checkedStatuses,
+          supervisorNotes: notes,
+          cafeId,
+        });
+
+        showToast(`✅ ${activeShiftType} SOP checklist certified (${res.data?.submissionId || 'SAVED'}). Audit event logged.`, "mint");
+        await fetchTasksFromServer();
+        refreshTasksView(root);
+        return true;
+      } catch (err) {
+        showToast(err.message || "Failed to submit shift checklist", "coral");
+        return false;
+      }
+    },
+  });
+
+  const updateItems = () => {
+    const container = document.getElementById("shift-checklist-items-container");
+    if (!container) return;
+    const items = activeShiftType === "OPENING" ? openingItems : closingItems;
+    container.innerHTML = items.map((it, idx) => `
+      <label style="display:flex; align-items:flex-start; gap:8px; padding:6px 8px; background:var(--surface); border:1px solid var(--line); border-radius:6px; cursor:pointer;">
+        <input type="checkbox" class="shift-chk-item" data-code="${it.code}" checked style="margin-top:2px;" />
+        <div style="flex:1;">
+          <strong style="color:var(--ink); font-size:12px; display:block;">${idx + 1}. ${escapeHtml(it.label)}</strong>
+          <span style="font-size:10px; color:var(--muted); font-family:var(--font-mono);">${it.code}</span>
+        </div>
+        <span class="badge" style="font-size:9.5px; background:rgba(16,185,129,0.15); color:#059669; font-weight:700;">PASS</span>
+      </label>
+    `).join("");
+  };
+
+  setTimeout(() => {
+    updateItems();
+
+    document.getElementById("shift-type-opening-btn")?.addEventListener("click", () => {
+      activeShiftType = "OPENING";
+      document.getElementById("shift-type-opening-btn").className = "btn btn-sm btn-primary shift-type-pill";
+      document.getElementById("shift-type-closing-btn").className = "btn btn-sm btn-ghost shift-type-pill";
+      updateItems();
+    });
+
+    document.getElementById("shift-type-closing-btn")?.addEventListener("click", () => {
+      activeShiftType = "CLOSING";
+      document.getElementById("shift-type-opening-btn").className = "btn btn-sm btn-ghost shift-type-pill";
+      document.getElementById("shift-type-closing-btn").className = "btn btn-sm btn-primary shift-type-pill";
+      updateItems();
+    });
   }, 50);
 }
 

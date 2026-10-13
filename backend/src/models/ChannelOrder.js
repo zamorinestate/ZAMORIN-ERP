@@ -196,6 +196,34 @@ const channelOrderSchema = new mongoose.Schema(
       trim: true,
       default: null,
     },
+    // Delivery Rider Pickup 4-digit OTP Check-In (F278)
+    riderPickupOtp: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    riderHandoverStatus: {
+      type: String,
+      enum: ['NOT_APPLICABLE', 'PENDING', 'VERIFIED'],
+      default: 'NOT_APPLICABLE',
+    },
+    riderHandoverVerifiedAt: {
+      type: Date,
+      default: null,
+    },
+    // Train Delivery Logistics (F092)
+    trainDetails: {
+      pnr: { type: String, trim: true, default: null },
+      trainNumber: { type: String, trim: true, default: null },
+      coach: { type: String, trim: true, default: null },
+      seatNumber: { type: String, trim: true, default: null },
+      stationCode: { type: String, trim: true, default: null },
+    },
+    // Cutlery & Disposable Opt-In / Opt-Out Preferences (F092)
+    cutleryPreference: {
+      optIn: { type: Boolean, default: true },
+      details: { type: String, trim: true, default: '' },
+    },
     rejectionReason: {
       type: String,
       default: null,

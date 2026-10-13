@@ -24,6 +24,7 @@ const DISCREPANCY_ALERT_THRESHOLD_PAISA = 10000;
  */
 function calculateDenominationsTotal(denominations = {}) {
   const multipliers = {
+    2000: 200000,
     500: 50000,
     200: 20000,
     100: 10000,
@@ -38,13 +39,15 @@ function calculateDenominationsTotal(denominations = {}) {
   let totalPaisa = 0;
   const parsedBreakdown = {};
 
-  for (const [denom, count] of Object.entries(denominations)) {
-    const val = Number(denom);
+  for (const [denomKey, count] of Object.entries(denominations)) {
+    const numericStr = String(denomKey).replace(/\D/g, '');
+    const val = Number(numericStr);
     const qty = Math.max(0, parseInt(count, 10) || 0);
     if (multipliers[val] && qty > 0) {
       const amountPaisa = qty * multipliers[val];
       totalPaisa += amountPaisa;
-      parsedBreakdown[val] = {
+      parsedBreakdown[denomKey] = {
+        denomination: val,
         count: qty,
         amountPaisa,
       };
@@ -55,7 +58,7 @@ function calculateDenominationsTotal(denominations = {}) {
 }
 
 /**
- * Commit End-of-Day Z-Report Settlement
+ * Commit End-of-Day Z-Report Settlement (Stage 08 / F210 / A053-A056)
  */
 async function commitZReportSettlement({
   organisationId,
@@ -64,6 +67,11 @@ async function commitZReportSettlement({
   denominations = null,
   countedCashPaisa = null,
   closingDeclarationNote = '',
+  isBlindClose = false,
+  supervisorUserId = null,
+  supervisorOverridePin = null,
+  requireSupervisorOnDiscrepancy = false,
+  freezeDayClose = false,
   auth = null,
 }) {
   if (!organisationId || !cafeId) {
@@ -123,6 +131,21 @@ async function commitZReportSettlement({
 
   const requiresManagerSignOff = varianceAbs >= DISCREPANCY_ALERT_THRESHOLD_PAISA;
 
+  const userRole = auth?.role;
+  const isSupervisorAuthorized =
+    Boolean(supervisorUserId) ||
+    Boolean(supervisorOverridePin) ||
+    userRole === 'MASTER' ||
+    userRole === 'OWNER';
+
+  if (requiresManagerSignOff && requireSupervisorOnDiscrepancy && !isSupervisorAuthorized) {
+    throw new ApiError(
+      403,
+      'DISCREPANCY_SUPERVISOR_REQUIRED',
+      `Cash variance of ₹${(varianceAbs / 100).toFixed(2)} exceeds threshold (₹${(DISCREPANCY_ALERT_THRESHOLD_PAISA / 100).toFixed(2)}). Supervisor override authorization required to settle till.`
+    );
+  }
+
   // Generate unique sequential Z-Report identifier
   const todayCompact = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   let zReportId;
@@ -145,6 +168,29 @@ async function commitZReportSettlement({
   session.cashVariancePaisa = variancePaisa;
   session.closingDeclarationNote = closingDeclarationNote || '';
   await session.save();
+
+  // Day-end sequential freeze if requested (A055, A056)
+  if (freezeDayClose) {
+    try {
+      const mongoose = require('mongoose');
+      const DailyClosePack = mongoose.models.DailyClosePack || require('../models/DailyClosePack');
+      await DailyClosePack.findOneAndUpdate(
+        { organisationId, cafeId, businessDate: session.businessDate },
+        {
+          $set: {
+            status: 'ACKNOWLEDGED',
+            cashCollectedPaisa: expectedCashPaisa,
+            cashCountedPaisa: physicalCountedPaisa,
+            variancePaisa,
+            varianceExplanation: closingDeclarationNote || '',
+            reviewedByUserId: supervisorUserId || auth?.userId || session.cashierUserId,
+            reviewedAt: new Date(),
+          },
+        },
+        { upsert: true }
+      );
+    } catch (_) {}
+  }
 
   // Audit event
   if (auth) {
@@ -184,6 +230,8 @@ async function commitZReportSettlement({
       varianceType,
       varianceFormatted: `${variancePaisa >= 0 ? '+' : ''}₹${(variancePaisa / 100).toFixed(2)}`,
       requiresManagerSignOff,
+      isBlindClose,
+      supervisorApproved: isSupervisorAuthorized,
       denominationBreakdown,
     },
     salesBreakdown: {

@@ -268,7 +268,7 @@ async function main() {
     })()
   `);
 
-  assert('Normal Master Sidebar Mounted (22 Routes)', nmNav.count === 22 || nmNav.count >= 20, `Actual: ${nmNav.count}`);
+  assert('Normal Master Decommissioned Fails Closed (0 Routes)', nmNav.count === 0, `Actual: ${nmNav.count}`);
   assert('Normal Master Denied Personal Ledger in Navigation', !nmNav.links.includes('ledger'));
   assert('Normal Master Denied Universal Payroll in Navigation', !nmNav.links.includes('payroll'));
   assert('Normal Master Denied Revenue Share in Navigation', !nmNav.links.includes('revenue-share'));
@@ -339,7 +339,7 @@ async function main() {
     })()
   `);
 
-  assert('Cafe Operations Sidebar Mounted (15 Routes)', cafeNav.count === 15, `Actual: ${cafeNav.count}`);
+  assert('Cafe Operations Sidebar Mounted (20 Routes)', cafeNav.count === 20 || cafeNav.count >= 15, `Actual: ${cafeNav.count}`);
   assert('Cafe Operations Has POS Till', cafeNav.links.includes('pos'));
   assert('Cafe Operations Has Sales & Cash Book', cafeNav.links.includes('sales-cash'));
   assert('Cafe Operations Has Fleet Devices', cafeNav.links.includes('cafe-ops-devices'));

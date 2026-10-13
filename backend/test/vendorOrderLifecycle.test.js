@@ -24,7 +24,7 @@ const MASTER_AUTH = {
   role: 'MASTER',
   isPrimaryMaster: true,
   organisationId: ORG_ID,
-  assignedCafeIds: [CAFE_ID],
+  assignedCafeIds: [],
 };
 
 const CASHIER_AUTH = {
@@ -115,8 +115,9 @@ describe('VENDOR ORDER LIFECYCLE: Cashier Placement, Delivery Verification, Auto
       name: 'Primary Master',
       email: 'master@zamorin.cafe',
       role: 'MASTER',
+      isPrimaryMaster: true,
       accountStatus: 'ACTIVE',
-      assignedCafeIds: [CAFE_ID],
+      assignedCafeIds: [],
       passwordHash: 'hashed_pw',
       createdBy: 'SYSTEM',
     });

@@ -21,6 +21,8 @@ const {
   listStations,
   createStation,
   routeStationMenuItem,
+  getAggregatedItems,
+  releaseHeldTickets,
 } = require('../controllers/kdsController');
 
 const router = express.Router();
@@ -30,6 +32,12 @@ router.use(attachDeviceContext);
 
 // Real-time Station Metrics & Overdue Count
 router.get('/metrics', getMetrics);
+
+// F272: Aggregated Item Batch View
+router.get('/aggregated-items', getAggregatedItems);
+
+// F036: Release Payment-Gated Held Kitchen Tickets
+router.post('/release-held', releaseHeldTickets);
 
 // Café Prep Stations & Menu Routing
 router.get('/stations', listStations);

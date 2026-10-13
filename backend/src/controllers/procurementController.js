@@ -80,6 +80,8 @@ const {
 const {
   ThreeWayMatchService,
 } = require('../services/threeWayMatchService');
+const { ProcurementApprovalService } = require('../services/procurementApprovalService');
+const SupplierPriceVarianceService = require('../services/supplierPriceVarianceService');
 
 const { Notification } = require('../models/Notification');
 const { User } = require('../models/User');
@@ -5452,7 +5454,6 @@ const sendToAccounts = asyncHandler(async (request, response) => {
 
 // ── P07 CAFÉ OPERATIONS PURCHASE REVIEW, APPROVAL & DISPATCH ──────────────────
 
-const { ProcurementApprovalService } = require('../services/procurementApprovalService');
 const { ProcurementDispatchService, defaultDispatchService } = require('../services/procurementDispatchService');
 const { ReplenishmentRecommendationService } = require('../services/replenishmentRecommendationService');
 
@@ -5731,7 +5732,176 @@ const reconcileDispatchJob = asyncHandler(async (request, response) => {
   });
 });
 
+/**
+ * POST /api/v1/procurement/orders/:purchaseOrderId/landed-cost/distribute (F147-F149)
+ */
+const distributeLandedCharges = asyncHandler(async (request, response) => {
+  const purchaseOrderId = normalizeId(request.params.purchaseOrderId);
+  const { additionalCharges, distributionMethod = 'VALUE' } = request.body;
+
+  const order = await PurchaseOrder.findOne({ purchaseOrderId });
+  if (!order) {
+    throw new ApiError(404, 'ORDER_NOT_FOUND', `Purchase order ${purchaseOrderId} not found.`);
+  }
+
+  const result = ThreeWayMatchService.distributeLandedCost({
+    lineItems: order.lineItems || [],
+    additionalCharges: additionalCharges || {},
+    distributionMethod,
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+/**
+ * GET /api/v1/procurement/orders/:purchaseOrderId/approval-tier (F046-F055)
+ */
+const evaluateOrderApprovalTier = asyncHandler(async (request, response) => {
+  const purchaseOrderId = normalizeId(request.params.purchaseOrderId);
+
+  const order = await PurchaseOrder.findOne({ purchaseOrderId });
+  if (!order) {
+    throw new ApiError(404, 'ORDER_NOT_FOUND', `Purchase order ${purchaseOrderId} not found.`);
+  }
+
+  const tier = ProcurementApprovalService.evaluateApprovalTier(order.totalPaisa);
+
+  return response.status(200).json({
+    success: true,
+    data: {
+      purchaseOrderId,
+      totalPaisa: order.totalPaisa,
+      ...tier,
+    },
+  });
+});
+
+/**
+ * POST /api/v1/procurement/price-variance/check (F154-F155)
+ */
+const checkItemPriceVariance = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const { itemId, proposedUnitPricePaisa, vendorId } = request.body;
+
+  if (!itemId || proposedUnitPricePaisa === undefined) {
+    throw new ApiError(400, 'VALIDATION_FAILED', 'itemId and proposedUnitPricePaisa are required.');
+  }
+
+  const evaluation = await SupplierPriceVarianceService.checkLineItemPriceVariance({
+    itemId,
+    proposedUnitPricePaisa: Number(proposedUnitPricePaisa),
+    organisationId,
+    vendorId,
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: evaluation,
+  });
+});
+
+/**
+ * POST /api/v1/procurement/orders/:purchaseOrderId/three-way-match
+ */
+const performOrderThreeWayMatch = asyncHandler(async (request, response) => {
+  const purchaseOrderId = normalizeId(request.params.purchaseOrderId);
+  const { toleranceConfig, supplierInvoice, grn } = request.body;
+
+  const order = await PurchaseOrder.findOne({ purchaseOrderId });
+  if (!order) {
+    throw new ApiError(404, 'ORDER_NOT_FOUND', `Purchase order ${purchaseOrderId} not found.`);
+  }
+
+  const matchResult = ThreeWayMatchService.performMatch({
+    purchaseOrder: order,
+    grn: grn || null,
+    supplierInvoice: supplierInvoice || { lineItems: order.lineItems, totalPaisa: order.totalPaisa },
+    toleranceConfig: toleranceConfig || { qtyTolerancePercent: 2, rateTolerancePaisa: 100, totalTolerancePaisa: 100 },
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: matchResult,
+  });
+});
+
+// Benchmark A093–A095: Excel Supplier-to-Material Mapping Matrix (Export)
+const exportSupplierMatrixHandler = asyncHandler(async (request, response) => {
+  const { Vendor } = require('../models/Vendor');
+  const { GlobalInventoryItem } = require('../models/GlobalInventoryItem');
+
+  const vendors = await Vendor.find({ organisationId: request.auth.organisationId }).lean();
+  const items = await GlobalInventoryItem.find({ organisationId: request.auth.organisationId, status: 'ACTIVE' }).lean();
+
+  const matrix = [];
+  for (const item of items) {
+    const primaryVendor = vendors.find((v) => v.vendorId === item.primaryVendorId);
+    matrix.push({
+      itemId: item.itemId,
+      itemName: item.name,
+      category: item.category,
+      baseUnit: item.baseUnit,
+      packSize: item.packSize || 1,
+      primaryVendorId: item.primaryVendorId || '',
+      primaryVendorName: primaryVendor?.name || 'Unassigned',
+      contractCostRupees: ((item.unitCostPaisa || 0) / 100).toFixed(2),
+      vendorItemCode: item.sku || item.itemId,
+      secondaryVendors: (item.approvedSubstituteItemIds || []).join(','),
+    });
+  }
+
+  return response.status(200).json({
+    success: true,
+    totalRecords: matrix.length,
+    vendors: vendors.map((v) => ({ vendorId: v.vendorId, name: v.name })),
+    matrix,
+  });
+});
+
+// Benchmark A093–A095: Excel Supplier-to-Material Mapping Matrix (Import)
+const importSupplierMatrixHandler = asyncHandler(async (request, response) => {
+  const { mappings = [] } = request.body;
+  if (!Array.isArray(mappings) || mappings.length === 0) {
+    throw new ApiError(400, 'INVALID_MAPPINGS', 'Array of supplier matrix items is required.');
+  }
+
+  const { GlobalInventoryItem } = require('../models/GlobalInventoryItem');
+  let updatedCount = 0;
+
+  for (const row of mappings) {
+    if (!row.itemId) continue;
+    const update = {};
+    if (row.primaryVendorId) update.primaryVendorId = String(row.primaryVendorId).trim().toUpperCase();
+    if (row.contractCostRupees != null) update.unitCostPaisa = Math.round(Number(row.contractCostRupees) * 100);
+    if (row.packSize != null) update.packSize = Number(row.packSize);
+    if (row.vendorItemCode) update.sku = String(row.vendorItemCode).trim().toUpperCase();
+
+    if (Object.keys(update).length > 0) {
+      await GlobalInventoryItem.updateOne(
+        { organisationId: request.auth.organisationId, itemId: String(row.itemId).trim().toUpperCase() },
+        { $set: update }
+      );
+      updatedCount++;
+    }
+  }
+
+  return response.status(200).json({
+    success: true,
+    updatedCount,
+    message: `Supplier price matrix updated across ${updatedCount} inventory items (A093).`,
+  });
+});
+
 module.exports = {
+  exportSupplierMatrixHandler,
+  importSupplierMatrixHandler,
+  distributeLandedCharges,
+  evaluateOrderApprovalTier,
+  checkItemPriceVariance,
+  performOrderThreeWayMatch,
   getOrderDocuments,
   attachOrderDocument,
   previewOrderDocument,

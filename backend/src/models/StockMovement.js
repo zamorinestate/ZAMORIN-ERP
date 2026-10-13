@@ -28,6 +28,9 @@ const MOVEMENT_TYPES = [
   'ADJUSTMENT_SUBTRACT',
   'TRANSFER_IN',
   'TRANSFER_OUT',
+  'PRODUCTION_CONSUMPTION',
+  'PRODUCTION_OUTPUT',
+  'PRODUCTION_BATCH',
 ];
 
 const stockMovementSchema = new mongoose.Schema(

@@ -1,6 +1,6 @@
 import { apiGet, apiPost, apiPatch } from "../apiClient.js";
 import { state } from "../state.js";
-import { showToast, openModal, renderCafeContextStrip, renderModuleErrorState } from "../components.js";
+import { showToast, openModal, closeModal, renderCafeContextStrip, renderModuleErrorState } from "../components.js";
 import { ROLES } from "../navigation.js";
 
 let activeSubTab = "tables"; // 'tables' | 'reservations' | 'orders' | 'pickup' | 'config'
@@ -10,6 +10,7 @@ let cachedWaitlist = [];
 let cachedOrders = [];
 let cachedTokens = [];
 let cachedConfig = null;
+let cachedAggregatorStatus = { zomato: { isPaused: false }, swiggy: { isPaused: false } };
 let cachedCafeId = "ZC-0001";
 
 export function setChannelsActiveTab(tab) {
@@ -133,6 +134,35 @@ function renderTablesTab() {
 
 function renderReservationsTab() {
   return `
+    <!-- Visual Hourly Shift Booking Timeline (F297–F301) -->
+    <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:10px; padding:16px 20px; margin-bottom:20px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <div>
+          <h4 style="margin:0; font-size:14px; font-weight:700; color:#16223F;">📅 Today's Shift Booking Timeline & Table Load (F297–F301)</h4>
+          <span style="font-size:11px; color:#64748B;">Lunch (12:00–16:00) & Dinner (19:00–23:00) Slot Capacities</span>
+        </div>
+        <span style="font-size:11px; font-weight:700; color:#059669; background:#ECFDF5; padding:3px 8px; border-radius:6px;">Floor Capacity: 84 Covers</span>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(8, 1fr); gap:8px;">
+        ${[
+          { slot: "12:00 PM", covers: 14, status: "OPEN" },
+          { slot: "1:00 PM", covers: 28, status: "PEAK" },
+          { slot: "2:00 PM", covers: 18, status: "OPEN" },
+          { slot: "3:00 PM", covers: 8, status: "LOW" },
+          { slot: "7:00 PM", covers: 22, status: "OPEN" },
+          { slot: "8:00 PM", covers: 36, status: "PEAK" },
+          { slot: "9:00 PM", covers: 24, status: "OPEN" },
+          { slot: "10:00 PM", covers: 12, status: "LOW" },
+        ].map((s) => `
+          <div style="background:${s.status === 'PEAK' ? '#FEF2F2' : s.status === 'OPEN' ? '#F0FDF4' : '#F8FAFC'}; border:1px solid ${s.status === 'PEAK' ? '#FECACA' : s.status === 'OPEN' ? '#BBF7D0' : '#E2E8F0'}; border-radius:8px; padding:8px; text-align:center;">
+            <div style="font-size:11px; font-weight:800; color:#16223F;">${s.slot}</div>
+            <div style="font-size:13px; font-weight:900; color:${s.status === 'PEAK' ? '#DC2626' : s.status === 'OPEN' ? '#16A34A' : '#64748B'}; margin-top:2px;">${s.covers}p</div>
+            <div style="font-size:9.5px; font-weight:700; color:${s.status === 'PEAK' ? '#B91C1C' : s.status === 'OPEN' ? '#15803D' : '#94A3B8'}; text-transform:uppercase;">${s.status}</div>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px;">
       <!-- Column 1: Today's Bookings -->
       <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:10px; padding:20px;">
@@ -238,59 +268,138 @@ function renderPickupTab() {
   `;
 }
 
+function renderAggregatorCard(provider, name, brandColor, statusObj = {}) {
+  const isPaused = Boolean(statusObj?.isPaused);
+  const remainingMins = statusObj?.remainingMinutes || 0;
+  const reason = statusObj?.reason || "Operational adjustment";
+  const pauseExpiresAt = statusObj?.pauseExpiresAt ? new Date(statusObj.pauseExpiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "";
+
+  return `
+    <div style="border:1.5px solid ${isPaused ? '#F59E0B' : '#E2E8F0'}; border-radius:8px; padding:16px; background:${isPaused ? '#FFFBEB' : '#FAFAFA'}; display:flex; flex-direction:column; justify-content:space-between; gap:12px;">
+      <div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:${brandColor};"></span>
+            <strong style="font-size:14px; color:#16223F;">${name} Store</strong>
+          </div>
+          ${isPaused ? `
+            <span style="background:#FDE68A; color:#92400E; font-size:10.5px; font-weight:800; padding:2px 8px; border-radius:6px; border:1px solid #FCD34D;">
+              ⏸️ PAUSED (${remainingMins > 0 ? `${remainingMins}m left` : 'Indefinite'})
+            </span>
+          ` : `
+            <span style="background:#DCFCE7; color:#15803D; font-size:10.5px; font-weight:800; padding:2px 8px; border-radius:6px; border:1px solid #86EFAC;">
+              🟢 ACCEPTING ORDERS
+            </span>
+          `}
+        </div>
+
+        <p style="margin:0 0 10px 0; font-size:11.5px; color:${isPaused ? '#B45309' : '#64748B'};">
+          ${isPaused ? `Paused until ${pauseExpiresAt || 'manual resume'}: "${escapeHtml(reason)}"` : 'Accepting marketplace delivery and takeaway orders.'}
+        </p>
+
+        ${isPaused ? `
+          <button class="btn btn-resume-agg" data-provider="${provider}" style="background:#059669; color:#FFFFFF; border:none; padding:8px 14px; font-size:12px; font-weight:700; border-radius:6px; cursor:pointer; width:100%;">
+            ▶️ Resume ${name} Store Now
+          </button>
+        ` : `
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <select class="select agg-pause-reason" data-provider="${provider}" style="font-size:11.5px; padding:5px 8px; border-radius:6px; border:1px solid #CBD5E1; width:100%;">
+              <option value="Kitchen Rush / Surge Orders">Kitchen Rush / Surge Orders</option>
+              <option value="Heavy Rain / Delivery Partner Shortage">Heavy Rain / Delivery Partner Shortage</option>
+              <option value="Key Raw Material Exhaustion">Key Raw Material Exhaustion</option>
+              <option value="Equipment Maintenance / Power Outage">Equipment Maintenance / Power Outage</option>
+            </select>
+            <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:6px;">
+              <button class="btn btn-pause-agg" data-provider="${provider}" data-mins="15" style="background:#F1F5F9; border:1px solid #CBD5E1; padding:6px 0; font-size:11px; font-weight:700; border-radius:6px; cursor:pointer;" type="button">⏸️ 15m</button>
+              <button class="btn btn-pause-agg" data-provider="${provider}" data-mins="30" style="background:#F1F5F9; border:1px solid #CBD5E1; padding:6px 0; font-size:11px; font-weight:700; border-radius:6px; cursor:pointer;" type="button">⏸️ 30m</button>
+              <button class="btn btn-pause-agg" data-provider="${provider}" data-mins="60" style="background:#F1F5F9; border:1px solid #CBD5E1; padding:6px 0; font-size:11px; font-weight:700; border-radius:6px; cursor:pointer;" type="button">⏸️ 60m</button>
+              <button class="btn btn-pause-agg" data-provider="${provider}" data-mins="0" style="background:#FEE2E2; border:1px solid #FCA5A5; color:#991B1B; padding:6px 0; font-size:11px; font-weight:700; border-radius:6px; cursor:pointer;" type="button">⏸️ Off</button>
+            </div>
+          </div>
+        `}
+      </div>
+    </div>
+  `;
+}
+
 function renderConfigTab() {
   const isOwner = state.user?.role === ROLES.OWNER;
   return `
-    <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:10px; padding:24px; max-width:800px;">
-      <h3 style="margin:0 0 6px 0; font-size:16px; font-weight:700; color:#16223F;">Channel Operations & Marketplace Reconciliation</h3>
-      <p style="margin:0 0 20px 0; font-size:12px; color:#64748B;">Configure direct online ordering policies and reconcile aggregator settlements.</p>
+    <div style="display:flex; flex-direction:column; gap:20px; max-width:960px;">
+      <!-- Direct Channels & Policies Card -->
+      <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:10px; padding:24px;">
+        <h3 style="margin:0 0 6px 0; font-size:16px; font-weight:700; color:#16223F;">Direct Channels & Store Policies</h3>
+        <p style="margin:0 0 20px 0; font-size:12px; color:#64748B;">Configure universal QR table ordering and direct web ordering policies.</p>
 
-      <form id="form-channel-config" style="display:flex; flex-direction:column; gap:18px;">
-        <div style="border-bottom:1px solid #E2E8F0; padding-bottom:14px;">
-          <label style="display:flex; align-items:center; gap:8px; font-weight:600; font-size:13px; color:#16223F; cursor:pointer;">
-            <input type="checkbox" id="cfg-qr-enabled" ${isOwner ? 'disabled' : ''} checked />
-            Enable Universal QR Table Ordering
-          </label>
-          <span style="font-size:11px; color:#64748B; margin-left:24px; display:block;">Allows guests to scan table QR codes and submit multi-round orders from their phones.</span>
-        </div>
+        <form id="form-channel-config" style="display:flex; flex-direction:column; gap:16px;">
+          <div style="border-bottom:1px solid #E2E8F0; padding-bottom:14px;">
+            <label style="display:flex; align-items:center; gap:8px; font-weight:600; font-size:13px; color:#16223F; cursor:pointer;">
+              <input type="checkbox" id="cfg-qr-enabled" ${isOwner ? 'disabled' : ''} ${cachedConfig?.qrOrderingEnabled !== false ? 'checked' : ''} />
+              Enable Universal QR Table Ordering
+            </label>
+            <span style="font-size:11px; color:#64748B; margin-left:24px; display:block;">Allows guests to scan table QR codes and submit multi-round orders from their phones.</span>
+          </div>
 
-        <div style="border-bottom:1px solid #E2E8F0; padding-bottom:14px;">
-          <label style="display:flex; align-items:center; gap:8px; font-weight:600; font-size:13px; color:#16223F; cursor:pointer;">
-            <input type="checkbox" id="cfg-web-enabled" ${isOwner ? 'disabled' : ''} checked />
-            Enable Direct Web Ordering (Takeaway & Delivery)
-          </label>
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:10px; margin-left:24px;">
-            <div>
-              <label style="font-size:11px; color:#64748B; display:block; margin-bottom:4px;">Packaging Fee (₹)</label>
-              <input type="number" id="cfg-packaging-fee" value="15" ${isOwner ? 'disabled' : ''} style="width:100%; padding:6px 10px; font-size:12px; border:1px solid #CBD5E1; border-radius:6px;" />
-            </div>
-            <div>
-              <label style="font-size:11px; color:#64748B; display:block; margin-bottom:4px;">Delivery Fee (₹)</label>
-              <input type="number" id="cfg-delivery-fee" value="40" ${isOwner ? 'disabled' : ''} style="width:100%; padding:6px 10px; font-size:12px; border:1px solid #CBD5E1; border-radius:6px;" />
+          <div style="border-bottom:1px solid #E2E8F0; padding-bottom:14px;">
+            <label style="display:flex; align-items:center; gap:8px; font-weight:600; font-size:13px; color:#16223F; cursor:pointer;">
+              <input type="checkbox" id="cfg-web-enabled" ${isOwner ? 'disabled' : ''} ${cachedConfig?.webOrderingEnabled !== false ? 'checked' : ''} />
+              Enable Direct Web Ordering (Takeaway & Delivery)
+            </label>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:10px; margin-left:24px;">
+              <div>
+                <label style="font-size:11px; color:#64748B; display:block; margin-bottom:4px;">Packaging Fee (₹)</label>
+                <input type="number" id="cfg-packaging-fee" value="${cachedConfig?.packagingFeePaisa ? (cachedConfig.packagingFeePaisa / 100).toFixed(0) : '15'}" ${isOwner ? 'disabled' : ''} style="width:100%; padding:6px 10px; font-size:12px; border:1px solid #CBD5E1; border-radius:6px;" />
+              </div>
+              <div>
+                <label style="font-size:11px; color:#64748B; display:block; margin-bottom:4px;">Delivery Fee (₹)</label>
+                <input type="number" id="cfg-delivery-fee" value="${cachedConfig?.deliveryFeePaisa ? (cachedConfig.deliveryFeePaisa / 100).toFixed(0) : '40'}" ${isOwner ? 'disabled' : ''} style="width:100%; padding:6px 10px; font-size:12px; border:1px solid #CBD5E1; border-radius:6px;" />
+              </div>
             </div>
           </div>
-        </div>
 
-        <div style="border-bottom:1px solid #E2E8F0; padding-bottom:14px;">
-          <div style="font-size:13px; font-weight:700; color:#16223F; margin-bottom:8px;">Marketplace Aggregators</div>
-          <div style="display:flex; gap:20px;">
-            <label style="display:flex; align-items:center; gap:8px; font-size:12px; color:#16223F; cursor:pointer;">
-              <input type="checkbox" id="cfg-zomato-enabled" ${isOwner ? 'disabled' : ''} checked />
-              Zomato Integration Active
-            </label>
-            <label style="display:flex; align-items:center; gap:8px; font-size:12px; color:#16223F; cursor:pointer;">
-              <input type="checkbox" id="cfg-swiggy-enabled" ${isOwner ? 'disabled' : ''} checked />
-              Swiggy Integration Active
-            </label>
+          ${!isOwner ? `
+            <button type="submit" class="btn" style="background:#16223F; color:#FFFFFF; border:none; padding:10px 16px; font-size:13px; font-weight:600; border-radius:6px; cursor:pointer; align-self:flex-start;">
+              Save Channel Policies
+            </button>
+          ` : ''}
+        </form>
+      </div>
+
+      <!-- Marketplace Aggregators 1-Click Store Pause Controls (F088 / A081) -->
+      <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:10px; padding:24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+          <div>
+            <h3 style="margin:0 0 4px 0; font-size:16px; font-weight:700; color:#16223F;">1-Click Aggregator Store Controls (F088, A081)</h3>
+            <p style="margin:0; font-size:12px; color:#64748B;">Instantly pause and resume store availability on Zomato & Swiggy during kitchen rushes, bad weather, or stock-outs.</p>
           </div>
-        </div>
-
-        ${!isOwner ? `
-          <button type="submit" class="btn" style="background:#16223F; color:#FFFFFF; border:none; padding:10px 16px; font-size:13px; font-weight:600; border-radius:6px; cursor:pointer; align-self:flex-start;">
-            Save Channel Settings
+          <button class="btn btn-sm btn-ghost" id="btn-refresh-agg-status" type="button" style="font-size:11px; font-weight:700;">
+            🔄 Refresh Status
           </button>
-        ` : ''}
-      </form>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+          ${renderAggregatorCard("ZOMATO", "Zomato", "#E23744", cachedAggregatorStatus?.zomato)}
+          ${renderAggregatorCard("SWIGGY", "Swiggy", "#FC8019", cachedAggregatorStatus?.swiggy)}
+        </div>
+      </div>
+
+      <!-- Marketplace Weekly Payout Statement Reconciler (F100-F106) -->
+      <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:10px; padding:24px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px;">
+          <div>
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+              <h3 style="margin:0; font-size:16px; font-weight:700; color:#16223F;">Weekly Payout Statement Reconciler & Dispute Generator (F100–F106)</h3>
+              <span style="background:rgba(16,185,129,0.12); color:#059669; font-size:10px; font-weight:800; padding:2px 8px; border-radius:12px;">STATUTORY GST SEC 52 AUDIT</span>
+            </div>
+            <p style="margin:0; font-size:12.5px; color:#64748B; max-width:640px;">
+              Line-by-line audit of Zomato & Swiggy weekly payout remittance CSVs. Detects overcharged commissions, TDS/TCS miscalculations, and unacknowledged cancellation penalties with 1-click legal dispute ticket generation.
+            </p>
+          </div>
+          <button class="btn" id="btn-launch-statement-reconciler" style="background:#D4AF37; color:#16223F; border:none; padding:10px 16px; font-size:12.5px; font-weight:800; border-radius:8px; cursor:pointer; display:flex; align-items:center; gap:6px;">
+            <span>📊</span> Launch Statement Reconciler
+          </button>
+        </div>
+      </div>
     </div>
   `;
 }
@@ -518,18 +627,33 @@ function renderReservationsList(reservations) {
 
   container.innerHTML = reservations.map((r) => {
     const timeStr = new Date(r.bookingTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const depositPaid = r.depositStatus === 'PAID';
     return `
       <div style="border:1px solid #E2E8F0; border-radius:8px; padding:12px; display:flex; justify-content:space-between; align-items:center;">
         <div>
-          <div style="font-weight:700; color:#16223F; font-size:13px;">${r.guestName} (${r.partySize} guests)</div>
-          <div style="font-size:11px; color:#64748B;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <strong style="color:#16223F; font-size:13px;">${r.guestName} (${r.partySize} guests)</strong>
+            ${depositPaid ? `
+              <span style="font-size:10px; font-weight:700; padding:1px 6px; border-radius:4px; background:#ECFDF5; color:#059669; border:1px solid #A7F3D0;">
+                💰 ₹${((r.depositAmountPaisa || 0) / 100).toFixed(0)} Deposit Paid
+              </span>
+            ` : `
+              <span style="font-size:10px; color:#94A3B8;">No Deposit</span>
+            `}
+          </div>
+          <div style="font-size:11px; color:#64748B; margin-top:2px;">
             ⏰ ${timeStr} • 📞 ${r.guestPhone} • Table: ${r.assignedTableNumber || 'Not assigned'}
           </div>
         </div>
-        <div style="display:flex; align-items:center; gap:8px;">
+        <div style="display:flex; align-items:center; gap:6px;">
           <span style="font-size:11px; font-weight:700; padding:2px 8px; border-radius:6px; background:#F1F5F9; color:#16223F;">
             ${r.status}
           </span>
+          ${!isOwner && !depositPaid ? `
+            <button class="btn-deposit-res" data-id="${r.reservationId}" style="background:#0F766E; color:#FFFFFF; border:none; padding:4px 8px; font-size:11px; border-radius:4px; cursor:pointer;" title="Collect Advance Per-Cover Deposit (F296)">
+              💳 Deposit
+            </button>
+          ` : ''}
           ${!isOwner && r.status === 'CONFIRMED' ? `
             <button class="btn-checkin-res" data-id="${r.reservationId}" style="background:#16223F; color:#FFFFFF; border:none; padding:4px 8px; font-size:11px; border-radius:4px; cursor:pointer;">
               Check In
@@ -539,6 +663,26 @@ function renderReservationsList(reservations) {
       </div>
     `;
   }).join("");
+
+  document.querySelectorAll(".btn-deposit-res").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const reservationId = btn.getAttribute("data-id");
+      const val = prompt("Enter advance booking deposit amount in ₹ (e.g. 500 per cover):", "1000");
+      if (!val || isNaN(Number(val))) return;
+      try {
+        const res = await apiPost("/api/v1/channels/reservations/deposit", {
+          reservationId,
+          amountPaisa: Math.round(Number(val) * 100),
+          paymentMethod: "UPI",
+          cafeId: cachedCafeId,
+        });
+        showToast(`Advance deposit recorded! Receipt: ${res.data.receiptNumber}`, "success");
+        fetchReservationsAndWaitlist();
+      } catch (err) {
+        showToast(err.message, "error");
+      }
+    });
+  });
 
   document.querySelectorAll(".btn-checkin-res").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -577,13 +721,25 @@ function renderWaitlistQueue(queue) {
               ${q.queueNumber}
             </span>
             <span style="font-weight:700; color:#16223F; font-size:13px;">${q.guestName} (${q.partySize}p)</span>
+            ${q.status === 'NOTIFIED' ? `
+              <span style="background:#FEF3C7; color:#B45309; font-size:10px; font-weight:800; padding:1px 5px; border-radius:4px;">📲 Notified</span>
+            ` : ''}
+            ${q.preOrderItems?.length ? `
+              <span style="background:#F0FDF4; color:#16A34A; font-size:10px; font-weight:800; padding:1px 5px; border-radius:4px;">🍲 Pre-Order (${q.preOrderItems.length})</span>
+            ` : ''}
           </div>
           <div style="font-size:11px; color:#64748B; margin-top:2px;">
             Est. wait: ${q.estimatedWaitMinutes}m • 📞 ${q.guestPhone}
           </div>
         </div>
-        <div>
+        <div style="display:flex; align-items:center; gap:6px;">
           ${!isOwner ? `
+            <button class="btn-notify-waitlist" data-id="${q.waitlistId}" style="background:#3B82F6; color:#FFFFFF; border:none; padding:5px 8px; font-size:11px; font-weight:700; border-radius:4px; cursor:pointer;" title="SMS Table Ready Notification (F295)">
+              📲 SMS Ready
+            </button>
+            <button class="btn-preorder-waitlist" data-id="${q.waitlistId}" style="background:#10B981; color:#FFFFFF; border:none; padding:5px 8px; font-size:11px; font-weight:700; border-radius:4px; cursor:pointer;" title="Attach Pre-Order Dishes (A069)">
+              🍲 Pre-Order
+            </button>
             <button class="btn-seat-waitlist" data-id="${q.waitlistId}" style="background:#D4AF37; color:#16223F; border:none; padding:5px 10px; font-size:11px; font-weight:700; border-radius:4px; cursor:pointer;">
               Seat Party
             </button>
@@ -592,6 +748,37 @@ function renderWaitlistQueue(queue) {
       </div>
     `;
   }).join("");
+
+  document.querySelectorAll(".btn-notify-waitlist").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const waitlistId = btn.getAttribute("data-id");
+      try {
+        const res = await apiPost(`/api/v1/channels/waitlist/${waitlistId}/notify`, { cafeId: cachedCafeId });
+        showToast(`📲 SMS table-ready alert dispatched to ${res.data.guestName}!`, "success");
+        fetchReservationsAndWaitlist();
+      } catch (err) {
+        showToast(err.message, "error");
+      }
+    });
+  });
+
+  document.querySelectorAll(".btn-preorder-waitlist").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const waitlistId = btn.getAttribute("data-id");
+      const dish = prompt("Enter pre-ordered dishes (e.g. '1x Cold Brew, 1x Paneer Wrap'):", "1x Malabar Cold Brew, 1x Pepper Paneer Wrap");
+      if (!dish) return;
+      try {
+        await apiPost(`/api/v1/channels/waitlist/${waitlistId}/pre-order`, {
+          cafeId: cachedCafeId,
+          preOrderItems: [{ dish, notes: "Pre-order while waiting" }],
+        });
+        showToast("Pre-order attached to waitlist party!", "success");
+        fetchReservationsAndWaitlist();
+      } catch (err) {
+        showToast(err.message, "error");
+      }
+    });
+  });
 
   document.querySelectorAll(".btn-seat-waitlist").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -742,6 +929,308 @@ async function fetchConfig() {
   } catch (err) {
     console.error("Failed to load channel config:", err);
   }
+  try {
+    const statusRes = await apiGet(`/api/v1/channels/aggregators/status?cafeId=${cachedCafeId}`);
+    cachedAggregatorStatus = statusRes.data || { zomato: { isPaused: false }, swiggy: { isPaused: false } };
+  } catch (err) {
+    console.warn("Failed to load aggregator pause status:", err);
+  }
+  const root = document.getElementById("channels-panel-root");
+  if (root && activeSubTab === "config") {
+    root.innerHTML = renderConfigTab();
+    wireConfigTab();
+  }
+}
+
+function wireConfigTab() {
+  document.querySelectorAll(".btn-pause-agg").forEach((b) => {
+    b.addEventListener("click", async () => {
+      const provider = b.dataset.provider;
+      const mins = Number(b.dataset.mins);
+      const reasonEl = document.querySelector(`.agg-pause-reason[data-provider="${provider}"]`);
+      const reason = reasonEl ? reasonEl.value : "Kitchen Rush / Surge Orders";
+      try {
+        await apiPost("/api/v1/channels/aggregators/pause", {
+          cafeId: cachedCafeId,
+          provider,
+          durationMinutes: mins,
+          reason,
+        });
+        showToast(`⏸️ ${provider} store paused (${mins === 0 ? 'Indefinite' : `${mins} minutes`}).`, "mint");
+        await fetchConfig();
+      } catch (err) {
+        showToast(err.message || "Failed to pause aggregator store", "error");
+      }
+    });
+  });
+
+  document.querySelectorAll(".btn-resume-agg").forEach((b) => {
+    b.addEventListener("click", async () => {
+      const provider = b.dataset.provider;
+      try {
+        await apiPost("/api/v1/channels/aggregators/resume", {
+          cafeId: cachedCafeId,
+          provider,
+        });
+        showToast(`▶️ ${provider} store resumed! Accepting marketplace orders.`, "mint");
+        await fetchConfig();
+      } catch (err) {
+        showToast(err.message || "Failed to resume aggregator store", "error");
+      }
+    });
+  });
+
+  document.querySelector("#btn-refresh-agg-status")?.addEventListener("click", async () => {
+    await fetchConfig();
+    showToast("Aggregator live statuses updated.", "info");
+  });
+
+  document.querySelector("#btn-launch-statement-reconciler")?.addEventListener("click", () => {
+    openAggregatorStatementModal();
+  });
+
+  const form = document.querySelector("#form-channel-config");
+  if (form) {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const qrEnabled = document.querySelector("#cfg-qr-enabled")?.checked ?? true;
+      const webEnabled = document.querySelector("#cfg-web-enabled")?.checked ?? true;
+      const packagingFee = Number(document.querySelector("#cfg-packaging-fee")?.value) || 0;
+      const deliveryFee = Number(document.querySelector("#cfg-delivery-fee")?.value) || 0;
+      try {
+        await apiPatch("/api/v1/channels/config", {
+          cafeId: cachedCafeId,
+          config: {
+            qrOrderingEnabled: qrEnabled,
+            webOrderingEnabled: webEnabled,
+            packagingFeePaisa: packagingFee * 100,
+            deliveryFeePaisa: deliveryFee * 100,
+          },
+        });
+        showToast("Channel store policies updated successfully.", "mint");
+      } catch (err) {
+        showToast(err.message || "Failed to save settings", "error");
+      }
+    });
+  }
+}
+
+function openAggregatorStatementModal() {
+  let sampleStatement = [
+    { channelOrderId: "ZOM-7801", orderDate: "2026-10-05", grossAmountPaisa: 65000, commissionPaisa: 11700, tcsPaisa: 650, tdsPaisa: 650, netPayoutPaisa: 52000 },
+    { channelOrderId: "ZOM-7802", orderDate: "2026-10-06", grossAmountPaisa: 120000, commissionPaisa: 21600, tcsPaisa: 1200, tdsPaisa: 1200, netPayoutPaisa: 96000 },
+    { channelOrderId: "ZOM-7803", orderDate: "2026-10-07", grossAmountPaisa: 85000, commissionPaisa: 21250, tcsPaisa: 1275, tdsPaisa: 850, netPayoutPaisa: 61625 },
+    { channelOrderId: "ZOM-7804", orderDate: "2026-10-08", grossAmountPaisa: 45000, commissionPaisa: 8100, tcsPaisa: 450, tdsPaisa: 450, netPayoutPaisa: 36000 },
+    { channelOrderId: "ZOM-7805", orderDate: "2026-10-09", grossAmountPaisa: 98000, commissionPaisa: 17640, tcsPaisa: 980, tdsPaisa: 980, netPayoutPaisa: 78400 },
+  ];
+
+  openModal({
+    title: "Aggregator Payout Reconciler & Statutory Audit (F100–F106)",
+    maxWidth: "760px",
+    content: `
+      <div style="display:flex; flex-direction:column; gap:16px; font-size:12.5px;">
+        <div style="background:var(--surface-sunken, #F8FAFC); padding:10px 14px; border-radius:8px; border:1px solid #E2E8F0; font-size:11.5px; color:#64748B;">
+          ℹ️ <strong>Statutory Reconciliation Engine:</strong> Validates weekly payout statements against contracted commission rates, CBIC Section 52 1% GST TCS deductions, Section 194-O 1% TDS, and unagreed cancellations.
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;">
+          <div>
+            <label style="font-weight:700; color:#16223F; display:block; margin-bottom:3px;">Aggregator</label>
+            <select id="modal-stmt-provider" class="select" style="width:100%; font-size:12px;">
+              <option value="ZOMATO" selected>Zomato (Hyperpure)</option>
+              <option value="SWIGGY">Swiggy (Bundl)</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-weight:700; color:#16223F; display:block; margin-bottom:3px;">Agreed Commission (%)</label>
+            <input type="number" id="modal-stmt-comm" class="input" value="18" min="5" max="40" step="0.5" style="width:100%; font-size:12px; font-weight:700;" />
+          </div>
+          <div>
+            <label style="font-weight:700; color:#16223F; display:block; margin-bottom:3px;">Statement Reference</label>
+            <input type="text" id="modal-stmt-ref" class="input" value="STMT-ZOM-2026-W41" style="width:100%; font-size:12px;" />
+          </div>
+        </div>
+
+        <div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <label style="font-weight:700; color:#16223F;">Statement Line Items (<span id="stmt-line-count">${sampleStatement.length}</span> orders)</label>
+            <button class="btn btn-sm btn-secondary" id="modal-stmt-load-demo-btn" type="button" style="font-size:11px; padding:2px 8px; font-weight:700;">
+              📥 Reload Sample Remittance
+            </button>
+          </div>
+          <div id="modal-stmt-lines-table" style="max-height:160px; overflow-y:auto; border:1px solid #E2E8F0; border-radius:6px; background:#FFFFFF;">
+          </div>
+        </div>
+
+        <button class="btn btn-primary" id="modal-stmt-run-audit-btn" type="button" style="padding:10px 16px; font-weight:800; font-size:13px; border-radius:6px; background:#16223F; color:#FFFFFF;">
+          ⚡ Run Payout & Statutory Audit
+        </button>
+
+        <div id="modal-stmt-audit-results" style="display:none; flex-direction:column; gap:12px; border-top:1px dashed #CBD5E1; padding-top:12px;">
+        </div>
+      </div>
+    `,
+  });
+
+  const renderTable = () => {
+    const tableEl = document.getElementById("modal-stmt-lines-table");
+    if (!tableEl) return;
+    tableEl.innerHTML = `
+      <table style="width:100%; font-size:11px; border-collapse:collapse; text-align:left;">
+        <thead>
+          <tr style="background:#F8FAFC; border-bottom:1px solid #E2E8F0; color:#64748B;">
+            <th style="padding:6px 8px;">Order Ref</th>
+            <th style="padding:6px 8px; text-align:right;">Gross (₹)</th>
+            <th style="padding:6px 8px; text-align:right;">Commission (₹)</th>
+            <th style="padding:6px 8px; text-align:right;">TCS (1%)</th>
+            <th style="padding:6px 8px; text-align:right;">Net Remittance (₹)</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${sampleStatement.map(s => `
+            <tr style="border-bottom:1px solid #F1F5F9;">
+              <td style="padding:5px 8px; font-family:monospace; font-weight:700;">${s.channelOrderId}</td>
+              <td style="padding:5px 8px; text-align:right;">₹${(s.grossAmountPaisa / 100).toFixed(2)}</td>
+              <td style="padding:5px 8px; text-align:right;">₹${(s.commissionPaisa / 100).toFixed(2)}</td>
+              <td style="padding:5px 8px; text-align:right;">₹${(s.tcsPaisa / 100).toFixed(2)}</td>
+              <td style="padding:5px 8px; text-align:right; font-weight:700; color:#16223F;">₹${(s.netPayoutPaisa / 100).toFixed(2)}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    `;
+  };
+
+  setTimeout(() => {
+    renderTable();
+
+    document.getElementById("modal-stmt-load-demo-btn")?.addEventListener("click", () => {
+      renderTable();
+      showToast("Sample weekly remittance statement reloaded.", "info");
+    });
+
+    document.getElementById("modal-stmt-run-audit-btn")?.addEventListener("click", async () => {
+      const provider = document.getElementById("modal-stmt-provider")?.value || "ZOMATO";
+      const commRate = Number(document.getElementById("modal-stmt-comm")?.value) || 18;
+      const ref = document.getElementById("modal-stmt-ref")?.value || "STMT-ZOM-2026-W41";
+      const resultsContainer = document.getElementById("modal-stmt-audit-results");
+
+      if (resultsContainer) {
+        resultsContainer.style.display = "flex";
+        resultsContainer.innerHTML = '<div style="text-align:center; padding:16px; color:#64748B;">Auditing remittance against contract and statutory GST rules...</div>';
+      }
+
+      try {
+        const res = await apiPost("/api/v1/channels/aggregators/statement-audit", {
+          cafeId: cachedCafeId,
+          provider,
+          statementReference: ref,
+          statementPeriod: "2026-W41",
+          agreedCommissionRatePercent: commRate,
+          agreedTcsRatePercent: 1,
+          agreedTdsRatePercent: 1,
+          lineItems: sampleStatement,
+        });
+
+        const auditData = res?.data || res;
+        const totalGross = (auditData.totalGrossPaisa || 0) / 100;
+        const totalDiscrepancy = (auditData.totalDiscrepancyPaisa || 0) / 100;
+        const discrepancies = auditData.discrepancies || [];
+        const hasLeakage = totalDiscrepancy > 0 || discrepancies.length > 0;
+
+        resultsContainer.innerHTML = `
+          <div style="background:${hasLeakage ? '#FFFBEB' : '#ECFDF5'}; border:1px solid ${hasLeakage ? '#FDE68A' : '#A7F3D0'}; border-radius:8px; padding:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <span style="font-weight:800; font-size:13px; color:${hasLeakage ? '#92400E' : '#065F46'};">
+                ${hasLeakage ? `⚠️ AUDIT COMPLETE: ₹${totalDiscrepancy.toFixed(2)} LEAKAGE FLAGGED` : '🟢 AUDIT COMPLETE: 100% RECONCILED CLEAN'}
+              </span>
+              <span class="badge" style="font-size:10px; background:${hasLeakage ? '#F59E0B' : '#10B981'}; color:#FFFFFF; font-weight:700;">
+                ${auditData.status || (hasLeakage ? 'DISCREPANCY_FLAGGED' : 'RECONCILED_CLEAN')}
+              </span>
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; font-size:11.5px;">
+              <div>Gross Orders: <strong>₹${totalGross.toFixed(2)}</strong></div>
+              <div>Agreed Comm (${commRate}%): <strong>₹${((auditData.totalExpectedCommissionPaisa || 0) / 100).toFixed(2)}</strong></div>
+              <div>Net Remittance Disbursed: <strong>₹${((auditData.totalNetRemittancePaisa || 0) / 100).toFixed(2)}</strong></div>
+            </div>
+          </div>
+
+          ${discrepancies.length > 0 ? `
+            <div>
+              <div style="font-weight:700; color:#16223F; margin-bottom:4px;">Discrepancy Breakdown (${discrepancies.length} issues detected):</div>
+              <div style="border:1px solid #E2E8F0; border-radius:6px; overflow:hidden;">
+                <table style="width:100%; font-size:11px; border-collapse:collapse; text-align:left;">
+                  <thead style="background:#F8FAFC; color:#64748B;">
+                    <tr>
+                      <th style="padding:5px 8px;">Order Ref</th>
+                      <th style="padding:5px 8px;">Anomaly Code</th>
+                      <th style="padding:5px 8px;">Variance Description</th>
+                      <th style="padding:5px 8px; text-align:right;">Leakage (₹)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${discrepancies.map(d => `
+                      <tr style="border-bottom:1px solid #F1F5F9;">
+                        <td style="padding:5px 8px; font-family:monospace; font-weight:700;">${d.channelOrderId}</td>
+                        <td style="padding:5px 8px;"><span style="background:rgba(239,68,68,0.12); color:#DC2626; font-size:9.5px; padding:1px 5px; border-radius:4px; font-weight:700;">${d.anomalyCode}</span></td>
+                        <td style="padding:5px 8px; color:#64748B;">${d.description || 'Rate variance detected'}</td>
+                        <td style="padding:5px 8px; text-align:right; font-weight:700; color:#DC2626;">+₹${((d.variancePaisa || 0) / 100).toFixed(2)}</td>
+                      </tr>
+                    `).join("")}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:11.5px; color:#64748B;">Discrepant orders are eligible for merchant dispute filing.</span>
+              <button class="btn btn-sm" id="modal-stmt-gen-dispute-btn" style="background:#16223F; color:#FFFFFF; font-weight:700; font-size:11.5px; padding:6px 12px; border-radius:6px;">
+                📩 Generate Merchant Dispute Notice
+              </button>
+            </div>
+
+            <div id="modal-stmt-dispute-box" style="display:none; background:#F8FAFC; border:1px solid #CBD5E1; border-radius:6px; padding:12px; font-family:monospace; font-size:11px; white-space:pre-wrap; color:#1E293B;">
+            </div>
+          ` : `
+            <div style="font-size:12px; color:#059669; font-weight:600; text-align:center; padding:8px 0;">
+              ✨ All remittance lines conform strictly to contract commission rate and statutory GST rules.
+            </div>
+          `}
+        `;
+
+        document.getElementById("modal-stmt-gen-dispute-btn")?.addEventListener("click", () => {
+          const disputeBox = document.getElementById("modal-stmt-dispute-box");
+          if (!disputeBox) return;
+          const noticeText = [
+            `TO: ${provider.toUpperCase()} MERCHANT SETTLEMENT SUPPORT`,
+            `DATE: ${new Date().toISOString().slice(0, 10)}`,
+            `MERCHANT: ZAMORIN CAFE ESTATE (CAFÉ ID: ${cachedCafeId})`,
+            `STATEMENT REF: ${ref}`,
+            `CONTRACTED COMMISSION: ${commRate}% | STATUTORY TCS: 1% (CBIC SEC 52)`,
+            `----------------------------------------------------------------------`,
+            `FORMAL NOTICE OF SETTLEMENT DISCREPANCY & RECOVERY CLAIM`,
+            `----------------------------------------------------------------------`,
+            `Upon automated audit of the remittance statement for period 2026-W41,`,
+            `the following contractual and statutory over-deductions were identified:`,
+            ``,
+            ...discrepancies.map((d, i) => `${i + 1}. Order ${d.channelOrderId}: ${d.anomalyCode} — Leakage: ₹${((d.variancePaisa || 0) / 100).toFixed(2)} (${d.description})`),
+            ``,
+            `TOTAL RECOVERY CLAIMED: ₹${totalDiscrepancy.toFixed(2)}`,
+            `Please reverse these excess deductions in the upcoming remittance cycle.`,
+            `Zamorin Café Internal Audit Ref: AUDIT-${Date.now()}`,
+          ].join('\\n');
+
+          disputeBox.style.display = "block";
+          disputeBox.textContent = noticeText;
+          showToast("Merchant dispute notice generated.", "mint");
+        });
+      } catch (auditErr) {
+        if (resultsContainer) {
+          resultsContainer.innerHTML = `<div style="color:#EF4444; text-align:center; padding:12px;">Audit failed: ${auditErr.message}</div>`;
+        }
+      }
+    });
+  }, 100);
 }
 
 // ── Modals ──

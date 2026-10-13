@@ -7,6 +7,7 @@
  */
 
 const OwnerRiskAuditService = require('../services/ownerRiskAuditService');
+const { AntiFraudGovernanceService } = require('../services/antiFraudGovernanceService');
 
 class OwnerRiskAuditController {
   static getTenantContext(req) {
@@ -345,6 +346,64 @@ class OwnerRiskAuditController {
       const { organisationId } = OwnerRiskAuditController.getTenantContext(req);
       const rules = OwnerRiskAuditService.getAnomalyRuleCatalogue(organisationId);
       return res.status(200).json({ success: true, count: rules.length, data: rules });
+    } catch (err) {
+      return next(err);
+    }
+  }
+
+  // ── Anti-Fraud Governance & Cashier Anomaly Controls (F207 / A083 / F350) ──
+
+  static async recordBillReprint(req, res, next) {
+    try {
+      const { organisationId, cafeId, actorId } = OwnerRiskAuditController.getTenantContext(req);
+      const { billId, reason } = req.body || {};
+      const result = await AntiFraudGovernanceService.recordBillReprint({
+        organisationId,
+        cafeId: req.body?.cafeId || cafeId,
+        billId,
+        actorUserId: actorId,
+        reason,
+        auth: req.auth,
+      });
+      return res.status(200).json({ success: true, data: result });
+    } catch (err) {
+      return next(err);
+    }
+  }
+
+  static async evaluateCashierShift(req, res, next) {
+    try {
+      const { organisationId, cafeId } = OwnerRiskAuditController.getTenantContext(req);
+      const { registerSessionId } = req.body || {};
+      const result = await AntiFraudGovernanceService.evaluateCashierShiftAnomalies({
+        organisationId,
+        cafeId: req.body?.cafeId || cafeId,
+        registerSessionId,
+        auth: req.auth,
+      });
+      return res.status(200).json({ success: true, data: result });
+    } catch (err) {
+      return next(err);
+    }
+  }
+
+  static async recordRolePermissionAudit(req, res, next) {
+    try {
+      const { organisationId, actorId, actorRole } = OwnerRiskAuditController.getTenantContext(req);
+      const { targetUserId, targetRole, action, previousState, newState, changeJustification } = req.body || {};
+      const result = await AntiFraudGovernanceService.recordRolePermissionChange({
+        organisationId,
+        actorUserId: actorId,
+        actorRole,
+        targetUserId,
+        targetRole,
+        action,
+        previousState,
+        newState,
+        changeJustification,
+        auth: req.auth,
+      });
+      return res.status(200).json({ success: true, data: result });
     } catch (err) {
       return next(err);
     }

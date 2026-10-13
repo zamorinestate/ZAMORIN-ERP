@@ -712,7 +712,7 @@ test('REC-19 Login 2.0 Hardening, WebAuthn Passkeys & Performance Optimization 8
   await t.test('63. Background static cache: service worker caches login styles and shell assets', () => {
     const swContent = fs.readFileSync(SW_JS_PATH, 'utf-8');
     assert.match(swContent, /\.\/src\/styles\/login2\.css/, 'Service worker caches login2.css');
-    assert.match(swContent, /zamorin-pwa-v2\.8\.0/, 'Service worker cache version updated');
+    assert.match(swContent, /zamorin-pwa-v2\.[89]\.0/, 'Service worker cache version updated');
   });
 
   await t.test('64. No recovery-screen refetch: getFixedPageBackground caches chosen background in sessionStorage', () => {

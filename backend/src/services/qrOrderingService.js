@@ -510,6 +510,19 @@ class QrOrderingService {
     session.cumulativeTotalPaisa = (session.cumulativeTotalPaisa || 0) + roundTotalPaisa;
     await session.save();
 
+    // A039 / F254 / F261: Shared QR Cart Real-Time Visibility Event Push
+    try {
+      const { distributedEventBus } = require('./distributedEventBus');
+      distributedEventBus.publish(`table-session:${session.sessionId}`, {
+        event: 'CART_ROUND_UPDATED',
+        sessionId: session.sessionId,
+        tableNumber: table.tableNumber,
+        roundNumber,
+        newRound,
+        cumulativeTotalPaisa: session.cumulativeTotalPaisa,
+      });
+    } catch (_) {}
+
     // Create ChannelOrder record for operational channel visibility
     const orderId = `ORD-QR-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
     const orderNumber = `#T${table.tableNumber}-R${roundNumber}`;

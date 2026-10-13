@@ -1,5 +1,7 @@
 'use strict';
 
+const { RetailScaleAndPrepLabelService } = require('../retailScaleAndPrepLabelService');
+
 class BarcodeScannerAdapter {
   /**
    * Sanitizes and parses raw scanner input.
@@ -14,9 +16,14 @@ class BarcodeScannerAdapter {
       return { success: false, error: 'EMPTY_SCAN_DATA', message: 'Scanner payload is empty.' };
     }
 
+    // Check retail scale variable barcode first (A105, C02)
+    const scaleInfo = RetailScaleAndPrepLabelService.parseScaleBarcode(clean);
+
     // Determine payload type
     let scanType = 'UNKNOWN';
-    if (/^\d{13}$/.test(clean)) {
+    if (scaleInfo.isScaleBarcode) {
+      scanType = scaleInfo.barcodeType; // VARIABLE_WEIGHT or VARIABLE_PRICE
+    } else if (/^\d{13}$/.test(clean)) {
       scanType = 'EAN13';
     } else if (/^\d{12}$/.test(clean)) {
       scanType = 'UPCA';
@@ -34,6 +41,7 @@ class BarcodeScannerAdapter {
       success: true,
       rawCode: clean,
       scanType,
+      scaleData: scaleInfo.isScaleBarcode ? scaleInfo : null,
       scannedAt: new Date().toISOString(),
     };
   }
@@ -49,10 +57,23 @@ class BarcodeScannerAdapter {
     }
 
     const code = parsed.rawCode.toUpperCase();
+    const scaleData = parsed.scaleData;
+
     const matchedItem = menuItems.find((item) => {
       const sku = (item.sku || item.itemCode || item.code || '').toUpperCase();
       const barcode = (item.barcode || '').toUpperCase();
       const itemId = (item.itemId || item._id || '').toString().toUpperCase();
+      const plu = (item.plu || item.itemPlu || '').toString().toUpperCase();
+
+      if (scaleData?.itemPlu) {
+        return (
+          plu === scaleData.itemPlu ||
+          sku === scaleData.itemPlu ||
+          barcode === scaleData.itemPlu ||
+          sku.includes(scaleData.itemPlu)
+        );
+      }
+
       return sku === code || barcode === code || itemId === code;
     });
 
@@ -92,17 +113,31 @@ class BarcodeScannerAdapter {
       };
     }
 
+    const basePrice = Number(matchedItem.price || matchedItem.rate || 0);
+    let quantity = 1;
+    let linePrice = basePrice;
+
+    if (scaleData?.barcodeType === 'VARIABLE_WEIGHT') {
+      quantity = scaleData.weightKg;
+      linePrice = Math.round(basePrice * scaleData.weightKg);
+    } else if (scaleData?.barcodeType === 'VARIABLE_PRICE') {
+      linePrice = scaleData.priceRupees;
+    }
+
     return {
       success: true,
       scannedCode: parsed.rawCode,
       scanType: parsed.scanType,
+      scaleData: scaleData || null,
       item: {
         itemId: matchedItem.itemId || matchedItem._id,
         name: matchedItem.name,
-        price: Number(matchedItem.price || matchedItem.rate || 0),
+        price: basePrice,
+        linePrice,
+        quantity,
         taxRate: Number(matchedItem.taxRate || matchedItem.gstRate || 0),
         category: matchedItem.category || 'GENERAL',
-        uom: matchedItem.uom || 'UNIT',
+        uom: scaleData?.barcodeType === 'VARIABLE_WEIGHT' ? 'KG' : matchedItem.uom || 'UNIT',
       },
       validatedAt: new Date().toISOString(),
     };

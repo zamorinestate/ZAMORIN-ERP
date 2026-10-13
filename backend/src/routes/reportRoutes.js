@@ -49,6 +49,7 @@ const {
   runScenarioSimulation,
   runSensitivityAnalysis,
   getTrustCentreOverview,
+  getStaffPerformanceByAssignee,
 } = require('../controllers/reportController');
 
 const router = express.Router();
@@ -313,6 +314,13 @@ router.get(
   '/trust-centre/overview',
   authorize('REPORTS_READ', { allowedRoles: ['MASTER', 'OWNER'] }),
   getTrustCentreOverview
+);
+
+// A017 / F213: Staff performance by assignee report
+router.get(
+  '/staff-performance-by-assignee',
+  authorize('REPORTS_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  getStaffPerformanceByAssignee
 );
 
 module.exports = router;

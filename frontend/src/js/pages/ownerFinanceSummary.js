@@ -113,6 +113,7 @@ const DEFAULT_FINANCE_DATA = {
     payrollBudget: 0,
     actualPayroll: 0,
   },
+  dailyPayouts: null,
 };
 
 export function renderOwnerFinanceSummary() {
@@ -243,6 +244,7 @@ export function renderOwnerFinanceSummary() {
       <!-- Interactive Subnav Tabs -->
       <div class="subnav-bar" style="display:flex; gap:6px; border-bottom:1px solid var(--border-subtle); margin-bottom:20px; overflow-x:auto; padding-bottom:4px;">
         <button class="subnav-btn ${activeTab === "overview" ? "active" : ""}" data-tab="overview">Executive Overview</button>
+        <button class="subnav-btn ${activeTab === "daily-payouts" ? "active" : ""}" data-tab="daily-payouts">Daily Payouts & Aggregators (A001)</button>
         <button class="subnav-btn ${activeTab === "matrix" ? "active" : ""}" data-tab="matrix">Multi-Café Matrix</button>
         <button class="subnav-btn ${activeTab === "revenue-bridge" ? "active" : ""}" data-tab="revenue-bridge">Revenue &amp; Tax Bridge</button>
         <button class="subnav-btn ${activeTab === "cost-leakage" ? "active" : ""}" data-tab="cost-leakage">Cost &amp; Leakage Control</button>
@@ -263,6 +265,8 @@ function renderActiveTabContent(tab, data, filteredCafes, totalNetSales, totalGr
   switch (tab) {
     case "overview":
       return renderOverviewTab(data, totalNetSales, totalGrossSales, totalExpenses, totalPayroll, totalWastage, totalExceptions, totalVariance, expRatio, payrollRatio);
+    case "daily-payouts":
+      return renderDailyPayoutsTab(data.dailyPayouts);
     case "matrix":
       return renderMatrixTab(filteredCafes);
     case "revenue-bridge":
@@ -299,6 +303,9 @@ function renderOverviewTab(data, totalNetSales, totalGrossSales, totalExpenses, 
       ${kpiBox("Reconciliation Variance", fmtInr(totalVariance), totalVariance === 0 ? "Matched · ₹0 Variance" : `Variance: ${fmtInr(totalVariance)}`, totalVariance === 0 ? "var(--color-success)" : "var(--color-danger)", "Unresolved difference between tender/drawer records and sales")}
       ${kpiBox("Financial Exceptions", `${totalExceptions} Issues`, totalExceptions === 0 ? "Zero Blocking Errors" : "Attention Required", totalExceptions > 0 ? "var(--color-danger)" : "var(--color-success)", "Unreconciled registers or critical financial control discrepancies")}
     </div>
+
+    <!-- Layer 2.5: A001 Daily Payouts & Aggregator Settlement Strip -->
+    ${renderDailyPayoutWidget(data.dailyPayouts)}
 
     <!-- Layer 3: What Changed Financially & Financial Attention Required -->
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:16px; margin-bottom:24px;">
@@ -403,6 +410,126 @@ function renderOverviewTab(data, totalNetSales, totalGrossSales, totalExpenses, 
           <div style="font-size:11.5px; color:var(--muted);">Operating Contribution Retained:</div>
           <strong style="font-size:16px; color:var(--color-success); font-family:var(--font-mono);">${opContribPct}%</strong>
         </div>
+      </div>
+    </div>
+  `;
+}
+
+// ── Daily Payouts & Platform Deductions Widget & Tab (A001) ─────────────────
+function renderDailyPayoutWidget(payouts) {
+  if (!payouts) {
+    return `
+      <div class="card" style="padding:14px 18px; margin-bottom:20px; display:flex; justify-content:space-between; align-items:center; background:linear-gradient(135deg, rgba(37,99,235,0.06), rgba(16,185,129,0.06)); border:1px solid var(--border-subtle);">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="font-size:20px;">💳</span>
+          <div>
+            <div style="font-size:13px; font-weight:700; color:var(--ink);">Daily Financial Activity, Payouts &amp; Deductions (A001)</div>
+            <div style="font-size:11.5px; color:var(--muted);">Consolidates daily platform sales, commissions, EDC card batches, and estimated bank deposits.</div>
+          </div>
+        </div>
+        <span class="status info" style="font-size:11px; font-weight:700;">ACTIVE GATEWAY</span>
+      </div>
+    `;
+  }
+
+  const grossAgg = fmtInr((payouts.aggregatorSettlement?.aggregatorGrossPaisa || 0) / 100);
+  const commAgg = fmtInr((payouts.aggregatorSettlement?.estimatedCommissionPaisa || 0) / 100);
+  const netAgg = fmtInr((payouts.aggregatorSettlement?.estimatedNetPayoutPaisa || 0) / 100);
+  const directBank = fmtInr((payouts.bankSettlement?.directTerminalSettlementPaisa || 0) / 100);
+  const totalDeposit = fmtInr((payouts.bankSettlement?.estimatedTotalBankDepositPaisa || 0) / 100);
+  const status = payouts.bankSettlement?.status || "PENDING_RECONCILIATION";
+
+  return `
+    <div class="card" style="padding:16px 20px; margin-bottom:20px; border-left:4px solid #2563EB;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="background:#2563EB; color:#FFF; font-size:10px; font-weight:800; padding:2px 6px; border-radius:4px;">A001 GATEWAY</span>
+          <h4 style="font-size:14px; font-weight:800; margin:0; color:var(--ink);">Daily Financial Activity &amp; Bank Payout Summary</h4>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="status ${status === 'RECONCILED' ? 'success' : 'info'}" style="font-size:10.5px; font-weight:700;">${status}</span>
+          <span style="font-size:11px; color:var(--muted);">Business Date: <strong>${payouts.businessDate || selectedBusinessDate}</strong></span>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:12px; font-size:12px;">
+        <div style="background:var(--surface-sunken); padding:10px; border-radius:6px; border:1px solid var(--border-subtle);">
+          <div style="color:var(--muted); font-size:11px;">Aggregator Gross Sales</div>
+          <div style="font-size:15px; font-weight:800; color:var(--ink); font-family:var(--font-mono); margin-top:2px;">${grossAgg}</div>
+          <div style="font-size:10.5px; color:var(--muted);">Swiggy / Zomato order pool</div>
+        </div>
+        <div style="background:var(--surface-sunken); padding:10px; border-radius:6px; border:1px solid var(--border-subtle);">
+          <div style="color:var(--muted); font-size:11px;">Platform Deductions</div>
+          <div style="font-size:15px; font-weight:800; color:var(--color-danger); font-family:var(--font-mono); margin-top:2px;">-${commAgg}</div>
+          <div style="font-size:10.5px; color:var(--muted);">Commission, GST &amp; tech fees</div>
+        </div>
+        <div style="background:var(--surface-sunken); padding:10px; border-radius:6px; border:1px solid var(--border-subtle);">
+          <div style="color:var(--muted); font-size:11px;">Net Aggregator Remittance</div>
+          <div style="font-size:15px; font-weight:800; color:#10B981; font-family:var(--font-mono); margin-top:2px;">${netAgg}</div>
+          <div style="font-size:10.5px; color:var(--muted);">Direct scheduled bank payout</div>
+        </div>
+        <div style="background:var(--surface-sunken); padding:10px; border-radius:6px; border:1px solid var(--border-subtle);">
+          <div style="color:var(--muted); font-size:11px;">Direct EDC &amp; UPI Settlements</div>
+          <div style="font-size:15px; font-weight:800; color:#2563EB; font-family:var(--font-mono); margin-top:2px;">${directBank}</div>
+          <div style="font-size:10.5px; color:var(--muted);">Terminal card &amp; BharatQR</div>
+        </div>
+        <div style="background:linear-gradient(135deg, rgba(16,185,129,0.1), rgba(37,99,235,0.1)); padding:10px; border-radius:6px; border:1px solid rgba(16,185,129,0.3);">
+          <div style="color:var(--muted); font-size:11px; font-weight:700;">Est. Total Bank Deposit</div>
+          <div style="font-size:16px; font-weight:900; color:#059669; font-family:var(--font-mono); margin-top:2px;">${totalDeposit}</div>
+          <div style="font-size:10.5px; color:var(--muted);">Aggregator net + Direct terminals</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderDailyPayoutsTab(payouts) {
+  const p = payouts || {};
+  const gross = fmtInr((p.aggregatorSettlement?.aggregatorGrossPaisa || 0) / 100);
+  const comm = fmtInr((p.aggregatorSettlement?.estimatedCommissionPaisa || 0) / 100);
+  const net = fmtInr((p.aggregatorSettlement?.estimatedNetPayoutPaisa || 0) / 100);
+  const direct = fmtInr((p.bankSettlement?.directTerminalSettlementPaisa || 0) / 100);
+  const cash = fmtInr((p.collectionsByChannel?.cashDrawerPaisa || 0) / 100);
+  const upi = fmtInr((p.collectionsByChannel?.upiPaisa || 0) / 100);
+  const card = fmtInr((p.collectionsByChannel?.cardPaisa || 0) / 100);
+  const total = fmtInr((p.bankSettlement?.estimatedTotalBankDepositPaisa || 0) / 100);
+
+  return `
+    <div class="card" style="padding:22px; margin-bottom:24px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
+        <div>
+          <h3 style="font-size:16px; font-weight:800; margin:0 0 4px; color:var(--ink);">Daily Financial Activity, Payouts &amp; Bank Remittances (A001)</h3>
+          <p style="font-size:12px; color:var(--muted); margin:0;">Authoritative consolidation of aggregator payouts, commission deductions, card terminals and bank accounts.</p>
+        </div>
+        <span class="status info" style="font-size:11px; font-weight:700;">AUDIT COMPLIANT (F001–F351)</span>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:14px; margin-bottom:20px;">
+        <div style="background:var(--surface-sunken); padding:14px; border-radius:8px; border:1px solid var(--border-subtle);">
+          <div style="font-size:11.5px; color:var(--muted); margin-bottom:2px;">Online Aggregator Gross</div>
+          <div style="font-size:18px; font-weight:800; color:var(--ink); font-family:var(--font-mono);">${gross}</div>
+          <div style="font-size:11px; color:var(--muted); margin-top:2px;">Swiggy &amp; Zomato order flow</div>
+        </div>
+        <div style="background:var(--surface-sunken); padding:14px; border-radius:8px; border:1px solid var(--border-subtle);">
+          <div style="font-size:11.5px; color:var(--muted); margin-bottom:2px;">Platform Deductions &amp; TDS</div>
+          <div style="font-size:18px; font-weight:800; color:var(--color-danger); font-family:var(--font-mono);">-${comm}</div>
+          <div style="font-size:11px; color:var(--muted); margin-top:2px;">Aggregator fee + GST deduction</div>
+        </div>
+        <div style="background:var(--surface-sunken); padding:14px; border-radius:8px; border:1px solid var(--border-subtle);">
+          <div style="font-size:11.5px; color:var(--muted); margin-bottom:2px;">Direct Terminal Settlements</div>
+          <div style="font-size:18px; font-weight:800; color:#2563EB; font-family:var(--font-mono);">${direct}</div>
+          <div style="font-size:11px; color:var(--muted); margin-top:2px;">UPI QR (${upi}) + EDC (${card})</div>
+        </div>
+        <div style="background:linear-gradient(135deg, rgba(16,185,129,0.12), rgba(37,99,235,0.12)); padding:14px; border-radius:8px; border:1px solid rgba(16,185,129,0.35);">
+          <div style="font-size:11.5px; color:var(--muted); margin-bottom:2px; font-weight:700;">Total Estimated Bank Credit</div>
+          <div style="font-size:20px; font-weight:900; color:#059669; font-family:var(--font-mono);">${total}</div>
+          <div style="font-size:11px; color:var(--muted); margin-top:2px;">Cash drawer physical: ${cash}</div>
+        </div>
+      </div>
+
+      <div style="background:var(--surface-sunken); padding:14px 18px; border-radius:8px; border:1px solid var(--border-subtle); font-size:12px; color:var(--muted); line-height:1.6;">
+        <strong style="color:var(--ink);">Reconciliation Protocol (T01):</strong>
+        Every daily aggregator payout is tied directly to underlying sales orders, cancellation deductions, delivery commission rates, and bank statement transaction references.
       </div>
     </div>
   `;
@@ -974,6 +1101,19 @@ async function fetchFinanceSummaryData() {
     }
     const res = await apiGet(url);
     const body = res?.data || res || {};
+
+    let dailyPayouts = null;
+    try {
+      let payoutUrl = `/finance/daily-payout-summary?businessDate=${encodeURIComponent(selectedBusinessDate)}`;
+      if (selectedCafeFilter && selectedCafeFilter !== "ALL") {
+        payoutUrl += `&cafeId=${encodeURIComponent(selectedCafeFilter)}`;
+      }
+      const pRes = await apiGet(payoutUrl);
+      if (pRes?.data) dailyPayouts = pRes.data;
+    } catch (pErr) {
+      console.warn("Could not fetch daily payout summary:", pErr);
+    }
+
     if (body.kpis) {
       cachedFinanceSummary = {
         kpis: {
@@ -986,9 +1126,10 @@ async function fetchFinanceSummaryData() {
         payables: body.payables || DEFAULT_FINANCE_DATA.payables,
         budgets: body.budgets || DEFAULT_FINANCE_DATA.budgets,
         controlStrip: body.controlStrip || {},
+        dailyPayouts,
       };
     } else {
-      cachedFinanceSummary = { ...DEFAULT_FINANCE_DATA };
+      cachedFinanceSummary = { ...DEFAULT_FINANCE_DATA, dailyPayouts };
     }
   } catch (err) {
     console.warn("Could not fetch remote finance summary:", err);

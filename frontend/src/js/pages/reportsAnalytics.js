@@ -3293,6 +3293,72 @@ async function renderWorkforceSubtab(root, container) {
       });
     }
 
+    if (view === 'assignees') {
+      body.innerHTML = `
+        <div class="card" style="padding:14px;background:var(--surface-sunken);">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+            <div>
+              <h4 style="font-size:13px;font-weight:700;color:var(--ink);margin:0;">Staff Assignee Performance Ledger (A017)</h4>
+              <p style="font-size:11px;color:var(--muted);margin:2px 0 0;">Sales revenue, check volume, and average bill sizes attributed to compulsory/optional order assignees.</p>
+            </div>
+            <button id="btn-refresh-assignees" class="btn btn-xs btn-primary" type="button" style="font-size:11px;">↻ Refresh Assignees</button>
+          </div>
+          <div id="assignee-table-box">${skeleton('180px')}</div>
+          <div style="margin-top:12px;padding:8px 12px;background:rgba(14,165,233,0.06);border:1px solid rgba(14,165,233,0.2);border-radius:6px;font-size:10.5px;color:var(--primary,#0ea5e9);">
+            ℹ️ <strong>Assignee Guardrail (A017, F213, F253):</strong> Advance orders, table reservations, and Captain QR guest orders are excluded from compulsory cashier assignment.
+          </div>
+        </div>
+      `;
+
+      const loadAssigneeData = async () => {
+        const box = body.querySelector('#assignee-table-box');
+        if (!box) return;
+        try {
+          const res = await apiGet('/reports/staff-performance-by-assignee' + buildFilterQueryString('workforce'));
+          const list = res?.data?.performance || res?.data || [];
+          if (!Array.isArray(list) || list.length === 0) {
+            box.innerHTML = `<div style="text-align:center;padding:24px;color:var(--muted);font-size:11.5px;">No assigned orders recorded in this date range. Cashier bills with assigned staff will appear here.</div>`;
+            return;
+          }
+          box.innerHTML = `
+            <table class="glass-table" style="width:100%;font-size:11.5px;">
+              <thead>
+                <tr>
+                  <th>Assignee Name</th>
+                  <th>Staff ID</th>
+                  <th style="text-align:right;">Orders Billed</th>
+                  <th style="text-align:right;">Net Revenue</th>
+                  <th style="text-align:right;">Avg Ticket Size</th>
+                  <th style="text-align:right;">Avg Items/Order</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${list.map(s => {
+                  const netInr = ((s.totalNetSalesPaisa || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 });
+                  const avgTicketInr = ((s.avgTicketPaisa || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 });
+                  return `
+                    <tr>
+                      <td><strong>${s.staffName || 'Unassigned Staff'}</strong></td>
+                      <td style="font-family:var(--font-mono);color:var(--muted);">${s.staffId || '—'}</td>
+                      <td style="text-align:right;font-weight:700;">${s.totalOrdersBilled || s.ordersCount || 0}</td>
+                      <td style="text-align:right;font-weight:800;color:var(--mint,#10b981);">₹${netInr}</td>
+                      <td style="text-align:right;font-family:var(--font-mono);">₹${avgTicketInr}</td>
+                      <td style="text-align:right;color:var(--muted);">${Number(s.avgItemsPerOrder || 0).toFixed(1)}</td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          `;
+        } catch (err) {
+          box.innerHTML = `<div style="color:var(--coral,#ef4444);padding:16px;text-align:center;font-size:11.5px;">Failed to fetch assignee report: ${err.message || 'Error'}</div>`;
+        }
+      };
+
+      body.querySelector('#btn-refresh-assignees')?.addEventListener('click', loadAssigneeData);
+      loadAssigneeData();
+    }
+
     // Update active tab buttons style
     root.querySelectorAll('[data-wf-view]').forEach((btn) => {
       const isActive = btn.dataset.wfView === workforceActiveView;
@@ -3357,6 +3423,7 @@ async function renderWorkforceSubtab(root, container) {
           ['attendance', 'Attendance & Punctuality'],
           ['payroll', 'Payroll & Overtime'],
           ['exceptions', 'Exception Centre'],
+          ['assignees', 'Staff Performance by Assignee (A017)'],
         ].map(([v, label]) => `
           <button data-wf-view="${v}" style="padding:6px 14px;border-radius:20px;border:1px solid var(--line);font-size:12px;font-weight:600;cursor:pointer;
             background:${v === workforceActiveView ? 'var(--primary,#0ea5e9)' : 'var(--surface)'};

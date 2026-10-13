@@ -479,15 +479,26 @@ const correctTender = asyncHandler(async (request, response) => {
     throw new ApiError(400, 'CANNOT_CORRECT_VOIDED', 'Cannot correct tender on a voided bill.');
   }
 
+  const normNewMethod = normalizeId(newPaymentMethod);
+  const normOldMethod = normalizeId(oldPaymentMethod);
+  const { PAYMENT_METHODS } = require('../models/Bill');
+  if (!normNewMethod || !PAYMENT_METHODS.includes(normNewMethod)) {
+    throw new ApiError(400, 'INVALID_TENDER_METHOD', `New payment method '${newPaymentMethod}' is not an authorized tender (A134).`);
+  }
+
   const targetAmountPaisa = Math.round(Number(amountPaisa) || bill.totalPaisa);
   const correctionId = `TC-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+  // Snapshot previous state for atomic rollback guardrail (Benchmark A134)
+  const previousTendersSnapshot = JSON.parse(JSON.stringify(bill.tenders || []));
+  const previousPaymentMethod = bill.paymentMethod;
 
   // Find matching tender or update tenders array
   let foundTender = false;
   if (Array.isArray(bill.tenders)) {
     for (const t of bill.tenders) {
-      if (normalizeId(t.paymentMethod) === normalizeId(oldPaymentMethod) && t.status === 'COMPLETED') {
-        t.paymentMethod = normalizeId(newPaymentMethod);
+      if (normalizeId(t.paymentMethod) === normOldMethod && t.status === 'COMPLETED') {
+        t.paymentMethod = normNewMethod;
         if (paymentReference) t.paymentReference = paymentReference;
         foundTender = true;
         break;
@@ -501,8 +512,8 @@ const correctTender = asyncHandler(async (request, response) => {
 
   const correctionEntry = {
     correctionId,
-    oldPaymentMethod: normalizeId(oldPaymentMethod),
-    newPaymentMethod: normalizeId(newPaymentMethod),
+    oldPaymentMethod: normOldMethod,
+    newPaymentMethod: normNewMethod,
     amountPaisa: targetAmountPaisa,
     reason: reasonText,
     correctedByUserId: request.auth.userId || 'OPERATOR',
@@ -514,10 +525,18 @@ const correctTender = asyncHandler(async (request, response) => {
   bill.tenderCorrections = bill.tenderCorrections || [];
   bill.tenderCorrections.push(correctionEntry);
   if (bill.tenders.length === 1) {
-    bill.paymentMethod = normalizeId(newPaymentMethod);
+    bill.paymentMethod = normNewMethod;
   }
 
-  await bill.save();
+  try {
+    await bill.save();
+  } catch (saveErr) {
+    // Atomic rollback guardrail (A134)
+    bill.tenders = previousTendersSnapshot;
+    bill.paymentMethod = previousPaymentMethod;
+    bill.tenderCorrections.pop();
+    throw new ApiError(500, 'TENDER_CORRECTION_FAILED', `Tender modification rolled back to prevent corruption: ${saveErr.message}`);
+  }
 
   return response.status(200).json({
     success: true,
@@ -526,6 +545,131 @@ const correctTender = asyncHandler(async (request, response) => {
       correction: correctionEntry,
       bill: bill.toObject ? bill.toObject() : bill,
     },
+  });
+});
+
+const voidOtpStore = new Map();
+
+const requestVoidOtpController = asyncHandler(async (request, response) => {
+  const { billId, managerEmail: customManagerEmail } = request.body;
+  if (!billId) {
+    throw new ApiError(400, 'BILL_ID_REQUIRED', 'billId is required.');
+  }
+  const otp = String(Math.floor(100000 + Math.random() * 900000));
+  const expiresAt = Date.now() + 5 * 60 * 1000;
+  voidOtpStore.set(normalizeId(billId), { otp, expiresAt });
+
+  // Benchmark A008 / F207: Email-Delivered Manager Cancellation OTP
+  let emailDispatched = false;
+  const targetEmail = customManagerEmail || process.env.STORE_MANAGER_EMAIL || 'manager@zamorincafe.com';
+  try {
+    const { NotificationService } = require('../services/NotificationService');
+    if (NotificationService.activeProvider && typeof NotificationService.activeProvider.sendEmail === 'function') {
+      await NotificationService.activeProvider.sendEmail({
+        to: targetEmail,
+        subject: `[SECURITY ALERT] Emergency Bill Cancellation OTP: ${otp} (Bill ${billId})`,
+        text: `Emergency Void Request for Bill ${billId}.\nCashier: ${request.auth?.userId || 'OPERATOR'}\nOTP: ${otp}\nValid for 5 minutes.`,
+        html: `<h3>Zamorin Café ERP — Bill Cancellation Authorization</h3><p>An emergency bill cancellation was initiated for bill <strong>${billId}</strong> by <strong>${request.auth?.userId || 'OPERATOR'}</strong>.</p><p style="font-size:24px;font-weight:bold;color:#b17d38;">OTP: ${otp}</p><p>This OTP expires in 5 minutes.</p>`,
+      });
+      emailDispatched = true;
+    }
+  } catch (err) {
+    console.warn('[POS] Failed to dispatch cancellation email OTP:', err.message);
+  }
+
+  return response.status(200).json({
+    success: true,
+    data: {
+      billId,
+      message: 'Cancellation authorization OTP dispatched to registered store manager email.',
+      emailDispatched,
+      recipientEmail: targetEmail,
+      expiresInSeconds: 300,
+      testOtp: process.env.NODE_ENV !== 'production' ? otp : undefined,
+    },
+  });
+});
+
+const splitBillByItemsController = asyncHandler(async (request, response) => {
+  const { originalBillId, splitGroups } = request.body;
+  const result = await PosOrderService.splitBillByItems({
+    originalBillId,
+    splitGroups,
+    authContext: request.auth,
+  });
+  return response.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+const splitBillEvenlyController = asyncHandler(async (request, response) => {
+  const { originalBillId, splitCount } = request.body;
+  const result = await PosOrderService.splitBillEvenly({
+    originalBillId,
+    splitCount,
+    authContext: request.auth,
+  });
+  return response.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+const splitBillFoodBeverageController = asyncHandler(async (request, response) => {
+  const { originalBillId } = request.body;
+  const result = await PosOrderService.splitBillByFoodBeverage({
+    originalBillId,
+    authContext: request.auth,
+  });
+  return response.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+const lookupBarcodeOrderController = asyncHandler(async (request, response) => {
+  const barcode = request.params.barcode || request.query.code || '';
+  const cafeId = request.query.cafeId || request.auth?.primaryCafeId;
+  const result = await PosOrderService.lookupOrderByBarcode(barcode, cafeId);
+  return response.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+const mergeTablesPosController = asyncHandler(async (request, response) => {
+  const { targetTableId, sourceTableIds, cafeId } = request.body || {};
+  const targetCafeId = cafeId || request.auth?.primaryCafeId || 'ZC-0001';
+  const { TableService } = require('../services/tableService');
+  const result = await TableService.mergeTables({
+    targetTableId,
+    sourceTableIds,
+    cafeId: targetCafeId,
+    organisationId: request.auth?.organisationId || 'ORG-DEFAULT',
+    authContext: request.auth,
+  });
+  return response.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+const shiftTablePosController = asyncHandler(async (request, response) => {
+  const { fromTableId, toTableId, reason, cafeId } = request.body || {};
+  const targetCafeId = cafeId || request.auth?.primaryCafeId || 'ZC-0001';
+  const { TableService } = require('../services/tableService');
+  const result = await TableService.shiftTable({
+    fromTableId,
+    toTableId,
+    reason,
+    cafeId: targetCafeId,
+    organisationId: request.auth?.organisationId || 'ORG-DEFAULT',
+    authContext: request.auth,
+  });
+  return response.status(200).json({
+    success: true,
+    data: result,
   });
 });
 
@@ -544,6 +688,158 @@ module.exports = {
   reviewOfflineOrder,
   handlePaymentCallback,
   correctTender,
+  splitBillByItemsController,
+  splitBillEvenlyController,
+  splitBillFoodBeverageController,
+  requestVoidOtpController,
+  lookupBarcodeOrderController,
+  mergeTablesPosController,
+  shiftTablePosController,
+  voidOtpStore,
 };
+
+const { SmartCardService } = require('../services/smartCardService');
+const { DailyProductionService } = require('../services/dailyProductionService');
+
+const splitBillFoodBarController = asyncHandler(async (request, response) => {
+  const { originalBillId } = request.body;
+  const result = await PosOrderService.splitBillByFoodBar({
+    originalBillId,
+    authContext: request.auth,
+  });
+  return response.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+const lookupItemByShortcodeController = asyncHandler(async (request, response) => {
+  const shortcode = request.params.shortcode || request.query.code || '';
+  const cafeId = request.query.cafeId || request.auth?.primaryCafeId;
+  const organisationId = request.auth?.organisationId || 'ZAMORIN';
+  const item = await PosOrderService.lookupMenuItemByShortcode(shortcode, cafeId, organisationId);
+  return response.status(200).json({
+    success: true,
+    data: item,
+  });
+});
+
+const issueSmartCardController = asyncHandler(async (request, response) => {
+  const { cardUid, initialTopupPaisa, securityDepositPaisa, customerName, customerPhone, customerId, paymentMethod, cafeId } = request.body || {};
+  const targetCafeId = cafeId || request.auth?.primaryCafeId;
+  const result = await SmartCardService.issueCard({
+    cardUid,
+    cafeId: targetCafeId,
+    organisationId: request.auth?.organisationId || 'ZAMORIN',
+    customerId,
+    customerName,
+    customerPhone,
+    initialTopupPaisa,
+    securityDepositPaisa,
+    paymentMethod,
+    authContext: request.auth,
+  });
+  return response.status(201).json(result);
+});
+
+const topupSmartCardController = asyncHandler(async (request, response) => {
+  const { cardUid, amountPaisa, paymentMethod, cafeId } = request.body || {};
+  const targetCafeId = cafeId || request.auth?.primaryCafeId;
+  const result = await SmartCardService.topupCard({
+    cardUid,
+    amountPaisa,
+    paymentMethod,
+    cafeId: targetCafeId,
+    organisationId: request.auth?.organisationId || 'ZAMORIN',
+    authContext: request.auth,
+  });
+  return response.status(200).json(result);
+});
+
+const debitSmartCardController = asyncHandler(async (request, response) => {
+  const { cardUid, amountPaisa, referenceBillId, cafeId } = request.body || {};
+  const targetCafeId = cafeId || request.auth?.primaryCafeId;
+  const result = await SmartCardService.debitCard({
+    cardUid,
+    amountPaisa,
+    referenceBillId,
+    cafeId: targetCafeId,
+    authContext: request.auth,
+  });
+  return response.status(200).json(result);
+});
+
+const refundSmartCardController = asyncHandler(async (request, response) => {
+  const { cardUid, refundDeposit } = request.body || {};
+  const result = await SmartCardService.refundAndCloseCard({
+    cardUid,
+    refundDeposit: refundDeposit !== false,
+    authContext: request.auth,
+  });
+  return response.status(200).json(result);
+});
+
+const getSmartCardBalanceController = asyncHandler(async (request, response) => {
+  const cardUid = request.params.cardUid || request.query.cardUid;
+  const result = await SmartCardService.getCardBalance(cardUid);
+  return response.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+const getSmartCardLiabilityReportController = asyncHandler(async (request, response) => {
+  const cafeId = request.query.cafeId || request.auth?.primaryCafeId;
+  const result = await SmartCardService.getUnspentLiabilityReport({
+    cafeId,
+    organisationId: request.auth?.organisationId || 'ZAMORIN',
+  });
+  return response.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+const registerDailyProductionBatchController = asyncHandler(async (request, response) => {
+  const { menuItemId, initialYieldQty, batchNumber, date, cafeId } = request.body || {};
+  const targetCafeId = cafeId || request.auth?.primaryCafeId;
+  const result = await DailyProductionService.registerDailyBatch({
+    organisationId: request.auth?.organisationId || 'ZAMORIN',
+    cafeId: targetCafeId,
+    date,
+    menuItemId,
+    initialYieldQty,
+    batchNumber,
+    authContext: request.auth,
+  });
+  return response.status(201).json(result);
+});
+
+const getDailyProductionRegisterController = asyncHandler(async (request, response) => {
+  const cafeId = request.query.cafeId || request.auth?.primaryCafeId;
+  const date = request.query.date;
+  const result = await DailyProductionService.getDailyRegister({
+    organisationId: request.auth?.organisationId || 'ZAMORIN',
+    cafeId,
+    date,
+  });
+  return response.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+Object.assign(module.exports, {
+  splitBillFoodBarController,
+  lookupItemByShortcodeController,
+  issueSmartCardController,
+  topupSmartCardController,
+  debitSmartCardController,
+  refundSmartCardController,
+  getSmartCardBalanceController,
+  getSmartCardLiabilityReportController,
+  registerDailyProductionBatchController,
+  getDailyProductionRegisterController,
+});
 
 

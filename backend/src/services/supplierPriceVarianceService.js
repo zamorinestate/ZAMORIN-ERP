@@ -203,6 +203,95 @@ class SupplierPriceVarianceService {
       governanceNote: 'ANALYTICAL FINDINGS ONLY. Variances do not retroactively modify approved purchase orders, AP invoices, or general ledgers. Any supplier adjustments require authorized review.',
     };
   }
+
+  /**
+   * Real-time pre-order price spike check for a proposed line item against vendor contracts and past purchases (F154, F155).
+   */
+  static async checkLineItemPriceVariance({
+    itemId,
+    proposedUnitPricePaisa,
+    organisationId = 'ZAMORIN',
+    vendorId = null,
+  }) {
+    const cleanItem = String(itemId || '').trim().toUpperCase();
+    const cleanOrg = String(organisationId || 'ZAMORIN').trim().toUpperCase();
+    const cleanVendor = vendorId ? String(vendorId).trim().toUpperCase() : null;
+    const proposedRate = Math.max(0, Number(proposedUnitPricePaisa || 0));
+
+    // 1. Look up contracted rate in Vendor catalogue
+    let baselinePricePaisa = null;
+    let baselineSource = 'NONE';
+
+    if (cleanVendor) {
+      const vendorDoc = await Vendor.findOne({ organisationId: cleanOrg, vendorId: cleanVendor }).lean();
+      if (vendorDoc && Array.isArray(vendorDoc.catalogue)) {
+        const catEntry = vendorDoc.catalogue.find(
+          (c) => String(c.itemId || c.sku || '').trim().toUpperCase() === cleanItem
+        );
+        if (catEntry && Number(catEntry.unitPricePaisa) > 0) {
+          baselinePricePaisa = Number(catEntry.unitPricePaisa);
+          baselineSource = 'VENDOR_CONTRACT_CATALOGUE';
+        }
+      }
+    }
+
+    // 2. If no vendor contract rate, check GlobalInventoryItem standard or last purchase cost
+    if (!baselinePricePaisa) {
+      const gItem = await GlobalInventoryItem.findOne({ organisationId: cleanOrg, itemId: cleanItem }).lean();
+      if (gItem) {
+        baselinePricePaisa = Number(gItem.lastPurchasePricePaisa || gItem.standardCostPaisa || gItem.unitCostPaisa || 0);
+        if (baselinePricePaisa > 0) {
+          baselineSource = 'GLOBAL_ITEM_HISTORY';
+        }
+      }
+    }
+
+    if (!baselinePricePaisa || baselinePricePaisa <= 0) {
+      return {
+        itemId: cleanItem,
+        proposedUnitPricePaisa: proposedRate,
+        baselinePricePaisa: null,
+        baselineSource: 'NONE',
+        variancePaisa: 0,
+        variancePercent: 0,
+        isAlert: false,
+        severity: 'NO_CONTRACTED_BASELINE',
+        message: 'No baseline price found for comparison.',
+      };
+    }
+
+    const variancePaisa = proposedRate - baselinePricePaisa;
+    const variancePercent = Number(((variancePaisa / baselinePricePaisa) * 100).toFixed(2));
+
+    let isAlert = false;
+    let severity = 'STABLE';
+    let message = 'Price matches expected baseline.';
+
+    if (variancePercent > 15) {
+      isAlert = true;
+      severity = 'SEVERE_INCREASE';
+      message = `Severe price spike alert: Proposed rate (₹${(proposedRate / 100).toFixed(2)}) is ${variancePercent}% above baseline (₹${(baselinePricePaisa / 100).toFixed(2)})!`;
+    } else if (variancePercent > 5) {
+      isAlert = true;
+      severity = 'MATERIAL_INCREASE';
+      message = `Price increase alert: Proposed rate (₹${(proposedRate / 100).toFixed(2)}) is ${variancePercent}% above baseline (₹${(baselinePricePaisa / 100).toFixed(2)}).`;
+    } else if (variancePercent < -5) {
+      severity = 'MATERIAL_DECREASE';
+      message = `Favorable price: Proposed rate is ${Math.abs(variancePercent)}% lower than baseline.`;
+    }
+
+    return {
+      itemId: cleanItem,
+      proposedUnitPricePaisa: proposedRate,
+      baselinePricePaisa,
+      baselineSource,
+      variancePaisa,
+      variancePercent,
+      isAlert,
+      severity,
+      message,
+    };
+  }
 }
 
 module.exports = SupplierPriceVarianceService;

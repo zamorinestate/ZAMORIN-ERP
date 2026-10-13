@@ -203,6 +203,17 @@ const globalInventoryItemSchema = new mongoose.Schema(
       default: 7,
       min: 0,
     },
+    isWholeUnitOnly: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    department: {
+      type: String,
+      enum: ['BAKERY', 'COFFEE_BAR', 'KITCHEN', 'STORE', 'PACKAGING', 'GENERAL'],
+      default: 'GENERAL',
+      index: true,
+    },
     unitCostPaisa: {
       type: Number,
       default: 0,

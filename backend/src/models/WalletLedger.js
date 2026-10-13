@@ -18,6 +18,7 @@ const WALLET_TX_TYPES = [
   'REFUND',
   'ADJUSTMENT',
   'GIFT_CARD_REDEEM',
+  'EXPIRATION',
 ];
 
 const WALLET_PAYMENT_STATUSES = [
@@ -137,6 +138,12 @@ const walletLedgerSchema = new mongoose.Schema(
       type: String,
       enum: ['PURCHASED', 'PROMOTIONAL'],
       default: 'PURCHASED',
+      index: true,
+    },
+
+    expiresAt: {
+      type: Date,
+      default: null,
       index: true,
     },
 

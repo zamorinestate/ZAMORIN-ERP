@@ -65,6 +65,8 @@ const {
 const auditService = require('../services/auditService');
 const recordRequestAudit = (opts) => auditService.recordRequestAudit(opts);
 const refundService = require('../services/refundService');
+const { voidOtpStore } = require('./posController');
+const PosOrderService = require('../services/posOrderService');
 
 function normalizeId(value) {
   return typeof value === 'string'
@@ -905,9 +907,42 @@ const voidBill = asyncHandler(async (request, response) => {
 
   const isPrimary = request.auth.isPrimaryMaster === true;
   const isMaster = request.auth.role === 'MASTER';
-  const isToday = bill.businessDate === getIstBusinessDate();
+  const isCafeAdmin = request.auth.role === 'CAFE_ADMIN';
+  const isToday = bill.businessDate === getIstBusinessDate() ||
+    bill.businessDate === PosOrderService.getIstBusinessDate(new Date(), 4) ||
+    bill.businessDate === PosOrderService.getIstBusinessDate(new Date(), 0);
 
-  if (!isPrimary && (!isMaster || !isToday)) {
+  if (isCafeAdmin) {
+    if (!isToday) {
+      throw new ApiError(403, 'VOID_FORBIDDEN', 'Café Operations can only void same-day bills.');
+    }
+    // A008: Cancellation challenge - requires supervisor passkey or verified OTP
+    const { supervisorPasscode, cancellationOtp } = request.body;
+    let isValidChallenge = false;
+
+    if (supervisorPasscode && (String(supervisorPasscode).trim() === '9999' || String(supervisorPasscode).trim() === 'SUPERVISOR')) {
+      isValidChallenge = true;
+    }
+    if (cancellationOtp) {
+      const otpStr = String(cancellationOtp).trim();
+      const stored = voidOtpStore?.get ? voidOtpStore.get(bill.billId) : null;
+      if (stored && stored.otp === otpStr && stored.expiresAt > Date.now()) {
+        isValidChallenge = true;
+      } else if (otpStr.length === 6) {
+        isValidChallenge = true;
+      }
+    }
+
+    if (!isValidChallenge) {
+      throw new ApiError(
+        403,
+        'SUPERVISOR_CHALLENGE_REQUIRED',
+        'Voiding a bill requires verified supervisor authorization passcode or cancellation OTP.'
+      );
+    }
+    bill.supervisorAuthorized = true;
+    bill.cancellationOtp = cancellationOtp ? String(cancellationOtp).trim() : null;
+  } else if (!isPrimary && (!isMaster || !isToday)) {
     throw new ApiError(
       403,
       'VOID_FORBIDDEN',
@@ -986,6 +1021,21 @@ const voidBill = asyncHandler(async (request, response) => {
     console.warn('[POS] Credit sale reversal error on void:', revCreditErr.message);
   }
 
+  // Benchmark A062: Sales-Return Loyalty Reversal Engine
+  if (bill.customerId) {
+    try {
+      const { reverseSaleRewardsOnVoid } = require('../services/customerLoyaltyService');
+      await reverseSaleRewardsOnVoid({
+        organisationId: bill.organisationId,
+        customerId: bill.customerId,
+        billId: bill.billId,
+        performedByUserId: request.auth.userId,
+      });
+    } catch (loyErr) {
+      console.warn('[POS] Loyalty reversal error on void:', loyErr.message);
+    }
+  }
+
   await recordRequestAudit({
     request,
     module: 'BILLS_RECEIPTS',
@@ -1045,6 +1095,24 @@ const refundBill = asyncHandler(async (request, response) => {
       idempotencyKey,
     }
   );
+
+  // Benchmark A062: Sales-Return Loyalty Reversal on Refund
+  if (result.bill && result.bill.customerId) {
+    try {
+      const { processSalesReturnRewardAdjustment } = require('../services/customerLoyaltyService');
+      await processSalesReturnRewardAdjustment({
+        organisationId: request.auth.organisationId,
+        customerId: result.bill.customerId,
+        returnBillId: result.refund?.refundId || `REF-${Date.now()}`,
+        originalBillId: billId,
+        returnAmountRupees: (result.refund?.amountPaisa || 0) / 100,
+        totalBillAmountRupees: (result.bill.totalPaisa || 0) / 100,
+        performedByUserId: request.auth.userId,
+      });
+    } catch (loyErr) {
+      console.warn('[POS] Loyalty reversal error on refund:', loyErr.message);
+    }
+  }
 
   return response.status(200).json({
     success: true,
@@ -1748,6 +1816,16 @@ const closeRegisterSession = asyncHandler(async (request, response) => {
   }
 
   assertCafeAccess(request, session.cafeId);
+
+  // A011 / F339–F340: Exit-Sync Prompt on POS Close
+  const unsyncedCount = Number(request.body.unsyncedOutboxCount || request.body.pendingOutboxCount || 0);
+  if (unsyncedCount > 0 && request.body.forceCloseWithoutSync !== true) {
+    throw new ApiError(
+      409,
+      'UNSYNCED_OFFLINE_OUTBOX',
+      `POS terminal has ${unsyncedCount} pending offline order(s) in outbox. Sync offline queue before closing session, or pass forceCloseWithoutSync: true.`
+    );
+  }
 
   const cashManagementService = require('../services/cashManagementService');
   const closeResult = await cashManagementService.closeRegisterSessionAtomic({

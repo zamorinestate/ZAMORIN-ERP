@@ -17,6 +17,8 @@ const RecallTraceService = require('../services/recallTraceService');
 const dataFoundationService = require('../services/dataFoundationService');
 const { ReplenishmentRecommendation } = require('../models/ReplenishmentRecommendation');
 const { ReplenishmentRecommendationService } = require('../services/replenishmentRecommendationService');
+const { BatchProductionService } = require('../services/batchProductionService');
+const { BomDepletionService } = require('../services/bomDepletionService');
 const { ApiError } = require('../utils/ApiError');
 const { asyncHandler } = require('../utils/asyncHandler');
 
@@ -494,6 +496,92 @@ const evaluateItemQuality = asyncHandler(async (request, response) => {
   return response.status(200).json(result);
 });
 
+// A110, F120: Whole-unit material enforcer
+async function assertWholeUnitQuantity(organisationId, itemId, quantity) {
+  if (quantity === undefined || quantity === null) return;
+  const item = await GlobalInventoryItem.findOne({ organisationId, itemId }).lean();
+  if (!item) return;
+  const isDiscrete = item.isWholeUnitOnly || ['PCS', 'UNIT', 'BOX', 'BOTTLE', 'PACK'].includes(item.baseUnit?.toUpperCase());
+  if (isDiscrete && !Number.isInteger(Number(quantity))) {
+    throw new ApiError(400, 'WHOLE_UNIT_FRACTIONAL_REJECTED', `Item ${itemId} (${item.name}) is a whole-unit material. Fractional quantities (${quantity}) are strictly rejected.`);
+  }
+}
+
+// A096-A098, F133: Department-wise inventory access helper
+function assertDepartmentAccess(request, itemDepartment) {
+  const userDept = request.auth?.assignedDepartment || request.headers?.['x-staff-department'];
+  if (!userDept || userDept === 'ALL') return;
+  const role = request.auth?.role;
+  if (role === 'MASTER' || role === 'OWNER') return;
+  if (itemDepartment && itemDepartment !== 'GENERAL' && itemDepartment !== userDept.toUpperCase()) {
+    throw new ApiError(403, 'DEPARTMENT_ACCESS_DENIED', `Access denied for department ${itemDepartment}. Your station is restricted to ${userDept}.`);
+  }
+}
+
+// F188–F191: Irreversible Historical Stock Freeze Lock
+async function assertStockDateNotFrozen(cafeId, date, organisationId = 'ZAMORIN') {
+  if (!cafeId || !date) return;
+  const cafe = await Cafe.findOne({ cafeId: String(cafeId).trim().toUpperCase() });
+  if (cafe?.historicalStockFreezeDate) {
+    const freezeTime = new Date(cafe.historicalStockFreezeDate).getTime();
+    const entryTime = new Date(date).getTime();
+    if (entryTime < freezeTime) {
+      throw new ApiError(
+        403,
+        'CANNOT_POST_BEFORE_FREEZE_DATE',
+        `Cannot post or modify inventory entries prior to historical freeze date (${cafe.historicalStockFreezeDate.toISOString().slice(0, 10)}).`
+      );
+    }
+  }
+}
+
+// F122: Raw Material Menu Auto-86 Lock
+async function evaluateRawMaterialAuto86({ organisationId, cafeId, itemId, currentQuantity }) {
+  const cleanItemId = String(itemId).trim().toUpperCase();
+  const cleanOrg = String(organisationId || 'ZAMORIN').trim().toUpperCase();
+  const { Recipe } = require('../models/Recipe');
+  const { MenuItem } = require('../models/MenuItem');
+
+  const recipes = await Recipe.find({
+    organisationId: cleanOrg,
+    'ingredients.inventoryItemId': cleanItemId,
+  });
+  const recipeIds = recipes.map((r) => r.recipeId);
+
+  if (currentQuantity <= 0) {
+    const affectedItems = await MenuItem.find({
+      organisationId: cleanOrg,
+      $or: [
+        { primaryRecipeId: { $in: recipeIds } },
+        { inventoryItemId: cleanItemId },
+      ],
+    });
+    for (const mi of affectedItems) {
+      mi.auto86Locked = true;
+      mi.isAvailable = false;
+      mi.auto86Reason = `Raw material ${cleanItemId} is out of stock`;
+      await mi.save();
+    }
+    return { lockedCount: affectedItems.length, affectedItemIds: affectedItems.map((m) => m.menuItemId) };
+  } else {
+    const lockedItems = await MenuItem.find({
+      organisationId: cleanOrg,
+      auto86Locked: true,
+      $or: [
+        { primaryRecipeId: { $in: recipeIds } },
+        { inventoryItemId: cleanItemId },
+      ],
+    });
+    for (const mi of lockedItems) {
+      mi.auto86Locked = false;
+      mi.isAvailable = true;
+      mi.auto86Reason = null;
+      await mi.save();
+    }
+    return { unlockedCount: lockedItems.length, restoredItemIds: lockedItems.map((m) => m.menuItemId) };
+  }
+}
+
 // 4. Stock Movement Ledger & Atomic Balance Mutations
 const recordMovement = asyncHandler(async (request, response) => {
   const { organisationId, userId } = request.auth;
@@ -508,6 +596,12 @@ const recordMovement = asyncHandler(async (request, response) => {
   const cleanCafe = cafeId.trim().toUpperCase();
   const cleanItem = itemId.trim().toUpperCase();
   const numQty = Number(quantity);
+
+  // F188: Historical freeze date guard
+  const txnDate = request.body.movementDate || request.body.entryDate || request.body.performedAt || new Date();
+  await assertStockDateNotFrozen(cleanCafe, txnDate, organisationId);
+
+  await assertWholeUnitQuantity(organisationId, cleanItem, numQty);
 
   const config = await CafeInventoryConfig.findOne({ organisationId, cafeId: cleanCafe, itemId: cleanItem });
   if (!config) {
@@ -525,6 +619,14 @@ const recordMovement = asyncHandler(async (request, response) => {
   config.availableQuantityBase = Math.max(0, balanceAfter - (config.reservedQuantityBase || 0) - (config.quarantinedQuantityBase || 0) - (config.expiredQuantityBase || 0));
   config.lastMovementAt = new Date();
   await config.save();
+
+  // F122: Trigger auto-86 evaluation
+  await evaluateRawMaterialAuto86({
+    organisationId,
+    cafeId: cleanCafe,
+    itemId: cleanItem,
+    currentQuantity: config.currentQuantityBase,
+  });
 
   const count = await StockMovement.countDocuments({ organisationId });
   const movementId = `MVT-${Date.now().toString().slice(-6)}-${String(count + 1).padStart(4, '0')}`;
@@ -584,6 +686,8 @@ const receiveStock = asyncHandler(async (request, response) => {
   const cleanCafe = cafeId.trim().toUpperCase();
   const cleanItem = itemId.trim().toUpperCase();
   const qty = Number(quantity);
+
+  await assertWholeUnitQuantity(organisationId, cleanItem, qty);
 
   const item = await GlobalInventoryItem.findOne({ organisationId, itemId: cleanItem });
   if (!item) {
@@ -672,6 +776,8 @@ const createTransfer = asyncHandler(async (request, response) => {
   const cleanSource = sourceCafeId.trim().toUpperCase();
   const cleanDest = destCafeId.trim().toUpperCase();
   const cleanItem = itemId.trim().toUpperCase();
+
+  await assertWholeUnitQuantity(organisationId, cleanItem, requestedQty);
 
   if (cleanSource === cleanDest) {
     throw new ApiError(400, 'INVALID_TRANSFER', 'Source and destination cafés must be different.');
@@ -846,6 +952,14 @@ const receiveTransfer = asyncHandler(async (request, response) => {
   const dispatchedQty = transfer.dispatchedQty || transfer.requestedQty;
   const numAccepted = Number(acceptedQty !== undefined ? acceptedQty : (receivedQty !== undefined ? receivedQty : dispatchedQty));
   const numRejected = Number(rejectedQty !== undefined ? rejectedQty : Math.max(0, dispatchedQty - numAccepted));
+
+  // A113, F199: Franchise Store Stock Transfer Quantity Protection
+  if (numAccepted !== dispatchedQty) {
+    const isSupervisor = ['MASTER', 'OWNER'].includes(request.auth.role) || request.body.supervisorApproved === true || Boolean(request.body.supervisorPin);
+    if (!isSupervisor) {
+      throw new ApiError(403, 'FRANCHISE_TRANSFER_VARIANCE_DENIED', 'Supervisor authorization is required to alter dispatched quantities on incoming central kitchen transfers.');
+    }
+  }
 
   if (numAccepted < 0 || numAccepted + numRejected > dispatchedQty) {
     throw new ApiError(400, 'INVALID_RECEIPT_QUANTITY', 'Accepted and rejected quantities exceed dispatched quantity.');
@@ -1579,34 +1693,62 @@ const approveCycleCount = asyncHandler(async (request, response) => {
   });
 });
 
-// 11. Wastage & Adjustments
+const ALLOWED_WASTAGE_REASONS = [
+  'EXPIRED',
+  'SPILLED',
+  'SPILLAGE',
+  'BURNT_BATCH',
+  'QUALITY_REJECT',
+  'QUALITY_REJECTION',
+  'DAMAGED_PACKAGING',
+  'PREPARATION_LOSS',
+  'CONTAMINATION',
+  'STORAGE_FAILURE',
+  'OTHER',
+];
+
+// 11. Wastage & Adjustments (F041 / F173-F177)
 const recordWastage = asyncHandler(async (request, response) => {
   const { organisationId, userId } = request.auth;
-  const { cafeId, itemId, lotId, quantity, reasonCode, notes, evidenceFileId } = request.body;
+  const { cafeId, itemId, menuItemId, lotId, quantity, reasonCode, notes, evidenceFileId } = request.body;
 
-  if (!cafeId || !itemId || !quantity || !reasonCode) {
-    throw new ApiError(400, 'VALIDATION_FAILED', 'Café, item, quantity, and reason code are required.');
+  if (!cafeId || (!itemId && !menuItemId) || !quantity || !reasonCode) {
+    throw new ApiError(400, 'VALIDATION_FAILED', 'Café, item/menuItem, quantity, and reason code are required.');
+  }
+
+  const normReason = String(reasonCode).trim().toUpperCase();
+  if (!ALLOWED_WASTAGE_REASONS.includes(normReason)) {
+    throw new ApiError(400, 'INVALID_REASON_CODE', `Invalid waste reason code: ${reasonCode}. Allowed: ${ALLOWED_WASTAGE_REASONS.join(', ')}`);
   }
 
   assertCafeAccess(request, cafeId);
 
   const cleanCafe = cafeId.trim().toUpperCase();
-  const cleanItem = itemId.trim().toUpperCase();
+  const cleanItem = (itemId || menuItemId).trim().toUpperCase();
   const qty = Number(quantity);
-
-  const config = await CafeInventoryConfig.findOne({ organisationId, cafeId: cleanCafe, itemId: cleanItem });
-  if (!config || config.currentQuantityBase < qty) {
-    throw new ApiError(400, 'INSUFFICIENT_STOCK', `Cannot waste ${qty} units. Current stock is ${config?.currentQuantityBase || 0}.`);
+  if (qty <= 0) {
+    throw new ApiError(400, 'INVALID_QUANTITY', 'Quantity to waste must be greater than zero.');
   }
 
-  const before = config.currentQuantityBase;
-  const after = before - qty;
-  config.currentQuantityBase = after;
-  config.availableQuantityBase = Math.max(0, config.availableQuantityBase - qty);
-  await config.save();
+  await assertWholeUnitQuantity(organisationId, cleanItem, qty);
+
+  const config = await CafeInventoryConfig.findOne({ organisationId, cafeId: cleanCafe, itemId: cleanItem });
+  if (config && config.currentQuantityBase < qty) {
+    throw new ApiError(400, 'INSUFFICIENT_STOCK', `Cannot waste ${qty} units. Current stock is ${config.currentQuantityBase}.`);
+  }
+
+  let before = 0;
+  let after = 0;
+  if (config) {
+    before = config.currentQuantityBase;
+    after = before - qty;
+    config.currentQuantityBase = after;
+    config.availableQuantityBase = Math.max(0, (config.availableQuantityBase || 0) - qty);
+    await config.save();
+  }
 
   const itm = await GlobalInventoryItem.findOne({ organisationId, itemId: cleanItem });
-  const estimatedValuePaisa = Math.round(qty * (itm?.unitCostPaisa || 0));
+  const estimatedValuePaisa = Math.round(qty * (itm?.unitCostPaisa || itm?.standardCostPaisa || 0));
 
   const count = await WastageRecord.countDocuments({ organisationId });
   const wastageId = `WST-2026-${String(count + 1).padStart(4, '0')}`;
@@ -1618,7 +1760,7 @@ const recordWastage = asyncHandler(async (request, response) => {
     itemId: cleanItem,
     lotId: lotId || null,
     quantityBase: qty,
-    reasonCode,
+    reasonCode: normReason,
     estimatedValuePaisa,
     notes: notes || '',
     recorderUserId: userId,
@@ -1634,13 +1776,91 @@ const recordWastage = asyncHandler(async (request, response) => {
     quantityBase: -qty,
     balanceBeforeBase: before,
     balanceAfterBase: after,
-    reason: `Wastage logged (${reasonCode}): ${notes || ''}`,
+    reason: `Wastage logged (${normReason}): ${notes || ''}`,
     referenceType: 'WASTAGE',
     referenceId: wastageId,
     performedByUserId: userId,
   });
 
-  return response.status(201).json({ message: 'Wastage record logged and stock deducted.', wastage });
+  return response.status(201).json({
+    message: 'Wastage record logged and stock deducted.',
+    wastage,
+    costImpactPaisa: estimatedValuePaisa,
+  });
+});
+
+// 11b. Semi-Finished Batch Production (F040 / F156-F159)
+const recordBatchProduction = asyncHandler(async (request, response) => {
+  const { organisationId, userId } = request.auth;
+  const {
+    cafeId,
+    recipeId,
+    outputItemId,
+    batchQuantity,
+    actualYield,
+    yieldUom,
+    notes,
+    batchNumber,
+    expiryDate,
+  } = request.body;
+
+  if (cafeId) assertCafeAccess(request, cafeId);
+
+  const result = await BatchProductionService.recordBatchProduction({
+    organisationId,
+    cafeId,
+    recipeId,
+    outputItemId,
+    batchQuantity,
+    actualYield,
+    yieldUom,
+    notes,
+    producedByUserId: userId,
+    batchNumber,
+    expiryDate,
+  });
+
+  return response.status(201).json({
+    message: 'Batch production logged successfully.',
+    ...result,
+  });
+});
+
+const listBatchProductions = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const { cafeId, recipeId, limit } = request.query;
+
+  if (cafeId) assertCafeAccess(request, cafeId);
+
+  const batches = await BatchProductionService.listBatchProductions({
+    organisationId,
+    cafeId,
+    recipeId,
+    limit,
+  });
+
+  return response.status(200).json({ batches });
+});
+
+const getBatchProduction = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const { batchNumber } = request.params;
+
+  const batch = await BatchProductionService.getBatchProductionByNumber({
+    organisationId,
+    batchNumber,
+  });
+
+  return response.status(200).json({ batch });
+});
+
+const getRecipeCostAnalysis = asyncHandler(async (request, response) => {
+  const { organisationId } = request.auth;
+  const { recipeId } = request.params;
+
+  const costing = await BomDepletionService.calculateRecipeCost(recipeId, organisationId);
+
+  return response.status(200).json({ costing });
 });
 
 // 12. Inventory Integrity Engine (16-point automated audit)
@@ -1941,11 +2161,210 @@ const getInventoryValuationReport = asyncHandler(async (request, response) => {
   });
 });
 
+// A111, F199, F200: Consolidated Store Dispatch Route Sheets / Central Kitchen Manifest
+const generateConsolidatedRouteManifest = asyncHandler(async (request, response) => {
+  const { organisationId, userId } = request.auth;
+  const { transferIds, routeName = 'Main Outlets Route', vehicleId = 'VAN-01', driverName = 'Express Courier' } = request.body;
+
+  const query = { organisationId };
+  if (Array.isArray(transferIds) && transferIds.length > 0) {
+    query.transferId = { $in: transferIds };
+  } else {
+    query.status = { $in: ['REQUESTED', 'APPROVED', 'IN_TRANSIT'] };
+  }
+
+  const transfers = await StockTransfer.find(query).lean();
+  if (transfers.length === 0) {
+    throw new ApiError(404, 'NO_TRANSFERS_FOUND', 'No eligible stock transfers found for the route manifest.');
+  }
+
+  // Group by destination café (stops)
+  const stopMap = new Map();
+  const cargoSummaryMap = new Map();
+
+  for (const t of transfers) {
+    if (!stopMap.has(t.destCafeId)) {
+      stopMap.set(t.destCafeId, {
+        cafeId: t.destCafeId,
+        transferIds: [],
+        items: [],
+      });
+    }
+    const stop = stopMap.get(t.destCafeId);
+    stop.transferIds.push(t.transferId);
+    stop.items.push({
+      transferId: t.transferId,
+      itemId: t.itemId,
+      requestedQty: t.requestedQty,
+      dispatchedQty: t.dispatchedQty || t.requestedQty,
+    });
+
+    const currentTotal = cargoSummaryMap.get(t.itemId) || 0;
+    cargoSummaryMap.set(t.itemId, currentTotal + (t.dispatchedQty || t.requestedQty));
+  }
+
+  const stops = Array.from(stopMap.values());
+  const cargoSummary = Array.from(cargoSummaryMap.entries()).map(([itemId, totalQty]) => ({
+    itemId,
+    totalQty,
+  }));
+
+  const manifestId = `MNF-${Date.now().toString().slice(-6)}`;
+  const manifest = {
+    manifestId,
+    routeName,
+    vehicleId,
+    driverName,
+    generatedBy: userId,
+    generatedAt: new Date(),
+    stopsCount: stops.length,
+    totalTransfers: transfers.length,
+    stops,
+    cargoSummary,
+  };
+
+  return response.status(200).json({
+    message: 'Consolidated store dispatch route manifest generated.',
+    manifest,
+  });
+});
+
+// F188–F191: Irreversible Historical Stock Freeze Lock
+const setHistoricalFreezeDate = asyncHandler(async (request, response) => {
+  const { cafeId, freezeDate } = request.body || {};
+  const targetCafeId = (cafeId || request.auth?.primaryCafeId || '').trim().toUpperCase();
+  if (!targetCafeId) {
+    throw new ApiError(400, 'CAFE_ID_REQUIRED', 'cafeId is required.');
+  }
+  if (!freezeDate) {
+    throw new ApiError(400, 'FREEZE_DATE_REQUIRED', 'freezeDate is required.');
+  }
+  const newDate = new Date(freezeDate);
+  const cafe = await Cafe.findOne({ cafeId: targetCafeId });
+  if (!cafe) {
+    throw new ApiError(404, 'CAFE_NOT_FOUND', `Cafe ${targetCafeId} not found.`);
+  }
+  if (cafe.historicalStockFreezeDate && newDate < new Date(cafe.historicalStockFreezeDate)) {
+    throw new ApiError(
+      400,
+      'FREEZE_DATE_IRREVERSIBLE',
+      'Historical stock freeze date cannot be moved backward.'
+    );
+  }
+  cafe.historicalStockFreezeDate = newDate;
+  await cafe.save();
+  return response.status(200).json({
+    success: true,
+    cafeId: targetCafeId,
+    historicalStockFreezeDate: cafe.historicalStockFreezeDate,
+  });
+});
+
+// F122: Trigger Manual or Stock-Based Auto-86 Evaluation
+const evaluateRawMaterialAuto86Handler = asyncHandler(async (request, response) => {
+  const { itemId, cafeId, currentQuantity } = request.body || {};
+  const targetCafeId = (cafeId || request.auth?.primaryCafeId || '').trim().toUpperCase();
+  const cleanOrg = request.auth?.organisationId || 'ZAMORIN';
+  const result = await evaluateRawMaterialAuto86({
+    organisationId: cleanOrg,
+    cafeId: targetCafeId,
+    itemId,
+    currentQuantity: Number(currentQuantity ?? 0),
+  });
+  return response.status(200).json({ success: true, data: result });
+});
+
+// F156–F159: Actual Production Yield & Cost Adjustment
+const recordActualProductionYield = asyncHandler(async (request, response) => {
+  const { batchNumber, actualYieldWeighed, notes } = request.body || {};
+  if (!batchNumber) {
+    throw new ApiError(400, 'BATCH_NUMBER_REQUIRED', 'batchNumber is required.');
+  }
+  const weighedYield = Number(actualYieldWeighed);
+  if (!Number.isFinite(weighedYield) || weighedYield <= 0) {
+    throw new ApiError(400, 'INVALID_ACTUAL_YIELD', 'actualYieldWeighed must be a positive number.');
+  }
+
+  const { BatchProductionLog } = require('../models/BatchProductionLog');
+  const batchLog = await BatchProductionLog.findOne({ batchNumber: batchNumber.trim().toUpperCase() });
+  if (!batchLog) {
+    throw new ApiError(404, 'BATCH_NOT_FOUND', `Production batch ${batchNumber} not found.`);
+  }
+
+  const oldYield = batchLog.actualYield;
+  batchLog.actualYield = weighedYield;
+  batchLog.yieldEfficiencyPercent = Math.round((weighedYield / batchLog.plannedYield) * 10000) / 100;
+  batchLog.shrinkagePercent = Math.max(0, Math.round(((batchLog.plannedYield - weighedYield) / batchLog.plannedYield) * 10000) / 100);
+
+  // Recompute unit cost in integer paise
+  const newUnitCostPaisa = Math.round(batchLog.totalMaterialCostPaisa / weighedYield);
+  batchLog.unitCostPaisa = newUnitCostPaisa;
+  if (notes) batchLog.notes = `${batchLog.notes || ''} [Yield Weighed: ${weighedYield} vs ${oldYield}]. ${notes}`.trim();
+
+  await batchLog.save();
+
+  // Update lot unit cost if lot exists
+  if (batchLog.outputLotId) {
+    await InventoryLot.updateOne(
+      { lotId: batchLog.outputLotId },
+      { $set: { unitCostPaisa: newUnitCostPaisa } }
+    );
+  }
+
+  return response.status(200).json({
+    success: true,
+    batchNumber: batchLog.batchNumber,
+    plannedYield: batchLog.plannedYield,
+    actualYieldWeighed: weighedYield,
+    yieldEfficiencyPercent: batchLog.yieldEfficiencyPercent,
+    shrinkagePercent: batchLog.shrinkagePercent,
+    totalMaterialCostPaisa: batchLog.totalMaterialCostPaisa,
+    adjustedUnitCostPaisa: newUnitCostPaisa,
+  });
+});
+
+// F114–F116: Deferred Advance Stock Consumption
+const consumeAdvanceStockHandler = asyncHandler(async (request, response) => {
+  const depositId = request.params.depositId || request.body.depositId;
+  if (!depositId) {
+    throw new ApiError(400, 'DEPOSIT_ID_REQUIRED', 'depositId is required.');
+  }
+  const cleanOrg = request.auth?.organisationId || 'ZAMORIN';
+  const { AdvanceDeposit } = require('../models/AdvanceDeposit');
+  const deposit = await AdvanceDeposit.findOne({ depositId: depositId.trim().toUpperCase(), organisationId: cleanOrg });
+
+  if (!deposit) {
+    throw new ApiError(404, 'ADVANCE_DEPOSIT_NOT_FOUND', `Advance deposit ${depositId} not found.`);
+  }
+
+  if (deposit.stockConsumptionStatus === 'CONSUMED') {
+    throw new ApiError(400, 'STOCK_ALREADY_CONSUMED', 'Stock for this advance order has already been consumed.');
+  }
+
+  const items = deposit.plannedItems || [];
+  if (items.length === 0) {
+    throw new ApiError(400, 'NO_PLANNED_ITEMS', 'No planned menu items defined on this advance deposit.');
+  }
+
+  // Mark consumed
+  deposit.stockConsumptionStatus = 'CONSUMED';
+  deposit.stockConsumedAt = new Date();
+  deposit.stockConsumedByUserId = request.auth?.userId || 'OPERATOR';
+  await deposit.save();
+
+  return response.status(200).json({
+    success: true,
+    depositId: deposit.depositId,
+    stockConsumptionStatus: deposit.stockConsumptionStatus,
+    stockConsumedAt: deposit.stockConsumedAt,
+    consumedItemCount: items.length,
+  });
+});
+
 module.exports = {
   getInventoryOverview,
   listGlobalItems,
   getItem,
-  getItem360,
   createGlobalItem,
   updateGlobalItem,
   archiveItem,
@@ -1959,6 +2378,7 @@ module.exports = {
   createTransfer,
   dispatchTransfer,
   receiveTransfer,
+  generateConsolidatedRouteManifest,
   listLots,
   getExpirySchedule,
   recordIncomingInspection,
@@ -1980,13 +2400,22 @@ module.exports = {
   submitCycleCount,
   approveCycleCount,
   recordWastage,
+  recordBatchProduction,
+  listBatchProductions,
+  getBatchProduction,
+  getRecipeCostAnalysis,
   getInventoryIntegrity,
   listReservations,
   createReservation,
   releaseReservation,
   recordInternalLocationTransfer,
+  getItem360,
   getConsumptionRecipeVariance,
   getInventoryValuationReport,
   getDataQualityReport,
   evaluateItemQuality,
+  setHistoricalFreezeDate,
+  evaluateRawMaterialAuto86Handler,
+  recordActualProductionYield,
+  consumeAdvanceStockHandler,
 };

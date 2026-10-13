@@ -3974,6 +3974,69 @@ const getTrustCentreOverview = asyncHandler(async (request, response) => {
   });
 });
 
+/**
+ * A017 / F213: Staff Performance by Assignee Report
+ * Aggregates dine-in and counter order performance grouped by assigned waiter/staff.
+ */
+const getStaffPerformanceByAssignee = asyncHandler(async (request, response) => {
+  const { Bill } = require('../models/Bill');
+  const orgId = request.auth.organisationId;
+  const cafeId = request.query.cafeId || request.auth.cafeId;
+  const dateFrom = request.query.dateFrom;
+  const dateTo = request.query.dateTo;
+
+  const match = {
+    organisationId: orgId,
+    status: { $in: ['COMPLETED', 'OPEN'] },
+    assignedStaffId: { $ne: null, $exists: true },
+  };
+  if (cafeId && cafeId !== '*') {
+    match.cafeId = cafeId.toUpperCase();
+  }
+  if (dateFrom || dateTo) {
+    match.businessDate = {};
+    if (dateFrom) match.businessDate.$gte = dateFrom;
+    if (dateTo) match.businessDate.$lte = dateTo;
+  }
+
+  const performance = await Bill.aggregate([
+    { $match: match },
+    {
+      $group: {
+        _id: '$assignedStaffId',
+        staffName: { $first: '$assignedStaffName' },
+        totalOrders: { $sum: 1 },
+        totalSubtotalPaisa: { $sum: '$subtotalPaisa' },
+        totalSalesPaisa: { $sum: '$totalPaisa' },
+        totalDiscountPaisa: { $sum: '$discountPaisa' },
+        totalCovers: { $sum: { $ifNull: ['$guestCovers', 1] } },
+      },
+    },
+    {
+      $project: {
+        staffId: '$_id',
+        staffName: { $ifNull: ['$staffName', 'Unknown Staff'] },
+        totalOrders: 1,
+        totalSalesPaisa: 1,
+        totalDiscountPaisa: 1,
+        totalCovers: 1,
+        averageTicketPaisa: {
+          $cond: [{ $gt: ['$totalOrders', 0] }, { $round: [{ $divide: ['$totalSalesPaisa', '$totalOrders'] }, 0] }, 0],
+        },
+      },
+    },
+    { $sort: { totalSalesPaisa: -1 } },
+  ]);
+
+  return response.status(200).json({
+    success: true,
+    data: {
+      staffPerformance: performance,
+      generatedAt: new Date().toISOString(),
+    },
+  });
+});
+
 module.exports = {
   getAnalyticsOverview,
   getReportCatalogue,
@@ -4015,4 +4078,5 @@ module.exports = {
   runScenarioSimulation,
   runSensitivityAnalysis,
   getTrustCentreOverview,
+  getStaffPerformanceByAssignee,
 };

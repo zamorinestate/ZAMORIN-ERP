@@ -84,6 +84,14 @@ import { renderOwnerGovernanceDelegation, initOwnerGovernanceDelegationEvents, s
 import { renderForecastsInsights, wireForecastsInsights, setForecastsActiveTab } from "./pages/forecastsInsights.js";
 import { renderPortfolioGovernance, initPortfolioGovernance, setPortfolioGovernanceTab } from "./pages/portfolioGovernance.js";
 import { renderOnboardingMigration, initOnboardingMigration, setOnboardingMigrationTab } from "./pages/onboardingMigration.js";
+import { renderGuestQrOrdering, wireGuestQrOrdering } from "./pages/guestQrOrdering.js";
+import { renderTakeawayTokenDisplay, wireTakeawayTokenDisplay } from "./pages/takeawayTokenDisplay.js";
+import { renderWaiterCaptainApp, wireWaiterCaptainApp } from "./pages/waiterCaptainApp.js";
+import { renderEmergencyTerminal, wireEmergencyTerminal } from "./pages/emergencyTerminal.js";
+import { renderRetailCpg, wireRetailCpg } from "./pages/retailCpgInvoice.js";
+import { renderCallCenter, wireCallCenter } from "./pages/centralCallCenter.js";
+import { renderMenuBoard, wireMenuBoard } from "./pages/digitalMenuBoard.js";
+import { renderDualScreen, wireDualScreen } from "./pages/customerDualScreen.js";
 
 // ROLE_LABELS: display-safe generic labels used only for topbar scope chip
 // until /auth/me bootstrap provides the real user's display name.
@@ -387,6 +395,53 @@ async function renderPage() {
       setChannelsActiveTab?.(subroute || (route === "reservations" ? "reservations" : (route === "tables" ? "tables" : "tables")));
       content.innerHTML = renderChannelsFrontService(subroute);
       wireChannelsFrontService();
+      break;
+
+    case "qr":
+    case "qr-order":
+      content.innerHTML = renderGuestQrOrdering(subroute);
+      await wireGuestQrOrdering(content, subroute);
+      break;
+
+    case "token-display":
+    case "pickup-display":
+      content.innerHTML = renderTakeawayTokenDisplay(subroute);
+      wireTakeawayTokenDisplay(content, subroute);
+      break;
+
+    case "captain":
+    case "waiter":
+      content.innerHTML = renderWaiterCaptainApp(subroute);
+      await wireWaiterCaptainApp(content, subroute);
+      break;
+
+    case "emergency-terminal":
+      content.innerHTML = renderEmergencyTerminal(subroute);
+      wireEmergencyTerminal(content, subroute);
+      break;
+
+    case "retail-cpg":
+    case "cpg-invoice":
+      content.innerHTML = renderRetailCpg(subroute);
+      wireRetailCpg(content, subroute);
+      break;
+
+    case "call-center":
+    case "phone-orders":
+      content.innerHTML = renderCallCenter(subroute);
+      wireCallCenter(content, subroute);
+      break;
+
+    case "menu-board":
+    case "digital-signage":
+      content.innerHTML = renderMenuBoard(subroute);
+      wireMenuBoard(content, subroute);
+      break;
+
+    case "dual-screen":
+    case "customer-screen":
+      content.innerHTML = renderDualScreen(subroute);
+      wireDualScreen(content, subroute);
       break;
 
     case "bills":
