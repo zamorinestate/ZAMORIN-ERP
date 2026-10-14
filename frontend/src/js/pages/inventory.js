@@ -319,8 +319,8 @@ function renderOverviewTab(wrap) {
 async function renderStockLevelsTab(wrap) {
   await loadCafesList();
   const isMaster = state.user?.role === "MASTER";
-  const defaultCafe = cachedCafes[0]?.cafeId || state.user?.primaryCafeId || "";
-  const cafeId = selectedCafeFilter === "ALL" ? defaultCafe : selectedCafeFilter;
+  const defaultCafe = cachedCafes[0]?.cafeId || state.user?.primaryCafeId || "ZC-0001";
+  const cafeId = (selectedCafeFilter === "ALL" || !selectedCafeFilter) ? defaultCafe : selectedCafeFilter;
   const kpis = liveOverview?.kpis || {};
 
   wrap.innerHTML = `
@@ -429,11 +429,12 @@ async function loadStockLevelsData(wrap, cafeId) {
   const heatmapWrap = wrap.querySelector("#stock-heatmap-container");
   if (!tableWrap) return;
 
+  const targetCafeId = cafeId || cachedCafes[0]?.cafeId || state.user?.primaryCafeId || "ZC-0001";
   let stockList = [];
   let isOfflineFallback = false;
 
   try {
-    const res = await apiGet(`/inventory/cafes/${cafeId}/stock`);
+    const res = await apiGet(`/inventory/cafes/${targetCafeId}/stock`);
     if (res?.stock && Array.isArray(res.stock) && res.stock.length > 0) {
       stockList = res.stock;
     } else {

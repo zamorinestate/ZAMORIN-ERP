@@ -63,13 +63,13 @@ export function renderPortfolioGovernance() {
           </select>
 
           <button id="p18-refresh-btn" class="btn btn-secondary" style="display:inline-flex;align-items:center;gap:6px;background:var(--bg-surface,#1e293b);border:1px solid var(--border-color,#334155);color:var(--text-primary,#fff);border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;">
-            ${icon('refresh', 'width:14px;height:14px;')}
+            ${icon('refresh', 14)}
             <span>Refresh Overview</span>
           </button>
 
           ${!isOwner ? `
             <button id="p18-propose-decision-btn" class="btn btn-primary" style="display:inline-flex;align-items:center;gap:6px;background:#3b82f6;border:none;color:#fff;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;">
-              ${icon('plus', 'width:14px;height:14px;')}
+              ${icon('plus', 14)}
               <span>Propose Decision</span>
             </button>
           ` : `

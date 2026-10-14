@@ -5,6 +5,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const zlib = require('node:zlib');
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const cookieParser = require('cookie-parser');
 
@@ -243,6 +244,56 @@ async function initializeDistributedInfrastructure(environment) {
   return { mode: 'memory', ready: true, factory: redisClientFactory };
 }
 
+function createZeroDepCompression() {
+  return function zeroDepCompression(req, res, next) {
+    const acceptEncoding = req.headers['accept-encoding'] || '';
+    if (!acceptEncoding.includes('gzip') && !acceptEncoding.includes('br')) {
+      return next();
+    }
+
+    const originalSend = res.send.bind(res);
+
+    res.send = function (body) {
+      if (res.headersSent || !body) return originalSend(body);
+
+      const isBuffer = Buffer.isBuffer(body);
+      const isString = typeof body === 'string';
+      if (!isBuffer && !isString) return originalSend(body);
+
+      const buf = isBuffer ? body : Buffer.from(body);
+      if (buf.length < 1024) return originalSend(body);
+
+      const contentType = String(res.getHeader('Content-Type') || '');
+      if (contentType.includes('event-stream') || contentType.includes('image/') || contentType.includes('pdf')) {
+        return originalSend(body);
+      }
+
+      res.setHeader('Vary', 'Accept-Encoding');
+      if (acceptEncoding.includes('br')) {
+        try {
+          const compressed = zlib.brotliCompressSync(buf, {
+            params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 4 },
+          });
+          res.setHeader('Content-Encoding', 'br');
+          res.setHeader('Content-Length', compressed.length);
+          return res.end(compressed);
+        } catch (_) {}
+      } else if (acceptEncoding.includes('gzip')) {
+        try {
+          const compressed = zlib.gzipSync(buf, { level: 6 });
+          res.setHeader('Content-Encoding', 'gzip');
+          res.setHeader('Content-Length', compressed.length);
+          return res.end(compressed);
+        } catch (_) {}
+      }
+
+      return originalSend(body);
+    };
+
+    next();
+  };
+}
+
 function createApp(environment) {
   const app = express();
 
@@ -253,6 +304,7 @@ function createApp(environment) {
   app.set('trust proxy', trustedProxies);
 
   app.use(requestContext);
+  app.use(createZeroDepCompression());
   app.use(cookieParser());
   app.use(
     helmet({

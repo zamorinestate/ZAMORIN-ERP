@@ -138,7 +138,7 @@ const workspacePrefsSchema = new mongoose.Schema(
     },
     defaultExportFormat: {
       type: String,
-      enum: ['PDF', 'XLSX', 'CSV'],
+      enum: ['PDF', 'XLSX'],
       default: 'PDF',
     },
     sidebarDefaultState: {

@@ -157,6 +157,40 @@ const TEMPLATES = {
       </div>
     `,
   },
+  NIGHTLY_EXCEL_AUDIT_REPORT: {
+    subject: '[ZAMORIN][EXECUTIVE][AUDIT] Nightly Multi-Sheet Transaction Register - {{date}}',
+    heading: 'Nightly Financial & Audit Register',
+    bodyText: 'Nightly Excel Audit Register\nDate: {{date}}\nCafe: {{cafeId}}\nGross Sales: ₹{{grossSales}}\nNet Sales: ₹{{netSales}}\nTax Total: ₹{{taxTotal}}\nAttached: {{excelFilename}}\nOpen ERP: {{link}}',
+    bodyHtml: `
+      <p style="color: #10b981; font-weight: bold; font-size: 16px;">NIGHTLY EXCEL AUDIT REGISTER GENERATED</p>
+      <p>The daily multi-sheet audit workbook for <strong>{{date}}</strong> has been compiled and archived.</p>
+      <table style="width: 100%; border-collapse: collapse; margin: 15px 0;">
+        <tr><td style="padding: 6px; color: #888;">Cafe Location:</td><td style="padding: 6px; font-weight: bold;">{{cafeId}}</td></tr>
+        <tr><td style="padding: 6px; color: #888;">Gross Volume:</td><td style="padding: 6px; font-weight: bold; color: #10b981;">₹{{grossSales}}</td></tr>
+        <tr><td style="padding: 6px; color: #888;">Net Taxable:</td><td style="padding: 6px;">₹{{netSales}}</td></tr>
+        <tr><td style="padding: 6px; color: #888;">Split GST (CGST+SGST):</td><td style="padding: 6px;">₹{{taxTotal}}</td></tr>
+        <tr><td style="padding: 6px; color: #888;">Attached Workbook:</td><td style="padding: 6px; font-family: monospace; color: #3b82f6;">{{excelFilename}}</td></tr>
+      </table>
+      <div style="background: #0f172a; padding: 12px; border-radius: 6px; margin: 15px 0; border: 1px solid #1e293b;">
+        <span style="color: #94a3b8; font-size: 13px;">Workbook Structure: 4 Tabs — Executive Dashboard, Bill Audit Register (AutoFilter active), Line-Item Breakdown, System &amp; Security Manifest. Formatted in native OpenXML (.xlsx).</span>
+      </div>
+    `,
+  },
+  MONTHLY_GST_EXCEL_REPORT: {
+    subject: '[ZAMORIN][STATUTORY][GST] Monthly GSTR-1 & HSN Summary Register - {{period}}',
+    heading: 'Monthly Statutory Tax Register',
+    bodyText: 'Monthly GST Tax Filing Register\nPeriod: {{period}}\nCafe: {{cafeId}}\nTaxable Turnover: ₹{{taxableTurnover}}\nIGST: ₹{{igst}}\nCGST: ₹{{cgst}}\nSGST: ₹{{sgst}}\nAttached: {{excelFilename}}',
+    bodyHtml: `
+      <p style="color: #3b82f6; font-weight: bold; font-size: 16px;">MONTHLY GSTR-1 TAX REGISTER COMPILED</p>
+      <table style="width: 100%; border-collapse: collapse; margin: 15px 0;">
+        <tr><td style="padding: 6px; color: #888;">Filing Period:</td><td style="padding: 6px; font-weight: bold;">{{period}}</td></tr>
+        <tr><td style="padding: 6px; color: #888;">Taxable Turnover:</td><td style="padding: 6px; font-weight: bold;">₹{{taxableTurnover}}</td></tr>
+        <tr><td style="padding: 6px; color: #888;">CGST (2.5%):</td><td style="padding: 6px;">₹{{cgst}}</td></tr>
+        <tr><td style="padding: 6px; color: #888;">SGST (2.5%):</td><td style="padding: 6px;">₹{{sgst}}</td></tr>
+        <tr><td style="padding: 6px; color: #888;">Attached Template:</td><td style="padding: 6px; font-family: monospace;">{{excelFilename}}</td></tr>
+      </table>
+    `,
+  },
 };
 
 class TemplateEngine {

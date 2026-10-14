@@ -276,14 +276,13 @@ const exportPassbookPdf = asyncHandler(async (req, res) => {
   }
 
   if (req.query.format === 'CSV') {
-    const csv = await ZurfService.renderCsv({
-      reportTitle: account ? `Passbook Statement - ${account.accountName}` : 'Consolidated Treasury Passbook',
-      columns,
-      rows,
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: 'UNSUPPORTED_EXPORT_FORMAT',
+        message: 'CSV format is not supported for passbook exports. Canonical export formats are PDF and XLSX.',
+      },
     });
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="passbook_${csv.runId}.csv"`);
-    return res.send(csv.csv);
   }
 
   if (req.query.format === 'PDF' || req.headers.accept === 'application/pdf') {

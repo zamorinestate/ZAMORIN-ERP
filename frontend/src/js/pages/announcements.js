@@ -10,6 +10,7 @@ import { navigate } from "../router.js";
 import { icon } from "../icons.js";
 import { apiGet, apiPatch, apiPost } from "../apiClient.js";
 import { showToast } from "../components.js";
+import { debounce } from "../utils/debounce.js";
 
 let currentFilterTab = "ALL"; // 'ALL' | 'UNREAD' | 'ACTION_REQUIRED' | 'IMPORTANT' | 'ACKNOWLEDGED' | 'ARCHIVED'
 let currentCategory = "ALL";
@@ -482,14 +483,14 @@ export function wireAnnouncements(root) {
 
   // 1. Search input binding
   const searchInput = root.querySelector("#announcements-search-input");
-  let searchDebounce = null;
   if (searchInput) {
+    const handleAnnouncementSearch = debounce((query) => {
+      currentSearchQuery = query;
+      loadAnnouncements();
+    }, 250);
+
     searchInput.addEventListener("input", () => {
-      clearTimeout(searchDebounce);
-      searchDebounce = setTimeout(() => {
-        currentSearchQuery = searchInput.value.trim();
-        loadAnnouncements();
-      }, 250);
+      handleAnnouncementSearch(searchInput.value.trim());
     });
   }
 

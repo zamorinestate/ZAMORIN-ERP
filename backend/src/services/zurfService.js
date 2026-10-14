@@ -9,6 +9,7 @@
 
 const crypto = require('crypto');
 const { CompanyIdentityService } = require('./companyIdentityService');
+const { generateQrSvg } = require('../utils/qrCodeGen');
 
 /**
  * Backward-compatibility shim. Returns resolved branding via CompanyIdentityService.
@@ -61,10 +62,11 @@ class ZurfService {
    * background watermark on every page, and footer metadata.
    */
   static async renderZurfHtml({
-    reportTitle,
-    scope = 'All Cafés — Global Portfolio',
-    period = 'Current Month (Aug 2026)',
-    classification = 'INTERNAL',
+    reportTitle = 'Executive Operations & Financial Report',
+    reportCode = 'ZURF-OPS-01',
+    scope = 'Zamorin Café — Global Portfolio',
+    period = 'Current Period',
+    classification = 'CONFIDENTIAL',
     generatedBy = 'Primary Master',
     runId = null,
     kpiCards = [],
@@ -78,243 +80,425 @@ class ZurfService {
     const finalRunId = runId || this.generateRunId();
     const generatedAt = new Date().toLocaleString('en-IN', {
       timeZone: 'Asia/Kolkata',
-      dateStyle: 'medium',
-      timeStyle: 'short',
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
     });
+
+    const safeTitle = reportTitle || 'Executive Report';
+    const safeLegalName = branding.legalName || 'Zamorin Speciality Coffee & Kitchens Pvt. Ltd.';
+    const safeGstin = branding.gstin || '29AABCT1332L1ZV';
+    const safeCin = branding.cin || 'U55101KA2024PTC189201';
+    const safeAddress = branding.regAddress || '123, Koramangala 5th Block, Bengaluru, KA — 560095';
+
+    // Verification QR Code
+    const qrUrl = `https://zamorin.cafe/qr/v1/report/${encodeURIComponent(finalRunId)}`;
+    let qrSvgMarkup = '';
+    try {
+      const rawSvg = generateQrSvg(qrUrl, {
+        size: 96,
+        margin: 1,
+        includeLogo: false,
+        darkColor: '#090d16',
+        lightColor: '#ffffff'
+      });
+      qrSvgMarkup = rawSvg.replace(
+        '<svg ',
+        '<svg style="width:96px !important;height:96px !important;display:block;" '
+      );
+    } catch (e) {
+      qrSvgMarkup = '<div style="width:96px;height:96px;background:#000;"></div>';
+    }
+
+    // Guarantee Sl. No. column exists
+    const hasSl = columns.some((c) => {
+      const l = (c.label || c.key || '').toLowerCase();
+      return l.includes('sl.') || l.includes('sl no') || l.includes('serial');
+    });
+    const finalCols = hasSl ? columns : [{ key: '__slNo', label: 'Sl.', width: '45px', isNum: false }, ...columns];
+    const finalRows = rows.map((r, idx) => {
+      if (!hasSl) {
+        return { ...r, __slNo: idx + 1 };
+      }
+      return r;
+    });
+
+    const classUpper = String(classification || 'CONFIDENTIAL').toUpperCase();
+    const classBg = classUpper === 'CONFIDENTIAL' ? '#fee2e2' : (classUpper === 'RESTRICTED' ? '#fef3c7' : '#e0f2fe');
+    const classColor = classUpper === 'CONFIDENTIAL' ? '#991b1b' : (classUpper === 'RESTRICTED' ? '#92400e' : '#0369a1');
+    const classBorder = classUpper === 'CONFIDENTIAL' ? '#fca5a5' : (classUpper === 'RESTRICTED' ? '#fcd34d' : '#7dd3fc');
 
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>${reportTitle} — ${branding.brandName}</title>
+  <title>${safeTitle} — ${branding.brandName || 'Zamorin Café'}</title>
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;0,800;1,600&family=Poppins:wght@400;500;600;700&display=swap');
+    
     @page {
       size: A4 portrait;
-      margin: 15mm 15mm 20mm 15mm;
+      margin: 10mm 12mm;
       @bottom-center {
         content: "Page " counter(page) " of " counter(pages);
       }
     }
     *, *::before, *::after { box-sizing: border-box; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
       margin: 0;
       padding: 0;
-      color: #0f172a;
+      color: #090d16;
       background: #ffffff;
       font-size: 11px;
       line-height: 1.4;
       position: relative;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }
-    /* MANDATORY ZURF WATERMARK ON EVERY PAGE */
+    .zurf-report-wrapper {
+      position: relative;
+      background: #ffffff;
+      width: 100%;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 24px 28px;
+    }
+    /* AUTHENTIC ROTATED WATERMARK */
+    .zurf-watermark,
     .zurf-page-watermark {
       position: fixed;
       top: 50%;
       left: 50%;
-      transform: translate(-50%, -50%);
-      width: 420px;
-      height: 420px;
-      opacity: 0.055;
-      z-index: 0;
+      transform: translate(-50%, -50%) rotate(-30deg);
+      font-size: 62px;
+      font-weight: 900;
+      letter-spacing: 14px;
+      color: rgba(15, 23, 42, 0.035);
       pointer-events: none;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .zurf-page-watermark svg {
-      width: 100%;
-      height: 100%;
+      user-select: none;
+      white-space: nowrap;
+      z-index: 0;
+      text-transform: uppercase;
+      font-family: 'Playfair Display', Georgia, serif;
     }
     .zurf-content {
       position: relative;
       z-index: 1;
     }
-    /* TOP-CENTRED MANDATORY CORPORATE HEADER */
+    /* OFFICIAL HEADER LOCKUP */
     .zurf-header {
-      text-align: center;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
       border-bottom: 2px solid #0f172a;
-      padding-bottom: 12px;
-      margin-bottom: 16px;
+      padding-bottom: 18px;
+      margin-bottom: 20px;
+    }
+    .zurf-brand-box {
+      max-width: 55%;
     }
     .zurf-logo-wrap {
       display: flex;
-      justify-content: center;
-      margin-bottom: 6px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .zurf-logo-wrap svg {
+      height: 68px !important;
+      width: auto !important;
+      max-width: 295px !important;
+      display: block;
     }
     .zurf-legal-name {
-      font-size: 14px;
+      font-size: 12.5px;
       font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      color: #0f172a;
+      color: #090d16;
+      letter-spacing: 0.02em;
+    }
+    .zurf-address-bar {
+      font-size: 10.5px;
+      color: #475569;
+      margin-top: 2px;
+      line-height: 1.35;
     }
     .zurf-gstin-bar {
       font-size: 10px;
-      color: #475569;
+      font-weight: 700;
+      color: #1e293b;
       margin-top: 2px;
       font-family: ui-monospace, monospace;
     }
-    .zurf-scope-bar {
-      display: inline-block;
-      margin-top: 6px;
-      padding: 2px 10px;
-      background: #f1f5f9;
-      border-radius: 12px;
-      font-size: 10.5px;
-      font-weight: 700;
-      color: #334155;
+    /* EXECUTIVE CONTROL BLOCK */
+    .zurf-control-box {
+      text-align: right;
+      min-width: 38%;
     }
-    .zurf-report-title {
-      font-size: 18px;
+    .zurf-pills-row {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+    .zurf-pill-class {
+      background: ${classBg};
+      color: ${classColor};
+      border: 1px solid ${classBorder};
+      padding: 2px 9px;
+      border-radius: 16px;
+      font-size: 9.5px;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .zurf-run-ref {
+      font-size: 11px;
+      font-family: ui-monospace, monospace;
       font-weight: 800;
       color: #0f172a;
-      margin-top: 10px;
-      letter-spacing: -0.3px;
     }
-    .zurf-period-bar {
-      font-size: 11px;
-      font-weight: 600;
-      color: #64748b;
+    .zurf-run-ref span {
+      color: #0052cc;
+    }
+    .zurf-meta-line {
+      font-size: 10.5px;
+      color: #475569;
       margin-top: 2px;
     }
-    /* METADATA STRIP */
-    .zurf-meta-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 8px;
+    /* TITLE BAR */
+    .zurf-title-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      margin-bottom: 20px;
+    }
+    .zurf-code-tag {
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #0052cc;
+      margin-bottom: 3px;
+    }
+    .zurf-report-title {
+      font-family: 'Playfair Display', Georgia, serif;
+      font-size: 22px;
+      font-weight: 800;
+      color: #090d16;
+      margin: 0;
+      line-height: 1.2;
+      letter-spacing: -0.02em;
+    }
+    .zurf-record-chip {
+      font-size: 11px;
+      font-weight: 700;
+      color: #475569;
       background: #f8fafc;
       border: 1px solid #e2e8f0;
+      padding: 5px 12px;
       border-radius: 6px;
-      padding: 8px 12px;
-      margin-bottom: 14px;
-      font-size: 10px;
     }
-    .zurf-meta-item strong { color: #0f172a; }
-    .zurf-meta-item span { color: #64748b; }
     /* KPI CARDS */
     .zurf-kpi-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-      gap: 8px;
-      margin-bottom: 16px;
+      gap: 10px;
+      margin-bottom: 22px;
     }
     .zurf-kpi-card {
-      border: 1px solid #e2e8f0;
       background: #f8fafc;
-      padding: 8px 10px;
-      border-radius: 4px;
+      border: 1.5px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 10px 12px;
     }
-    .zurf-kpi-title { font-size: 9.5px; font-weight: 700; color: #64748b; text-transform: uppercase; }
-    .zurf-kpi-value { font-size: 15px; font-weight: 800; color: #0f172a; margin-top: 2px; }
-    /* DATA TABLE */
+    .zurf-kpi-title {
+      font-size: 9.5px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #475569;
+      margin-bottom: 3px;
+    }
+    .zurf-kpi-value {
+      font-size: 17px;
+      font-weight: 900;
+      color: #090d16;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      letter-spacing: -0.02em;
+    }
+    /* DATA MATRIX TABLE */
     table.zurf-table {
       width: 100%;
       border-collapse: collapse;
-      margin-bottom: 16px;
-      font-size: 10.5px;
-    }
-    table.zurf-table th, table.zurf-table td {
+      font-size: 11px;
       border: 1px solid #cbd5e1;
-      padding: 6px 8px;
-      text-align: left;
+      border-radius: 6px;
+      overflow: hidden;
+      margin-bottom: 24px;
     }
     table.zurf-table th {
-      background: #f1f5f9;
-      font-weight: 700;
+      background: #0f172a;
+      color: #ffffff;
+      padding: 10px 12px;
+      font-size: 9.5px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      border-right: 1px solid #1e293b;
+    }
+    table.zurf-table td {
+      padding: 8px 12px;
+      border-bottom: 1px solid #e2e8f0;
+      border-right: 1px solid #f1f5f9;
       color: #1e293b;
     }
     table.zurf-table tr:nth-child(even) td {
-      background: #fafafa;
+      background: #f8fafc;
     }
     table.zurf-table td.num {
       text-align: right;
       font-family: ui-monospace, monospace;
+      font-weight: 600;
     }
-    /* MANDATORY FOOTER */
+    /* FOOTER */
     .zurf-footer {
-      border-top: 1px solid #cbd5e1;
-      padding-top: 8px;
-      margin-top: 20px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      font-size: 9.5px;
-      color: #64748b;
+      padding-top: 18px;
+      border-top: 1.5px solid #e2e8f0;
     }
-    .zurf-classification-badge {
-      display: inline-block;
-      padding: 1px 6px;
-      background: #e2e8f0;
-      border-radius: 3px;
-      font-weight: 700;
-      color: #0f172a;
+    .zurf-qr-block {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .zurf-qr-card {
+      display: inline-flex;
+      padding: 4px;
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+    }
+    .zurf-disclaimer {
+      text-align: right;
+      max-width: 48%;
+      font-size: 9px;
+      color: #475569;
+      line-height: 1.4;
     }
     @media print {
       body { margin: 0; }
+      .zurf-report-wrapper { padding: 0 !important; max-width: 100% !important; }
       .no-print { display: none !important; }
     }
   </style>
 </head>
 <body>
-  <!-- MANDATORY BACKGROUND LOGO WATERMARK -->
-  <div class="zurf-page-watermark">
-    ${branding.logoSvg}
-  </div>
+  <div class="zurf-watermark zurf-page-watermark">ZAMORIN CAFÉ · CERTIFIED REPORT</div>
 
-  <div class="zurf-content">
-    <!-- TOP-CENTRED MANDATORY HEADER -->
-    <div class="zurf-header">
-      <div class="zurf-logo-wrap">${branding.logoSvg}</div>
-      <div class="zurf-legal-name">${branding.legalName}</div>
-      <div class="zurf-gstin-bar">GSTIN: ${branding.gstin} · CIN: ${branding.cin}</div>
-      <div class="zurf-scope-bar">${scope}</div>
-      <div class="zurf-report-title">${reportTitle}</div>
-      <div class="zurf-period-bar">Reporting Window: ${period}</div>
-    </div>
+  <div class="zurf-report-wrapper">
+    <div class="zurf-content">
+      
+      <!-- TOP HEADER -->
+      <div class="zurf-header">
+        <div class="zurf-brand-box">
+          <div class="zurf-logo-wrap">${branding.logoSvg || ''}</div>
+          <div class="zurf-legal-name">${safeLegalName}</div>
+          <div class="zurf-address-bar">${safeAddress}</div>
+          <div class="zurf-gstin-bar">GSTIN: <span style="color:#090d16;">${safeGstin}</span> · CIN: ${safeCin}</div>
+        </div>
 
-    <!-- METADATA STRIP -->
-    <div class="zurf-meta-grid">
-      <div class="zurf-meta-item"><span>Run ID:</span> <strong>${finalRunId}</strong></div>
-      <div class="zurf-meta-item"><span>Generated:</span> <strong>${generatedAt}</strong></div>
-      <div class="zurf-meta-item"><span>Actor:</span> <strong>${generatedBy}</strong></div>
-      <div class="zurf-meta-item"><span>Classification:</span> <span class="zurf-classification-badge">${classification}</span></div>
-    </div>
-
-    <!-- KPI CARDS (IF PROVIDED) -->
-    ${kpiCards.length > 0 ? `
-      <div class="zurf-kpi-grid">
-        ${kpiCards.map((k) => `
-          <div class="zurf-kpi-card">
-            <div class="zurf-kpi-title">${k.label}</div>
-            <div class="zurf-kpi-value">${k.value}</div>
+        <div class="zurf-control-box">
+          <div class="zurf-pills-row">
+            <span class="zurf-pill-class">${classUpper}</span>
           </div>
-        `).join('')}
+          <div class="zurf-run-ref">REF: <span>${finalRunId}</span></div>
+          <div class="zurf-meta-line"><strong>Period:</strong> <span style="color:#090d16;font-weight:700;">${period}</span></div>
+          <div class="zurf-meta-line"><strong>Generated:</strong> ${generatedAt}</div>
+          <div class="zurf-meta-line"><strong>Scope:</strong> ${scope}</div>
+        </div>
       </div>
-    ` : ''}
 
-    <!-- DETAIL TABLE -->
-    <table class="zurf-table">
-      <thead>
-        <tr>
-          ${columns.map((c) => `<th style="${c.isNum ? 'text-align:right;' : ''}">${c.label}</th>`).join('')}
-        </tr>
-      </thead>
-      <tbody>
-        ${rows.map((r) => `
+      <!-- TITLE BAR -->
+      <div class="zurf-title-bar">
+        <div>
+          <div class="zurf-code-tag">OFFICIAL CORPORATE REPORT · ${reportCode}</div>
+          <h1 class="zurf-report-title">${safeTitle}</h1>
+        </div>
+        <div class="zurf-record-chip">
+          Total Records: <strong style="color:#090d16;">${finalRows.length}</strong>
+        </div>
+      </div>
+
+      <!-- KPI METRIC CARDS -->
+      ${kpiCards.length > 0 ? `
+        <div class="zurf-kpi-grid">
+          ${kpiCards.map((k) => `
+            <div class="zurf-kpi-card">
+              <div class="zurf-kpi-title">${k.title || k.label || 'Metric'}</div>
+              <div class="zurf-kpi-value">${k.value !== undefined ? k.value : '—'}</div>
+              ${k.subtext ? `<div style="font-size:9px;font-weight:600;color:#059669;margin-top:2px;">${k.subtext}</div>` : ''}
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
+
+      <!-- DATA MATRIX TABLE -->
+      <table class="zurf-table">
+        <thead>
           <tr>
-            ${columns.map((c) => `<td class="${c.isNum ? 'num' : ''}">${r[c.key] ?? '—'}</td>`).join('')}
+            ${finalCols.map((c, i) => {
+              const align = c.isNum ? 'text-align:right;' : (i === 0 ? 'text-align:center;width:40px;' : 'text-align:left;');
+              return `<th style="${align}">${c.label || c.key}</th>`;
+            }).join('')}
           </tr>
-        `).join('')}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          ${finalRows.map((r) => `
+            <tr>
+              ${finalCols.map((c, i) => {
+                const isNum = c.isNum || (!c.label?.toLowerCase().includes('category') && !c.label?.toLowerCase().includes('item') && !c.label?.toLowerCase().includes('sl') && (String(r[c.key]).startsWith('₹') || String(r[c.key]).startsWith('INR') || String(r[c.key]).endsWith('%') || !isNaN(Number(r[c.key]))));
+                const alignClass = isNum ? 'num' : (i === 0 ? 'center' : '');
+                const alignStyle = i === 0 ? 'text-align:center;font-weight:bold;color:#475569;' : (i === 1 ? 'font-weight:700;color:#090d16;' : '');
+                return `<td class="${alignClass}" style="${alignStyle}">${r[c.key] ?? '—'}</td>`;
+              }).join('')}
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
 
-    ${notes ? `<div style="font-size:10px;color:#64748b;margin-top:8px;font-style:italic;">* ${notes}</div>` : ''}
+      ${notes ? `<div style="font-size:10px;color:#475569;margin-top:8px;font-style:italic;">* ${notes}</div>` : ''}
 
-    <!-- MANDATORY FOOTER -->
-    <div class="zurf-footer">
-      <div>${branding.legalName} · ${classification}</div>
-      <div>Run ID: ${finalRunId}</div>
-      <div>ZURF v1 Verified</div>
+      <!-- FOOTER -->
+      <div class="zurf-footer">
+        <div class="zurf-qr-block">
+          <div class="zurf-qr-card">
+            ${qrSvgMarkup}
+          </div>
+          <div>
+            <div style="font-size:10px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:#090d16;">
+              SCAN TO VERIFY AUDIT RECORD
+            </div>
+            <div style="font-size:9.5px;font-weight:600;color:#475569;margin-top:2px;">
+              ZURF v1.0 Cryptographic Integrity
+            </div>
+            <div style="font-size:8px;font-family:monospace;color:#64748b;margin-top:2px;max-width:240px;word-break:break-all;">
+              ${qrUrl}
+            </div>
+          </div>
+        </div>
+
+        <div class="zurf-disclaimer">
+          This document is an authoritative corporate intelligence output generated by <strong>Zamorin Central ERP</strong>. It is subject to statutory audit logging and role-based confidentiality governance under Indian Companies Act and DPDP Act provisions.
+          <div style="font-size:9px;font-weight:700;color:#090d16;margin-top:4px;">
+            ZAMORIN ESTATE PVT. LTD. · ALL RIGHTS RESERVED
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 </body>

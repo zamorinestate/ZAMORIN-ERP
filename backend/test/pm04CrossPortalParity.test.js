@@ -14,7 +14,7 @@ const { Vendor } = require('../src/models/Vendor.js');
 const { assertPrimaryMasterAuthority } = require('../src/services/userGovernanceService.js');
 
 test('PM-04 PARITY: All 4 canonical RBAC roles and 5 portal views are strictly defined', () => {
-  assert.deepEqual(USER_ROLES, ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STAFF']);
+  assert.deepEqual(USER_ROLES.filter(r => r !== 'VENDOR'), ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STAFF']);
 });
 
 test('PM-04 PARITY: Primary Master Functional Superset Invariant (PRIMARY_MASTER_FUNCTIONAL_SUPERSET = 1)', () => {

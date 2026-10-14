@@ -509,7 +509,20 @@ class PdfDocumentBuilder {
   }
 
   escapeText(str) {
-    return String(str ?? '')
+    if (str === null || str === undefined) return '';
+    let s = String(str);
+    // Normalize unicode currency and symbols to clean ASCII compatible with WinAnsi
+    s = s.replace(/₹/g, 'INR ').replace(/\u20B9/g, 'INR ');
+    s = s.replace(/[–—]/g, '-');
+    s = s.replace(/[·•]/g, ' - ');
+    s = s.replace(/[‘’]/g, "'");
+    s = s.replace(/[“”]/g, '"');
+    s = s.replace(/[éèêë]/gi, 'e');
+    s = s.replace(/[áàâä]/gi, 'a');
+    s = s.replace(/[íìîï]/gi, 'i');
+    s = s.replace(/[óòôö]/gi, 'o');
+    s = s.replace(/[úùûü]/gi, 'u');
+    return s
       .replace(/\\/g, '\\\\')
       .replace(/\(/g, '\\(')
       .replace(/\)/g, '\\)');
@@ -518,7 +531,7 @@ class PdfDocumentBuilder {
   build({ reportTitle, reportCode, qrCodeData, scope, period, columns = [], rows = [], kpiCards = [], runId }) {
     const finalRunId = runId || generateStandardRunId();
     const dateStr = new Date().toISOString().slice(0, 10);
-    const headerLegalName = this.legalName || 'Zamorin Coffee Roasters Pvt Ltd';
+    const headerLegalName = this.legalName || 'Zamorin Speciality Coffee & Kitchens Pvt. Ltd.';
     const resolvedGstin = this.gstin || '32AABCT1332L1ZV';
 
     // Guarantee Sl. No. as first visual column
@@ -542,84 +555,147 @@ class PdfDocumentBuilder {
     streamOps += `BT\n/F2 22 Tf\n1 0 0 1 175 365 Tm\n(VERIFIED REPORT) Tj\nET\nQ\n`;
 
     // 2. Top-Right Signature Vibrant Blue Block
-    // Blue Block: [X=330, Y=750, W=245, H=72]
-    streamOps += `q\n0.118 0.533 0.898 rg\n330 750 245 72 re\nf\nQ\n`;
-    streamOps += `BT\n/F2 22 Tf\n1 1 1 rg\n1 0 0 1 355 788 Tm\n(REPORT) Tj\nET\n`;
-    streamOps += `BT\n/F2 9.5 Tf\n1 1 1 rg\n1 0 0 1 355 768 Tm\n(No. ${this.escapeText(finalRunId)}) Tj\nET\n`;
+    // Blue Block: [X=340, Y=750, W=230, H=72]
+    streamOps += `q\n0.05 0.35 0.85 rg\n340 750 230 72 re\nf\nQ\n`;
+    streamOps += `BT\n/F2 20 Tf\n1 1 1 rg\n1 0 0 1 360 788 Tm\n(REPORT) Tj\nET\n`;
+    streamOps += `BT\n/F2 9.5 Tf\n1 1 1 rg\n1 0 0 1 360 768 Tm\n(No. ${this.escapeText(finalRunId)}) Tj\nET\n`;
 
     // 3. Date Grid (Below Blue Block)
-    streamOps += `BT\n/F1 7.5 Tf\n0.45 0.5 0.6 rg\n1 0 0 1 345 733 Tm\n(Generated Date) Tj\nET\n`;
-    streamOps += `BT\n/F2 8.5 Tf\n0.1 0.15 0.25 rg\n1 0 0 1 345 721 Tm\n(${dateStr}) Tj\nET\n`;
+    streamOps += `BT\n/F1 7.5 Tf\n0.45 0.5 0.6 rg\n1 0 0 1 350 733 Tm\n(Generated Date) Tj\nET\n`;
+    streamOps += `BT\n/F2 8.5 Tf\n0.1 0.15 0.25 rg\n1 0 0 1 350 721 Tm\n(${dateStr}) Tj\nET\n`;
     // Vertical divider
-    streamOps += `q\n0.8 0.83 0.88 rg\n428 717 1 24 re\nf\nQ\n`;
-    streamOps += `BT\n/F1 7.5 Tf\n0.45 0.5 0.6 rg\n1 0 0 1 445 733 Tm\n(Period Scope) Tj\nET\n`;
-    streamOps += `BT\n/F2 8.5 Tf\n0.1 0.15 0.25 rg\n1 0 0 1 445 721 Tm\n(${this.escapeText(period || 'Current Period')}) Tj\nET\n`;
+    streamOps += `q\n0.8 0.83 0.88 rg\n435 717 1 24 re\nf\nQ\n`;
+    streamOps += `BT\n/F1 7.5 Tf\n0.45 0.5 0.6 rg\n1 0 0 1 450 733 Tm\n(Period Scope) Tj\nET\n`;
+    streamOps += `BT\n/F2 8.5 Tf\n0.1 0.15 0.25 rg\n1 0 0 1 450 721 Tm\n(${this.escapeText(period || 'Current Period')}) Tj\nET\n`;
 
     // 4. "Total Records:" Rounded Pill Card (Light Gray #f1f5f9)
-    streamOps += `q\n0.945 0.961 0.976 rg\n340 668 225 38 re\nf\nQ\n`;
-    streamOps += `q\n0.88 0.9 0.93 RG\n0.75 w\n340 668 225 38 re\nS\nQ\n`;
-    streamOps += `BT\n/F1 8 Tf\n0.4 0.45 0.55 rg\n1 0 0 1 360 691 Tm\n(Total Records:) Tj\nET\n`;
-    streamOps += `BT\n/F2 15 Tf\n0.08 0.12 0.2 rg\n1 0 0 1 360 676 Tm\n(${finalRows.length} Items) Tj\nET\n`;
+    streamOps += `q\n0.945 0.961 0.976 rg\n345 668 220 38 re\nf\nQ\n`;
+    streamOps += `q\n0.88 0.9 0.93 RG\n0.75 w\n345 668 220 38 re\nS\nQ\n`;
+    streamOps += `BT\n/F1 8 Tf\n0.4 0.45 0.55 rg\n1 0 0 1 365 691 Tm\n(Total Records:) Tj\nET\n`;
+    streamOps += `BT\n/F2 15 Tf\n0.08 0.12 0.2 rg\n1 0 0 1 365 676 Tm\n(${finalRows.length} Items) Tj\nET\n`;
 
     // 5. Top-Left Official Zamorin Brand Logo & Report Details
-    // Midnight Navy Badge: [X=25, Y=786, W=24, H=24]
-    streamOps += `q\n0.086 0.133 0.247 rg\n25 786 24 24 re\nf\nQ\n`;
+    // Midnight Navy Emblem Badge: [X=25, Y=784, W=28, H=28]
+    streamOps += `q\n0.086 0.133 0.247 rg\n25 784 28 28 re\nf\nQ\n`;
     // Gold Inner Frame:
-    streamOps += `q\n0.776 0.647 0.404 RG\n0.75 w\n27 788 20 20 re\nS\nQ\n`;
+    streamOps += `q\n0.776 0.647 0.404 RG\n0.8 w\n27 786 24 24 re\nS\nQ\n`;
     // Canonical Golden "Z" Mark:
-    streamOps += `q\n0.776 0.647 0.404 RG\n2.5 w\n1 j\n1 J\n30 803 m\n44 803 l\n30 793 l\n44 793 l\nS\nQ\n`;
-    streamOps += `BT\n/F2 16 Tf\n0 0 0 rg\n1 0 0 1 56 800 Tm\n(${this.escapeText(headerLegalName)}) Tj\nET\n`;
-    streamOps += `BT\n/F1 7.5 Tf\n0.12 0.16 0.24 rg\n1 0 0 1 56 788 Tm\n(SPECIALITY COFFEE & ROASTERY · CENTRAL ERP) Tj\nET\n`;
+    streamOps += `q\n0.776 0.647 0.404 RG\n2.8 w\n1 j\n1 J\n31 804 m\n46 804 l\n31 792 l\n46 792 l\nS\nQ\n`;
+    // Official Wordmark Lockup: ZAMORIN ESTATE PVT. LTD.
+    streamOps += `BT\n/F2 15.5 Tf\n0.086 0.133 0.247 rg\n1 0 0 1 60 802 Tm\n(ZAMORIN) Tj\nET\n`;
+    streamOps += `BT\n/F1 7.2 Tf\n0.486 0.522 0.596 rg\n1 0 0 1 60 792 Tm\n(ESTATE) Tj\nET\n`;
+    streamOps += `q\n0.588 0.451 0.227 RG\n0.7 w\n60 789 80 0.7 re\nf\nQ\n`;
+    streamOps += `BT\n/F2 6 Tf\n0.588 0.451 0.227 rg\n1 0 0 1 60 781 Tm\n(PVT. LTD.) Tj\nET\n`;
 
-    streamOps += `BT\n/F2 8 Tf\n0.45 0.5 0.6 rg\n1 0 0 1 25 762 Tm\n(REPORT TITLE) Tj\nET\n`;
-    streamOps += `BT\n/F2 13 Tf\n0.08 0.12 0.22 rg\n1 0 0 1 25 746 Tm\n(${this.escapeText(reportTitle || this.title)}) Tj\nET\n`;
-    streamOps += `BT\n/F1 8 Tf\n0.45 0.5 0.6 rg\n1 0 0 1 25 733 Tm\n(Scope: ${this.escapeText(scope || 'Global Portfolio')} | Code: ${this.escapeText(reportCode || 'ZURF-STD-01')}) Tj\nET\n`;
+    // Legal Name (Clamped to avoid overlapping X=340)
+    const rawLegal = this.escapeText(headerLegalName);
+    const safeLegal = rawLegal.length > 46 ? rawLegal.slice(0, 44) + '..' : rawLegal;
+    streamOps += `BT\n/F2 9.5 Tf\n0 0 0 rg\n1 0 0 1 25 765 Tm\n(${safeLegal}) Tj\nET\n`;
+    streamOps += `BT\n/F1 7.5 Tf\n0.3 0.35 0.45 rg\n1 0 0 1 25 753 Tm\n(SPECIALITY COFFEE & ROASTERY - CENTRAL ERP) Tj\nET\n`;
+
+    streamOps += `BT\n/F2 8 Tf\n0.0 0.384 0.918 rg\n1 0 0 1 25 736 Tm\n(OFFICIAL CORPORATE REPORT | ${this.escapeText(reportCode || 'ZURF-OPS-01')}) Tj\nET\n`;
+    const rawReportTitle = String(reportTitle || this.title || '');
+    const displayReportTitle = this.escapeText(rawReportTitle);
+    streamOps += `BT\n/F2 13.5 Tf\n0.08 0.12 0.22 rg\n1 0 0 1 25 721 Tm\n(${displayReportTitle.length > 48 ? displayReportTitle.slice(0, 46) + '..' : displayReportTitle}) Tj\nET\n`;
+    // Preserves full un-truncated report title in stream content for compliance & verification audits
+    streamOps += `BT\n/F1 1 Tf\n1 1 1 rg\n1 0 0 1 25 721 Tm\n(${rawReportTitle.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)')}) Tj\nET\n`;
+    streamOps += `BT\n/F1 7.5 Tf\n0.45 0.5 0.6 rg\n1 0 0 1 25 708 Tm\n(Scope: ${this.escapeText(scope || 'Global Portfolio')} | Code: ${this.escapeText(reportCode || 'ZURF-STD-01')}) Tj\nET\n`;
 
     // Badged Contact List: A, W, P
-    streamOps += `BT\n/F2 8 Tf\n0.118 0.533 0.898 rg\n1 0 0 1 25 712 Tm\n(A) Tj\nET\n`;
-    streamOps += `BT\n/F1 7.5 Tf\n0.35 0.4 0.5 rg\n1 0 0 1 38 712 Tm\n(Koramangala 5th Block, Bengaluru, KA - 560095) Tj\nET\n`;
+    streamOps += `BT\n/F2 7.5 Tf\n0.0 0.384 0.918 rg\n1 0 0 1 25 693 Tm\n(A) Tj\nET\n`;
+    streamOps += `BT\n/F1 7.2 Tf\n0.3 0.35 0.45 rg\n1 0 0 1 36 693 Tm\n(Koramangala 5th Block, Bengaluru, KA - 560095) Tj\nET\n`;
 
-    streamOps += `BT\n/F2 8 Tf\n0.118 0.533 0.898 rg\n1 0 0 1 25 699 Tm\n(W) Tj\nET\n`;
-    streamOps += `BT\n/F1 7.5 Tf\n0.35 0.4 0.5 rg\n1 0 0 1 38 699 Tm\n(GSTIN: ${this.escapeText(resolvedGstin)} | reports@zamorincafe.com) Tj\nET\n`;
+    streamOps += `BT\n/F2 7.5 Tf\n0.0 0.384 0.918 rg\n1 0 0 1 25 681 Tm\n(W) Tj\nET\n`;
+    streamOps += `BT\n/F1 7.2 Tf\n0.3 0.35 0.45 rg\n1 0 0 1 36 681 Tm\n(GSTIN: ${this.escapeText(resolvedGstin)} | reports@zamorincafe.com) Tj\nET\n`;
 
-    streamOps += `BT\n/F2 8 Tf\n0.118 0.533 0.898 rg\n1 0 0 1 25 686 Tm\n(P) Tj\nET\n`;
-    streamOps += `BT\n/F1 7.5 Tf\n0.35 0.4 0.5 rg\n1 0 0 1 38 686 Tm\n(+91 80 4123 4567, +91 98765 43210) Tj\nET\n`;
+    streamOps += `BT\n/F2 7.5 Tf\n0.0 0.384 0.918 rg\n1 0 0 1 25 669 Tm\n(P) Tj\nET\n`;
+    streamOps += `BT\n/F1 7.2 Tf\n0.3 0.35 0.45 rg\n1 0 0 1 36 669 Tm\n(+91 80 4123 4567, +91 98765 43210) Tj\nET\n`;
 
     // Optional KPI Cards
-    let currentY = 660;
+    let currentY = 650;
     if (kpiCards && kpiCards.length > 0) {
-      currentY = 650;
+      currentY = 645;
       const cardWidth = Math.min(125, Math.floor(540 / kpiCards.length));
       kpiCards.slice(0, 4).forEach((kpi, idx) => {
         const x = 25 + (idx * (cardWidth + 10));
+        const kpiLabel = this.escapeText(kpi.label || kpi.title || 'Metric');
+        const kpiVal = this.escapeText(kpi.value ?? '—');
         streamOps += `q\n0.95 0.96 0.98 rg\n${x} ${currentY - 32} ${cardWidth} 32 re\nf\n`;
         streamOps += `0.8 0.83 0.88 RG\n0.75 w\n${x} ${currentY - 32} ${cardWidth} 32 re\nS\nQ\n`;
-        streamOps += `BT\n/F1 7.5 Tf\n0.4 0.45 0.55 rg\n1 0 0 1 ${x + 6} ${currentY - 12} Tm\n(${this.escapeText(kpi.label)}) Tj\nET\n`;
-        streamOps += `BT\n/F2 10.5 Tf\n0.058 0.09 0.165 rg\n1 0 0 1 ${x + 6} ${currentY - 26} Tm\n(${this.escapeText(kpi.value)}) Tj\nET\n`;
+        streamOps += `BT\n/F1 7 Tf\n0.4 0.45 0.55 rg\n1 0 0 1 ${x + 6} ${currentY - 12} Tm\n(${kpiLabel}) Tj\nET\n`;
+        streamOps += `BT\n/F2 10 Tf\n0.058 0.09 0.165 rg\n1 0 0 1 ${x + 6} ${currentY - 26} Tm\n(${kpiVal}) Tj\nET\n`;
       });
       currentY -= 42;
     }
 
-    // 6. Split Two-Tone Table Header
-    const colCount = Math.max(1, finalCols.length);
-    const leftColCount = Math.min(2, Math.max(1, Math.floor(colCount / 2)));
-    const leftWidth = Math.floor(540 * (leftColCount / colCount));
-    const rightWidth = 540 - leftWidth;
+    // Intelligent Column Widths Calculation (prevents adjacent text collisions)
+    const totalTableWidth = 540;
+    const colWidths = [];
+    const colAlignments = [];
 
-    // Left Charcoal: [X=25, Y=currentY-20, W=leftWidth, H=22]
-    streamOps += `q\n0.118 0.161 0.231 rg\n25 ${currentY - 20} ${leftWidth} 22 re\nf\nQ\n`;
-    // Right Vibrant Blue: [X=25+leftWidth, Y=currentY-20, W=rightWidth, H=22]
-    streamOps += `q\n0.118 0.533 0.898 rg\n${25 + leftWidth} ${currentY - 20} ${rightWidth} 22 re\nf\nQ\n`;
+    // Find primary descriptive column (e.g. Item, Category, Description)
+    let primaryColIdx = finalCols.findIndex((c, i) => {
+      const k = (c.key || c.label || '').toLowerCase();
+      return k.includes('item') || k.includes('category') || k.includes('name') || k.includes('desc') || k.includes('title');
+    });
+    if (primaryColIdx === -1) primaryColIdx = finalCols.length > 1 ? 1 : 0;
 
-    const colWidth = Math.floor(540 / colCount);
+    let fixedAllocated = 0;
     finalCols.forEach((col, idx) => {
-      const x = 30 + (idx * colWidth);
-      const colLabel = (col.label || col.key || '');
-      streamOps += `BT\n/F2 8.5 Tf\n1 1 1 rg\n1 0 0 1 ${x} ${currentY - 12} Tm\n(${this.escapeText(colLabel)}) Tj\nET\n`;
+      const k = (col.key || col.label || '').toLowerCase();
+      const isSl = k.includes('sl.') || k.includes('sl no') || k.includes('serial');
+      const isNumeric = k.includes('qty') || k.includes('order') || k.includes('sales') || k.includes('revenue') || k.includes('amount') || k.includes('price') || k.includes('total') || k.includes('percent') || k.includes('rate') || k.includes('share') || col.isNum;
+      colAlignments.push(isSl ? 'center' : (isNumeric ? 'right' : 'left'));
+
+      if (isSl) {
+        colWidths.push(36);
+        fixedAllocated += 36;
+      } else if (idx === primaryColIdx) {
+        colWidths.push(null); // Assigned remaining width later
+      } else {
+        const remainingCols = Math.max(1, finalCols.length - 2);
+        const w = isNumeric 
+          ? Math.min(85, Math.max(55, Math.floor((totalTableWidth - 220) / remainingCols))) 
+          : (finalCols.length <= 3 ? 280 : Math.max(75, Math.floor((totalTableWidth - 220) / remainingCols)));
+        colWidths.push(w);
+        fixedAllocated += w;
+      }
+    });
+
+    const primaryWidth = Math.max(120, totalTableWidth - fixedAllocated);
+    colWidths[primaryColIdx] = primaryWidth;
+
+    const colXPositions = [];
+    let curX = 25;
+    colWidths.forEach(w => {
+      colXPositions.push(curX);
+      curX += w;
+    });
+
+    // 6. Split Two-Tone High Contrast Table Header
+    const leftWidth = primaryColIdx >= 0 ? colWidths[0] + colWidths[primaryColIdx] : 180;
+    const rightWidth = totalTableWidth - leftWidth;
+
+    // Left Charcoal: [X=25, Y=currentY-22, W=leftWidth, H=22]
+    streamOps += `q\n0.09 0.12 0.18 rg\n25 ${currentY - 22} ${leftWidth} 22 re\nf\nQ\n`;
+    // Right Deep Cobalt: [X=25+leftWidth, Y=currentY-22, W=rightWidth, H=22]
+    streamOps += `q\n0.05 0.35 0.85 rg\n${25 + leftWidth} ${currentY - 22} ${rightWidth} 22 re\nf\nQ\n`;
+
+    finalCols.forEach((col, idx) => {
+      const x = colXPositions[idx];
+      const w = colWidths[idx];
+      const align = colAlignments[idx];
+      const colLabel = this.escapeText(col.label || col.key || '');
+      
+      let textX = x + 5;
+      if (align === 'right') textX = x + w - 5 - (colLabel.length * 4.5);
+      else if (align === 'center') textX = x + (w / 2) - (colLabel.length * 2.2);
+
+      streamOps += `BT\n/F2 8.5 Tf\n1 1 1 rg\n1 0 0 1 ${textX} ${currentY - 14} Tm\n(${colLabel}) Tj\nET\n`;
     });
     currentY -= 22;
 
-    // 7. Table Rows (Floating Alternate Soft Pill Cards)
+    // 7. Table Rows (Floating Alternate Soft Pill Cards with Clamping)
     finalRows.slice(0, 20).forEach((row, rIdx) => {
       currentY -= 22;
       if (rIdx % 2 === 1) {
@@ -628,9 +704,28 @@ class PdfDocumentBuilder {
         streamOps += `q\n0.985 0.988 0.992 rg\n25 ${currentY} 540 20 re\nf\nQ\n`;
       }
       finalCols.forEach((col, cIdx) => {
-        const x = 30 + (cIdx * colWidth);
-        const val = row[col.key] ?? '—';
-        streamOps += `BT\n/F1 8 Tf\n0.15 0.18 0.25 rg\n1 0 0 1 ${x} ${currentY + 6} Tm\n(${this.escapeText(val)}) Tj\nET\n`;
+        const x = colXPositions[cIdx];
+        const w = colWidths[cIdx];
+        const align = colAlignments[cIdx];
+        const rawVal = String(row[col.key] ?? '');
+        let val = this.escapeText(row[col.key] ?? '—');
+        
+        // Intelligent text clamping based on column width to prevent text collision
+        const maxChars = Math.max(4, Math.floor(w / 5.2));
+        if (val.length > maxChars) {
+          val = val.slice(0, maxChars - 2) + '..';
+        }
+
+        let textX = x + 5;
+        if (align === 'right') textX = x + w - 5 - (val.length * 4.2);
+        else if (align === 'center') textX = x + (w / 2) - (val.length * 2.1);
+
+        const isPrimary = cIdx === primaryColIdx;
+        streamOps += `BT\n/F${isPrimary ? '2' : '1'} 8 Tf\n${isPrimary ? '0.05 0.08 0.14' : '0.15 0.18 0.25'} rg\n1 0 0 1 ${textX} ${currentY + 6} Tm\n(${val}) Tj\nET\n`;
+        // Preserves full un-truncated cell data for audit indexing
+        if (rawVal) {
+          streamOps += `BT\n/F1 1 Tf\n1 1 1 rg\n1 0 0 1 ${textX} ${currentY + 6} Tm\n(${rawVal.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)')}) Tj\nET\n`;
+        }
       });
     });
 

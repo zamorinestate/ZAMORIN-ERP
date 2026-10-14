@@ -10,6 +10,7 @@
 
 import { apiGet, apiPost, apiDelete } from '../apiClient.js';
 import { showToast, skeleton, confirmAction } from '../components.js';
+import { debounce } from '../utils/debounce.js';
 
 let _activeTab = 'active'; // active | expiring | holds | review | certificates | policies
 let _searchQuery = '';
@@ -190,11 +191,13 @@ export async function wireTrashBin(root) {
   // Search input
   const searchInput = root.querySelector('#trash-search-input');
   if (searchInput) {
-    let debounce = null;
+    const handleTrashSearch = debounce((val) => {
+      _searchQuery = val;
+      _loadTabContent(root);
+    }, 250);
+
     searchInput.addEventListener('input', (e) => {
-      clearTimeout(debounce);
-      _searchQuery = e.target.value;
-      debounce = setTimeout(() => _loadTabContent(root), 250);
+      handleTrashSearch(e.target.value);
     });
   }
 

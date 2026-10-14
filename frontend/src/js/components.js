@@ -9,6 +9,7 @@ import { navigate } from "./router.js";
 import { forRole, unreadCount, markRead, markAllRead } from "./notifications.js";
 import { apiGet, apiPost, clearAllAuthTokens, clearApiCacheAndInFlight } from "./apiClient.js";
 import { setSettingsActiveSection } from "./pages/settingsShared.js";
+import { debounce } from "./utils/debounce.js";
 
 const ROLE_LABELS = {
   [ROLES.MASTER]: "Master User",
@@ -818,46 +819,47 @@ export function wireBell(root) {
       }
     });
 
-    let searchDebounce = null;
+    const handleSearchInput = debounce(async (q) => {
+      try {
+        const res = await apiGet(`/search?q=${encodeURIComponent(q)}`);
+        const results = res?.data?.results || {};
+        let html = "";
+        for (const [group, list] of Object.entries(results)) {
+          if (!list?.length) continue;
+          html += `<div class="search-group-title">${group.replace(/_/g, " ")}</div>`;
+          list.forEach((item) => {
+            html += `
+              <div class="search-item" data-search-route="${item.route}">
+                <div class="search-item-title">${item.title}</div>
+                <div class="search-item-sub">${item.subtitle || ""}</div>
+              </div>`;
+          });
+        }
+        if (!html) html = `<div class="search-empty">No matching records found</div>`;
+        searchResults.innerHTML = html;
+        searchResults.style.display = "block";
+        highlightedSearchIndex = -1;
+
+        searchResults.querySelectorAll("[data-search-route]").forEach((el) => {
+          el.addEventListener("click", () => {
+            searchResults.style.display = "none";
+            searchInput.value = "";
+            navigate(el.dataset.searchRoute);
+          });
+        });
+      } catch {
+        searchResults.style.display = "none";
+      }
+    }, 200);
+
     searchInput.addEventListener("input", () => {
-      clearTimeout(searchDebounce);
       const q = searchInput.value.trim();
       if (q.length < 1) {
+        handleSearchInput.cancel();
         renderDefaultSearchSuggestions();
         return;
       }
-      searchDebounce = setTimeout(async () => {
-        try {
-          const res = await apiGet(`/search?q=${encodeURIComponent(q)}`);
-          const results = res?.data?.results || {};
-          let html = "";
-          for (const [group, list] of Object.entries(results)) {
-            if (!list?.length) continue;
-            html += `<div class="search-group-title">${group.replace(/_/g, " ")}</div>`;
-            list.forEach((item) => {
-              html += `
-                <div class="search-item" data-search-route="${item.route}">
-                  <div class="search-item-title">${item.title}</div>
-                  <div class="search-item-sub">${item.subtitle || ""}</div>
-                </div>`;
-            });
-          }
-          if (!html) html = `<div class="search-empty">No matching records found</div>`;
-          searchResults.innerHTML = html;
-          searchResults.style.display = "block";
-          highlightedSearchIndex = -1;
-
-          searchResults.querySelectorAll("[data-search-route]").forEach((el) => {
-            el.addEventListener("click", () => {
-              searchResults.style.display = "none";
-              searchInput.value = "";
-              navigate(el.dataset.searchRoute);
-            });
-          });
-        } catch {
-          searchResults.style.display = "none";
-        }
-      }, 200);
+      handleSearchInput(q);
     });
   }
 

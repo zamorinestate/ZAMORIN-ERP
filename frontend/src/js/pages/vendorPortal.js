@@ -12,6 +12,7 @@
 
 import { apiGet } from "../apiClient.js";
 import { state } from "../state.js";
+import { debounce } from "../utils/debounce.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function formatRupees(paisa) {
@@ -371,12 +372,11 @@ async function _loadOrders(container, { page = 1, status = "ALL", search = "" } 
   // Wire search/filter events once
   if (searchInput && !searchInput._wired) {
     searchInput._wired = true;
-    let debounce;
-    searchInput.addEventListener("input", () => {
-      clearTimeout(debounce);
-      debounce = setTimeout(() => {
-        _loadOrders(container, { page: 1, status: statusSelect?.value || "ALL", search: searchInput.value });
-      }, 300);
+    const handleVendorSearch = debounce((searchVal) => {
+      _loadOrders(container, { page: 1, status: statusSelect?.value || "ALL", search: searchVal });
+    }, 250);
+    searchInput.addEventListener("input", (e) => {
+      handleVendorSearch(e.target.value);
     });
   }
   if (statusSelect && !statusSelect._wired) {

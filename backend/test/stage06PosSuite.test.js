@@ -23,6 +23,7 @@ const { PosOrderService } = require('../src/services/posOrderService');
 const { Bill } = require('../src/models/Bill');
 const { Cafe } = require('../src/models/Cafe');
 const { MenuItem } = require('../src/models/MenuItem');
+const { OutletOffering } = require('../src/models/OutletOffering');
 const { RegisterSession } = require('../src/models/RegisterSession');
 const { CashTransaction } = require('../src/models/CashTransaction');
 const { SequenceCounter } = require('../src/models/SequenceCounter');
@@ -132,6 +133,10 @@ test('STAGE 06 — POS & Order Management Master Test Suite', async (t) => {
       { menuItemId: 'MNU-COFFEE-01', name: 'Zamorin Pour-Over', currentPricePaisa: 22000, taxRatePercent: 5 },
       { menuItemId: 'MNU-BAKERY-01', name: 'Malabar Cardamom Bun', currentPricePaisa: 15000, taxRatePercent: 5 },
     ],
+  }));
+
+  t.mock.method(OutletOffering, 'find', () => ({
+    lean: async () => [],
   }));
 
   Bill.prototype.save = async function () {

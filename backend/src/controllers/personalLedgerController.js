@@ -1133,67 +1133,65 @@ const exportPersonalLedger = asyncHandler(async (request, response) => {
   });
   entriesWithRunning.reverse();
 
-  const format = String(request.query.format || 'CSV').toUpperCase();
+  const format = String(request.query.format || 'XLSX').toUpperCase();
+  if (format === 'CSV' || format.includes('CSV')) {
+    const err = new Error('CSV format is not supported for ledger exports. Canonical export formats are PDF and XLSX.');
+    err.statusCode = 400;
+    err.code = 'UNSUPPORTED_EXPORT_FORMAT';
+    throw err;
+  }
   if (format === 'JSON') {
     return response.status(200).json({
       data: entriesWithRunning,
     });
   }
 
-  // Formula injection defense: escape leading =, +, -, @ with single quote
-  const sanitizeCell = (val) => {
-    if (val === null || val === undefined) return '""';
-    const str = String(val);
-    if (/^[=+\-@]/.test(str)) {
-      return `"'${str.replace(/"/g, '""')}"`;
-    }
-    return `"${str.replace(/"/g, '""')}"`;
-  };
-
-  const headers = [
-    'Voucher ID',
-    'Business Date',
-    'Category',
-    'Description',
-    'Payment Source',
-    'Entry Type',
-    'Amount (INR)',
-    'Amount (Paise)',
-    'Running Balance (INR)',
-    'Running Balance (Paise)',
-    'Economic Direction',
-    'Accounting Treatment',
-    'Finance Journal Ref',
-    'Workflow Status',
-    'Settlement Status',
-    'Record Status',
+  const { generateXlsx } = require('../utils/exportGenerators');
+  const columns = [
+    { key: 'voucherId', label: 'Voucher ID' },
+    { key: 'businessDate', label: 'Business Date' },
+    { key: 'category', label: 'Category' },
+    { key: 'description', label: 'Description' },
+    { key: 'paymentSource', label: 'Payment Source' },
+    { key: 'entryType', label: 'Entry Type' },
+    { key: 'amountInr', label: 'Amount (INR)' },
+    { key: 'runningBalanceInr', label: 'Running Balance (INR)' },
+    { key: 'direction', label: 'Economic Direction' },
+    { key: 'accountingTreatment', label: 'Accounting Treatment' },
+    { key: 'financeJournalRef', label: 'Finance Journal Ref' },
+    { key: 'workflowStatus', label: 'Workflow Status' },
+    { key: 'settlementStatus', label: 'Settlement Status' },
+    { key: 'status', label: 'Record Status' },
   ];
 
-  const rows = entriesWithRunning.map((e) => [
-    sanitizeCell(e.voucherNumber || e.ledgerEntryId),
-    sanitizeCell(e.businessDate),
-    sanitizeCell(e.category),
-    sanitizeCell(e.description),
-    sanitizeCell(e.paymentSource),
-    sanitizeCell(e.entryType),
-    ((e.amountPaisa || 0) / 100).toFixed(2),
-    e.amountPaisa || 0,
-    ((e.runningBalancePaisa || 0) / 100).toFixed(2),
-    e.runningBalancePaisa || 0,
-    sanitizeCell(e.direction),
-    sanitizeCell(e.accountingTreatment),
-    sanitizeCell(e.financeJournalRef || 'Unposted'),
-    sanitizeCell(e.workflowStatus),
-    sanitizeCell(e.settlementStatus || 'UNSETTLED'),
-    sanitizeCell(e.status || 'ACTIVE'),
-  ]);
+  const xlsxRows = entriesWithRunning.map((e) => ({
+    voucherId: e.voucherNumber || e.ledgerEntryId,
+    businessDate: e.businessDate,
+    category: e.category,
+    description: e.description,
+    paymentSource: e.paymentSource,
+    entryType: e.entryType,
+    amountInr: (e.amountPaisa || 0) / 100,
+    runningBalanceInr: (e.runningBalancePaisa || 0) / 100,
+    direction: e.direction,
+    accountingTreatment: e.accountingTreatment,
+    financeJournalRef: e.financeJournalRef || 'Unposted',
+    workflowStatus: e.workflowStatus,
+    settlementStatus: e.settlementStatus || 'UNSETTLED',
+    status: e.status || 'ACTIVE',
+  }));
 
-  const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
-  const filename = `Zamorin_Personal_SubLedger_${getIstBusinessDate()}.csv`;
+  const xlsx = generateXlsx({
+    sheetName: 'Personal Sub-Ledger',
+    reportTitle: 'Personal Sub-Ledger Journal',
+    columns,
+    rows: xlsxRows,
+  });
 
-  response.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  const filename = `Zamorin_Personal_SubLedger_${getIstBusinessDate()}.xlsx`;
+  response.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   response.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-  return response.status(200).send(csv);
+  return response.status(200).send(xlsx.buffer);
 });
 
 module.exports = {

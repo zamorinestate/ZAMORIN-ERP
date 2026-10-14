@@ -15,6 +15,7 @@ const { DeviceRegistration } = require('../models/DeviceRegistration');
 const { Expense } = require('../models/Expense');
 const { CashTransaction } = require('../models/CashTransaction');
 const { Incident } = require('../models/Incident');
+const { Bill } = require('../models/Bill');
 const { notificationService } = require('./NotificationService');
 
 class OperationalReportService {
@@ -179,6 +180,67 @@ class OperationalReportService {
       summary,
       exceptionCount: exceptions.length,
       exceptions,
+    };
+  }
+
+  /**
+   * Generates and dispatches Nightly Excel Multi-Sheet Audit Register to Cafe Admins and Master.
+   */
+  static async generateNightlyExcelDispatches({ organisationId = 'ZAMORIN', cafeId = null, targetDate = null } = {}) {
+    const dateStr = targetDate || new Date().toISOString().slice(0, 10);
+    const query = { organisationId };
+    if (cafeId && cafeId !== 'ALL') {
+      query.cafeId = cafeId;
+    }
+
+    let bills = [];
+    try {
+      bills = await Bill.find(query).lean();
+    } catch {
+      bills = [];
+    }
+
+    const grossSales = bills.reduce((sum, b) => sum + (Number(b.grandTotal || b.totalAmount || 0)), 0);
+    const netSales = bills.reduce((sum, b) => sum + (Number(b.subTotal || b.taxableAmount || 0)), 0);
+    const taxTotal = bills.reduce((sum, b) => sum + (Number(b.totalTax || b.taxAmount || 0)), 0);
+
+    const safeCafeLabel = cafeId || 'ALL_CAFES';
+    const excelFilename = `ZAMORIN_NIGHTLY_AUDIT_${safeCafeLabel}_${dateStr}.xlsx`;
+
+    const reportData = {
+      date: dateStr,
+      cafeId: safeCafeLabel,
+      grossSales: grossSales.toFixed(2),
+      netSales: netSales.toFixed(2),
+      taxTotal: taxTotal.toFixed(2),
+      excelFilename,
+      sheetCount: '4 Tabs (Dashboard, Bill Register, Line-Items, Audit Manifest)',
+    };
+
+    await notificationService.publishNotification({
+      eventType: 'NIGHTLY_EXCEL_AUDIT_REPORT',
+      organisationId,
+      cafeId: cafeId && cafeId !== 'ALL' ? cafeId : null,
+      recipientRoles: ['CAFE_ADMIN', 'MASTER'],
+      includePrimaryMaster: true,
+      severity: 'INFO',
+      priority: 'NORMAL',
+      templateId: 'NIGHTLY_EXCEL_AUDIT_REPORT',
+      templateData: {
+        ...reportData,
+        awaitOutboxProcessing: true,
+      },
+      idempotencyKey: `NIGHTLY_EXCEL_${safeCafeLabel}_${dateStr}`,
+    });
+
+    return {
+      success: true,
+      date: dateStr,
+      cafeId: safeCafeLabel,
+      excelFilename,
+      grossSales,
+      netSales,
+      taxTotal,
     };
   }
 }

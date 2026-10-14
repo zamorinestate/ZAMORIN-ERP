@@ -851,23 +851,23 @@ class PosOrderService {
 
     if (itemIds.length > 0) {
       try {
-        const foundItems = await MenuItem.find({
+        const itemsQuery = MenuItem.find({
           organisationId: orgId,
           menuItemId: { $in: itemIds },
         });
-        const itemsList = foundItems && typeof foundItems.lean === 'function' ? await foundItems.lean() : foundItems;
+        const itemsList = typeof itemsQuery.lean === 'function' ? await itemsQuery.lean() : await itemsQuery;
         if (Array.isArray(itemsList)) {
           for (const it of itemsList) {
             itemMap[it.menuItemId] = it;
           }
         }
 
-        const foundOfferings = await OutletOffering.find({
+        const offeringsQuery = OutletOffering.find({
           organisationId: orgId,
           outletId: cafeId,
           menuItemId: { $in: itemIds },
         });
-        const offeringsList = foundOfferings && typeof foundOfferings.lean === 'function' ? await foundOfferings.lean() : foundOfferings;
+        const offeringsList = typeof offeringsQuery.lean === 'function' ? await offeringsQuery.lean() : await offeringsQuery;
         if (Array.isArray(offeringsList)) {
           for (const off of offeringsList) {
             offeringMap[off.menuItemId] = off;

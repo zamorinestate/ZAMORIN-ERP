@@ -61,14 +61,14 @@ function parseReportRequest(req, explicitReportId = null) {
   // 5. Validate Metrics if explicitly requested
   let requestedMetrics = [];
   if (query.metrics) {
-    const metricsValidation = MetricRegistry.validateMetrics(query.metrics);
-    if (!metricsValidation.valid) {
-      const err = new Error(`Unsupported metric(s) requested: ${metricsValidation.invalid.join(', ')}`);
+    const metricValidation = MetricRegistry.validateMetrics(query.metrics);
+    if (!metricValidation.valid) {
+      const err = new Error(`Unsupported metric(s) requested: ${metricValidation.invalid.join(', ')}`);
       err.statusCode = 400;
       err.code = 'UNSUPPORTED_METRIC';
       throw err;
     }
-    requestedMetrics = metricsValidation.metrics;
+    requestedMetrics = metricValidation.metrics;
   }
 
   return {

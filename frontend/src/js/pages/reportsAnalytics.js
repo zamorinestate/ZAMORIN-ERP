@@ -4220,6 +4220,7 @@ async function renderInventorySubtab(root, container) {
         <div style="display:flex;align-items:center;gap:6px;">
           <span class="pill pill-sky" style="font-size:10px;font-weight:700;">OPERATIONAL VALUATION</span>
           <span class="pill pill-coral" style="font-size:10px;font-weight:700;">ACTUAL COGS UNAVAILABLE</span>
+          <button class="btn btn-sm btn-primary" data-export-report="inventory-valuation" style="font-size:12px;" type="button">ZURF Export</button>
         </div>
       </div>
 
@@ -4625,7 +4626,7 @@ async function renderProcurementSubtab(root, container) {
         </div>
         <div style="display:flex;align-items:center;gap:6px;">
           <span class="pill pill-sky" style="font-size:10px;font-weight:700;">PM-02E ACTIVATED</span>
-          <span class="pill pill-purple" style="font-size:10px;font-weight:700;">VENDOR SCORE = NOT_CONFIGURED</span>
+          <button class="btn btn-sm btn-primary" data-export-report="procurement-spend" style="font-size:12px;" type="button">ZURF Export</button>
         </div>
       </div>
 
@@ -7822,7 +7823,15 @@ function openExportModal(root, reportId = 'daily-sales') {
       <option value="daily-sales" ${reportId === 'daily-sales' ? 'selected' : ''}>Daily Sales &amp; Operations Summary</option>
       <option value="pl-statement" ${reportId === 'pl-statement' ? 'selected' : ''}>Profit &amp; Loss Statement &amp; Waterfall</option>
       <option value="inventory-valuation" ${reportId === 'inventory-valuation' ? 'selected' : ''}>Inventory Valuation &amp; Stock Movement</option>
+      <option value="menu-engineering" ${reportId === 'menu-engineering' ? 'selected' : ''}>Menu Engineering &amp; Product Mix</option>
+      <option value="procurement-spend" ${reportId === 'procurement-spend' ? 'selected' : ''}>Procurement Spend &amp; 3-Way Match</option>
+      <option value="vendor-performance-intelligence" ${reportId === 'vendor-performance-intelligence' ? 'selected' : ''}>Vendor Performance &amp; Intelligence Suite</option>
+      <option value="cash-book-variance" ${reportId === 'cash-book-variance' ? 'selected' : ''}>Cash Book &amp; Register Variance</option>
+      <option value="workforce-overview" ${reportId === 'workforce-overview' ? 'selected' : ''}>Workforce &amp; Headcount Intelligence</option>
       <option value="attendance-exceptions" ${reportId === 'attendance-exceptions' ? 'selected' : ''}>Attendance Exceptions &amp; Labour Trends</option>
+      <option value="customer-retention" ${reportId === 'customer-retention' ? 'selected' : ''}>Customer Cohorts &amp; Loyalty Repeat Index</option>
+      <option value="pos-exceptions" ${reportId === 'pos-exceptions' ? 'selected' : ''}>POS Exceptions &amp; Cashier Control Audit</option>
+      <option value="service-speed" ${reportId === 'service-speed' ? 'selected' : ''}>Speed of Service &amp; Kitchen Prep Analytics</option>
     `;
 
   const modalHtml = `
@@ -7854,15 +7863,50 @@ function openExportModal(root, reportId = 'daily-sales') {
         </div>
       </div>
 
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px;">
-        <button class="btn btn-ghost" id="modal-exp-cancel" style="font-size:12px;" type="button">Cancel</button>
-        <button class="btn btn-primary" id="modal-exp-gen" style="font-size:12px;font-weight:700;" type="button">Generate Export</button>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+        <button class="btn btn-ghost" id="modal-exp-preview" style="font-size:12px;display:flex;align-items:center;gap:6px;" type="button">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11-8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          Live 8K Preview
+        </button>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-ghost" id="modal-exp-cancel" style="font-size:12px;" type="button">Cancel</button>
+          <button class="btn btn-primary" id="modal-exp-gen" style="font-size:12px;font-weight:700;" type="button">Generate Export</button>
+        </div>
       </div>
     </div>
   `;
 
   openModal(modalHtml);
   document.getElementById('modal-exp-cancel')?.addEventListener('click', closeModal);
+
+  document.getElementById('modal-exp-preview')?.addEventListener('click', async () => {
+    const rep = document.getElementById('modal-exp-rep')?.value || reportId;
+    const cls = document.getElementById('modal-exp-cls')?.value || 'INTERNAL';
+    try {
+      showToast('Rendering certified 8K report preview...', 'info');
+      const res = await apiPost('/reports/export', {
+        reportId: rep,
+        format: 'PDF',
+        classification: cls,
+        cafeId: activeFilters.cafeId !== 'ALL' ? activeFilters.cafeId : undefined,
+        period: activeFilters.period,
+        dateFrom: activeFilters.period === 'custom' ? activeFilters.dateFrom : undefined,
+        dateTo: activeFilters.period === 'custom' ? activeFilters.dateTo : undefined,
+        comparison: activeFilters.comparison !== 'none' ? activeFilters.comparison : undefined,
+      });
+      if (res?.success && res.data?.html) {
+        const previewWindow = window.open('', '_blank');
+        if (previewWindow) {
+          previewWindow.document.open();
+          previewWindow.document.write(res.data.html);
+          previewWindow.document.close();
+        }
+      }
+    } catch (err) {
+      showToast(err?.message || 'Preview generation failed', 'error');
+    }
+  });
+
   document.getElementById('modal-exp-gen')?.addEventListener('click', async () => {
     const rep = document.getElementById('modal-exp-rep')?.value || reportId;
     const fmt = document.getElementById('modal-exp-fmt')?.value || 'PDF';
@@ -7901,6 +7945,23 @@ function openExportModal(root, reportId = 'daily-sales') {
           document.body.removeChild(a);
           URL.revokeObjectURL(url);
         } else if (fmt === 'PDF') {
+          if (res.data.pdfBase64) {
+            const byteCharacters = atob(res.data.pdfBase64);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+              byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: 'application/pdf' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = res.data.filename || `report_${rep}_${runId}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          }
           if (res.data.html) {
             const printWindow = window.open('', '_blank');
             if (printWindow) {
@@ -7961,15 +8022,46 @@ function openViewReportModal(root, reportId) {
         </div>
       </div>
 
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px;">
-        <button class="btn btn-ghost" id="modal-view-close" style="font-size:12px;" type="button">Close</button>
-        <button class="btn btn-primary" id="modal-view-export" style="font-size:12px;font-weight:700;" type="button">ZURF Export</button>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
+        <button class="btn btn-ghost" id="modal-view-preview" style="font-size:12px;display:flex;align-items:center;gap:6px;" type="button">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          Live 8K Preview
+        </button>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-ghost" id="modal-view-close" style="font-size:12px;" type="button">Close</button>
+          <button class="btn btn-primary" id="modal-view-export" style="font-size:12px;font-weight:700;" type="button">Export Report</button>
+        </div>
       </div>
     </div>
   `;
 
   openModal(modalHtml);
   document.getElementById('modal-view-close')?.addEventListener('click', closeModal);
+  document.getElementById('modal-view-preview')?.addEventListener('click', async () => {
+    try {
+      showToast('Rendering certified 8K report preview...', 'info');
+      const res = await apiPost('/reports/export', {
+        reportId,
+        format: 'PDF',
+        classification: 'INTERNAL',
+        cafeId: activeFilters.cafeId !== 'ALL' ? activeFilters.cafeId : undefined,
+        period: activeFilters.period,
+        dateFrom: activeFilters.period === 'custom' ? activeFilters.dateFrom : undefined,
+        dateTo: activeFilters.period === 'custom' ? activeFilters.dateTo : undefined,
+        comparison: activeFilters.comparison !== 'none' ? activeFilters.comparison : undefined,
+      });
+      if (res?.success && res.data?.html) {
+        const previewWindow = window.open('', '_blank');
+        if (previewWindow) {
+          previewWindow.document.open();
+          previewWindow.document.write(res.data.html);
+          previewWindow.document.close();
+        }
+      }
+    } catch (err) {
+      showToast(err?.message || 'Preview generation failed', 'error');
+    }
+  });
   document.getElementById('modal-view-export')?.addEventListener('click', () => {
     closeModal();
     openExportModal(root, reportId);

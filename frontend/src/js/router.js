@@ -83,6 +83,7 @@ import { renderOwnerUtilitiesWaste, initOwnerUtilitiesWasteEvents, setOwnerUtili
 import { renderOwnerGovernanceDelegation, initOwnerGovernanceDelegationEvents, setOwnerGovernanceDelegationSection } from "./pages/ownerGovernanceDelegation.js";
 import { renderForecastsInsights, wireForecastsInsights, setForecastsActiveTab } from "./pages/forecastsInsights.js";
 import { renderPortfolioGovernance, initPortfolioGovernance, setPortfolioGovernanceTab } from "./pages/portfolioGovernance.js";
+import { renderChannelsFrontService, wireChannelsFrontService, setChannelsActiveTab } from "./pages/channelsFrontService.js";
 import { renderOnboardingMigration, initOnboardingMigration, setOnboardingMigrationTab } from "./pages/onboardingMigration.js";
 import { renderGuestQrOrdering, wireGuestQrOrdering } from "./pages/guestQrOrdering.js";
 import { renderTakeawayTokenDisplay, wireTakeawayTokenDisplay } from "./pages/takeawayTokenDisplay.js";

@@ -583,10 +583,29 @@ function authorize(
           })
         );
 
-      const decision =
+      let decision =
         selectEffectiveDecision(
           applicableRules
         );
+
+      if (!decision.allowed && applicableRules.length === 0) {
+        const isMaster = (auth.role === 'MASTER' || auth.role === 'PRIMARY_MASTER') && Boolean(auth.isPrimaryMaster);
+        const isRoleInAllowed = Array.isArray(allowedRoles) && (allowedRoles.includes(auth.role) || (allowedRoles.includes('MASTER') && isMaster));
+        if (isRoleInAllowed || isMaster || hasMatchingCapability) {
+          decision = {
+            allowed: true,
+            rule: {
+              permissionRuleId: 'DEFAULT',
+              scope: 'ORGANISATION',
+              requiresMfa: false,
+              requiresStepUpAuthentication: false,
+              requiresReason: false,
+              requiresAuditEvent: false,
+              requiresReauthentication: false,
+            },
+          };
+        }
+      }
 
       if (!decision.allowed) {
         return sendAuthorizationError(
@@ -612,23 +631,22 @@ function authorize(
         permissionCode:
           normalizedPermissionCode,
         permissionRuleId:
-          decision.rule.permissionRuleId,
-        scope: decision.rule.scope,
+          decision.rule?.permissionRuleId || 'DEFAULT',
+        scope: decision.rule?.scope || 'ORGANISATION',
         cafeId,
         targetUserId,
         requiresReason:
-          decision.rule.requiresReason,
+          decision.rule?.requiresReason || false,
         requiresAuditEvent:
-          decision.rule
-            .requiresAuditEvent,
+          decision.rule?.requiresAuditEvent !== false,
         allowedFields:
-          decision.rule.fieldAccess
+          decision.rule?.fieldAccess
             ?.allowedFields || [],
         deniedFields:
-          decision.rule.fieldAccess
+          decision.rule?.fieldAccess
             ?.deniedFields || [],
         maskedFields:
-          decision.rule.fieldAccess
+          decision.rule?.fieldAccess
             ?.maskedFields || [],
       };
 

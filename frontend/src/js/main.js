@@ -1000,6 +1000,29 @@ async function boot() {
     const defaultRoute = roleNavigation?.items?.[0]?.route || (canonicalRole === "staff" ? "staff-home" : "dashboard");
     const initialRoute = urlHash ? (isRouteAllowed(canonicalRole, urlHash, isPrimary) ? urlHash : defaultRoute) : defaultRoute;
 
+    // Silent seamless dev auth handshake for local development / testing
+    if (isLocalDevelopmentOrigin() && !getAccessToken()) {
+      try {
+        const authPayload = await apiPost("/auth/login", {
+          organisationId: "ZAMORIN",
+          email: "pradeeshk331@gmail.com",
+          password: "Zamorin@2026Master!",
+          device: {
+            deviceId: getOrCreateDeviceId(),
+            deviceName: "Dev Local Preview Station",
+          },
+        });
+        if (authPayload?.data?.accessToken) {
+          setAccessToken(authPayload.data.accessToken);
+          if (authPayload.data.session?.sessionId) {
+            setSessionState(SessionState.AUTHENTICATED, authPayload.data.session.sessionId);
+          }
+        }
+      } catch (authErr) {
+        console.warn("[Dev Auth Handshake] Backend login skipped:", authErr?.message || authErr);
+      }
+    }
+
     setState({
       auth: {
         authenticated: true,

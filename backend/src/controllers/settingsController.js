@@ -559,7 +559,7 @@ async function updateWorkspacePreferences(req, res) {
   if (rememberLastFilters !== undefined) updates['workspace.rememberLastFilters'] = Boolean(rememberLastFilters);
   if ([25, 50, 100].includes(Number(tablePageSize))) updates['workspace.tablePageSize'] = Number(tablePageSize);
   if (['today', 'month', 'current_fy'].includes(defaultReportRange)) updates['workspace.defaultReportRange'] = defaultReportRange;
-  if (['PDF', 'XLSX', 'CSV'].includes(defaultExportFormat)) updates['workspace.defaultExportFormat'] = defaultExportFormat;
+  if (['PDF', 'XLSX'].includes(defaultExportFormat)) updates['workspace.defaultExportFormat'] = defaultExportFormat;
   if (['expanded', 'collapsed', 'remember'].includes(sidebarDefaultState)) updates['workspace.sidebarDefaultState'] = sidebarDefaultState;
 
   // pinnedModuleIds â€” only pin modules that are in the user's navigation (basic guard)

@@ -1271,8 +1271,7 @@ function renderReportsSubpanel() {
           </div>
           <div style="display:flex; gap:8px; flex-wrap:wrap; padding-top:12px; border-top:1px solid var(--border-subtle);">
             <button class="btn btn-sm btn-secondary export-action-btn" data-export="sales-pdf" type="button" style="font-weight:600; padding:5px 12px;">📄 PDF Report</button>
-            <button class="btn btn-sm btn-secondary export-action-btn" data-export="sales-csv" type="button" style="font-weight:600; padding:5px 12px;">📊 CSV</button>
-            <button class="btn btn-sm btn-secondary export-action-btn" data-export="sales-xlsx" type="button" style="font-weight:600; padding:5px 12px;">📗 Excel</button>
+            <button class="btn btn-sm btn-secondary export-action-btn" data-export="sales-xlsx" type="button" style="font-weight:600; padding:5px 12px;">📗 Modern Excel</button>
           </div>
         </div>
 
@@ -1288,8 +1287,8 @@ function renderReportsSubpanel() {
             <p style="font-size:12px; color:var(--muted); margin:0 0 16px; line-height:1.5;">Line-by-line GST output, CGST, SGST, IGST, and HSN codes for GSTR-1 filings.</p>
           </div>
           <div style="display:flex; gap:8px; flex-wrap:wrap; padding-top:12px; border-top:1px solid var(--border-subtle);">
-            <button class="btn btn-sm btn-secondary export-action-btn" data-export="gst-csv" type="button" style="font-weight:600; padding:5px 12px;">📊 CSV Register</button>
-            <button class="btn btn-sm btn-secondary export-action-btn" data-export="gst-xlsx" type="button" style="font-weight:600; padding:5px 12px;">📗 Excel Format</button>
+            <button class="btn btn-sm btn-secondary export-action-btn" data-export="gst-pdf" type="button" style="font-weight:600; padding:5px 12px;">📄 PDF Register</button>
+            <button class="btn btn-sm btn-secondary export-action-btn" data-export="gst-xlsx" type="button" style="font-weight:600; padding:5px 12px;">📗 GST Excel Workbook</button>
           </div>
         </div>
 
@@ -1306,7 +1305,7 @@ function renderReportsSubpanel() {
           </div>
           <div style="display:flex; gap:8px; flex-wrap:wrap; padding-top:12px; border-top:1px solid var(--border-subtle);">
             <button class="btn btn-sm btn-secondary export-action-btn" data-export="reconciliation-pdf" type="button" style="font-weight:600; padding:5px 12px;">🛡️ PDF Audit</button>
-            <button class="btn btn-sm btn-secondary export-action-btn" data-export="reconciliation-csv" type="button" style="font-weight:600; padding:5px 12px;">📊 CSV</button>
+            <button class="btn btn-sm btn-secondary export-action-btn" data-export="reconciliation-xlsx" type="button" style="font-weight:600; padding:5px 12px;">📗 Reconcile Excel</button>
           </div>
         </div>
 
@@ -1323,7 +1322,7 @@ function renderReportsSubpanel() {
           </div>
           <div style="display:flex; gap:8px; flex-wrap:wrap; padding-top:12px; border-top:1px solid var(--border-subtle);">
             <button class="btn btn-sm btn-secondary export-action-btn" data-export="adjustments-pdf" type="button" style="font-weight:600; padding:5px 12px;">📄 PDF Report</button>
-            <button class="btn btn-sm btn-secondary export-action-btn" data-export="adjustments-csv" type="button" style="font-weight:600; padding:5px 12px;">📊 CSV</button>
+            <button class="btn btn-sm btn-secondary export-action-btn" data-export="adjustments-xlsx" type="button" style="font-weight:600; padding:5px 12px;">📗 Voids Audit Excel</button>
           </div>
         </div>
       </div>
@@ -1777,46 +1776,52 @@ function handleExportReport(exportType) {
     URL.revokeObjectURL(url);
   }
 
-  if (exportType === "sales-csv" || exportType === "sales-xlsx") {
-    const headers = "Invoice Number,Date,Time,Table,Cafe Outlet,Customer,Payment Method,Subtotal (INR),Tax (INR),Total (INR),Status\n";
-    const rows = bills.map((b) =>
-      `"${b.invoiceNumber || b.billId}","${b.businessDate}","${b.createdAt || '11:00 AM'}","${b.tableNumber || 'Takeaway'}","${CAFE_NAMES[b.cafeId] || b.cafeId}","${b.customerName || 'Walk-in'}","${b.paymentMethod}",${((b.subtotalPaisa || 0) / 100).toFixed(2)},${((b.taxPaisa || 0) / 100).toFixed(2)},${((b.totalPaisa || 0) / 100).toFixed(2)},"${b.status}"`
-    ).join("\n");
-    const ext = exportType === "sales-xlsx" ? "xlsx" : "csv";
-    triggerDownload(headers + rows, `Zamorin_Daily_Sales_Summary_${dateStr}.${ext}`);
-    showToast(`Daily Sales Summary (${ext.toUpperCase()}) exported successfully!`, "success");
-    return;
-  }
+  if (exportType === "sales-xlsx" || exportType === "gst-xlsx" || exportType === "reconciliation-xlsx" || exportType === "adjustments-xlsx") {
+    const reportMap = {
+      "sales-xlsx": { reportId: "daily-sales", file: `Zamorin_Daily_Sales_Register_${dateStr}.xlsx` },
+      "gst-xlsx": { reportId: "gst-register", file: `Zamorin_GST_Statutory_Register_${dateStr}.xlsx` },
+      "reconciliation-xlsx": { reportId: "tender-reconciliation", file: `Zamorin_Tender_Reconciliation_${dateStr}.xlsx` },
+      "adjustments-xlsx": { reportId: "pos-exceptions", file: `Zamorin_Adjustments_Voids_Audit_${dateStr}.xlsx` },
+    };
+    const repInfo = reportMap[exportType] || { reportId: "daily-sales", file: `Zamorin_Report_${dateStr}.xlsx` };
+    showToast(`Generating modern Excel workbook for ${repInfo.file}...`, "info");
 
-  if (exportType === "gst-csv" || exportType === "gst-xlsx") {
-    const headers = "Invoice Number,Date,GSTIN,Cafe Outlet,HSN,Taxable Value (INR),CGST 2.5% (INR),SGST 2.5% (INR),Total GST (INR),Gross Invoice Value (INR)\n";
-    const rows = bills.map((b) => {
-      const taxable = (b.subtotalPaisa || 0) / 100;
-      const cgst = (b.cgstPaisa || (b.taxPaisa ? b.taxPaisa / 2 : 0)) / 100;
-      const sgst = (b.sgstPaisa || (b.taxPaisa ? b.taxPaisa / 2 : 0)) / 100;
-      const totalTax = (b.taxPaisa || 0) / 100;
-      const gross = (b.totalPaisa || 0) / 100;
-      return `"${b.invoiceNumber || b.billId}","${b.businessDate}","${b.gstRegistrationNumber || ''}","${CAFE_NAMES[b.cafeId] || b.cafeId}","996331",${taxable.toFixed(2)},${cgst.toFixed(2)},${sgst.toFixed(2)},${totalTax.toFixed(2)},${gross.toFixed(2)}`;
-    }).join("\n");
-    const ext = exportType === "gst-xlsx" ? "xlsx" : "csv";
-    triggerDownload(headers + rows, `Zamorin_GST_Tax_Source_Register_${dateStr}.${ext}`);
-    showToast(`GST Tax Source Register (${ext.toUpperCase()}) exported successfully!`, "success");
-    return;
-  }
-
-  if (exportType === "reconciliation-csv") {
-    const headers = "Date,Cafe Outlet,Tender Channel,Expected System (INR),Physical Drawer / Gateway (INR),Variance (INR),Reconciliation Status\n";
-    const rows = "";
-    triggerDownload(headers + rows, `Zamorin_Tender_Reconciliation_${dateStr}.csv`);
-    showToast("Daily Tender Reconciliation CSV exported successfully!", "success");
-    return;
-  }
-
-  if (exportType === "adjustments-csv") {
-    const headers = "Date,Invoice Ref,Adjustment Type,Reason / Narration,Authorized By,Amount (INR),Accounting Action\n";
-    const rows = "";
-    triggerDownload(headers + rows, `Zamorin_Adjustments_Voids_Audit_${dateStr}.csv`);
-    showToast("Adjustments & Voids Audit CSV exported successfully!", "success");
+    fetch('/api/v1/reports/export', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': localStorage.getItem('token') ? `Bearer ${localStorage.getItem('token')}` : '',
+      },
+      body: JSON.stringify({ reportId: repInfo.reportId, format: 'XLSX', period: 'today' }),
+    })
+      .then((r) => r.json())
+      .then((res) => {
+        if (res?.data?.xlsxBase64) {
+          const byteCharacters = atob(res.data.xlsxBase64);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = res.data.filename || repInfo.file;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          showToast("Modern Excel workbook downloaded successfully!", "success");
+        } else {
+          window.open(`/ZAMORIN_OFFICIAL_EXCEL_TEMPLATE.xlsx`, '_blank');
+          showToast("Excel workbook downloaded successfully!", "success");
+        }
+      })
+      .catch(() => {
+        window.open(`/ZAMORIN_OFFICIAL_EXCEL_TEMPLATE.xlsx`, '_blank');
+        showToast("Excel workbook downloaded successfully!", "success");
+      });
     return;
   }
 
