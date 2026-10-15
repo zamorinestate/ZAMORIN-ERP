@@ -16,6 +16,7 @@ const ROLE_LABELS = {
   [ROLES.OWNER]: "Cafe Owner",
   [ROLES.CAFE_ADMIN]: "Cafe Operations",
   [ROLES.STAFF]: "Staff",
+  [ROLES.VENDOR]: "Supplier Partner",
 };
 
 const ROLE_INITIALS = {
@@ -23,6 +24,7 @@ const ROLE_INITIALS = {
   [ROLES.OWNER]: "BO",
   [ROLES.CAFE_ADMIN]: "OP",
   [ROLES.STAFF]: "SA",
+  [ROLES.VENDOR]: "VP",
 };
 
 const SIDEBAR_COLLAPSED_KEY = "zamorin-sidebar-collapsed";
@@ -178,6 +180,7 @@ export function renderTopbar({ scopeChip } = {}) {
     : (ROLE_INITIALS[role] || "ZU");
   const isStaff = role === ROLES.STAFF;
   const isCafeOps = role === ROLES.CAFE_ADMIN;
+  const isVendor = role === ROLES.VENDOR;
 
   // Dynamic online/offline badge for Cafe Operations Context Bar
   function getConnectivityBadge() {
@@ -206,6 +209,7 @@ export function renderTopbar({ scopeChip } = {}) {
             <option value="owner" ${currentWs === 'owner' ? 'selected' : ''}>👑 Owner Portal</option>
             <option value="cafe_admin" ${currentWs === 'cafe_admin' ? 'selected' : ''}>☕ Café Operations</option>
             <option value="staff" ${currentWs === 'staff' ? 'selected' : ''}>👤 Staff Preview</option>
+            <option value="vendor" ${currentWs === 'vendor' ? 'selected' : ''}>🏢 Vendor Portal</option>
           </select>
         </div>
         <div class="cafe-scope-dropdown">
@@ -247,6 +251,18 @@ export function renderTopbar({ scopeChip } = {}) {
         <span style="font-size:13px;">📍</span>
         <span>${user.primaryCafeName || (user.primaryCafeId ? `Outlet ${user.primaryCafeId}` : "Assigned Outlet")}</span>
       </div>`;
+  } else if (isVendor) {
+    const supplierName = user.name || "Demo Supplier Co.";
+    const supplierId = user.vendorId || "VENDOR-DEMO-001";
+    cafeScopeHtml = `
+      <div class="vendor-scope-context" style="display:inline-flex; align-items:center; flex-wrap:wrap; gap:8px; padding:4px 10px; border-radius:var(--radius-md); background:var(--surface-sunken); border:1px solid var(--line); font-size:12px; color:var(--ink);">
+        <span style="font-weight:700; display:inline-flex; align-items:center; gap:4px; color:var(--bronze-500);">🏢 ${supplierName}</span>
+        <span style="color:var(--muted); opacity:0.6;">·</span>
+        <span style="font-family:var(--font-mono, monospace); font-size:11px; color:var(--muted); font-weight:600;">${supplierId}</span>
+        <span style="color:var(--muted); opacity:0.6;">·</span>
+        <span style="display:inline-flex; align-items:center; gap:3px; padding:1px 7px; border-radius:99px; background:#dc262618; color:#dc2626; font-size:10px; font-weight:700; border:1px solid #dc262633;">🔒 READ-ONLY</span>
+      </div>
+    `;
   } else {
     const cafeOptions = (state.cafes || []).map(c => `<option value="${c.cafeId || c.id || c.code}" ${(state.selectedCafeId === (c.cafeId || c.id || c.code)) ? 'selected' : ''}>☕ ${c.cafeId || c.id || c.code} · ${c.name || 'Outlet'}</option>`).join('');
     cafeScopeHtml = `<div class="cafe-scope-dropdown">
@@ -261,6 +277,8 @@ export function renderTopbar({ scopeChip } = {}) {
     ? "Search attendance, payslips, requests..."
     : isCafeOps
     ? "Search this café…"
+    : isVendor
+    ? "Search purchase orders, deliveries..."
     : "Search modules, records, employees...";
 
   return `
@@ -514,6 +532,11 @@ export function wireBell(root) {
         state.activeWorkspace = "staff";
         showToast("Switched workspace to Staff Self-Service Preview", "info");
         navigate("staff-home");
+      } else if (targetWs === "vendor") {
+        state.role = ROLES.VENDOR;
+        state.activeWorkspace = "vendor";
+        showToast("Switched workspace to Vendor Portal (Fifth Window)", "info");
+        navigate("vendor-dashboard");
       }
     });
   }

@@ -3,10 +3,12 @@
 //
 // External supplier / vendor workspace. Strictly read-only.
 // Design principles:
-//   - Clean, professional, enterprise aesthetic with supplier branding.
-//   - Prominent "READ-ONLY" status badges to prevent confusion.
+//   - Clean, professional, enterprise aesthetic integrating with ERP design tokens.
+//   - No duplicate nested shells — works seamlessly within the main ERP shell.
+//   - Prominent "READ-ONLY" status badges to guarantee role isolation.
+//   - Quick navigation pill tabs to easily switch between supplier views.
 //   - Keyboard navigable order list with full modal detail view.
-//   - Responsive layout; works from mobile to desktop.
+//   - Graceful Dev-Preview / Unauthenticated Localhost fixtures for inspection.
 //   - API base: /api/v1/vendor-portal/*
 // =============================================================================
 
@@ -41,57 +43,151 @@ function statusBadge(status) {
     RECEIVED_PENDING_FINAL_POSTING: ["#065f46", "Pending Post"],
     RECEIVED: ["#059669", "Received"],
     CLOSED: ["#475569", "Closed"],
+    SETTLED: ["#059669", "Settled"],
+    POSTED: ["#2563eb", "Posted"],
+    VERIFIED_PHYSICAL_RECEIPT: ["#059669", "Verified Receipt"],
   };
-  const [color, label] = map[status] || ["#94a3b8", status];
-  return `<span style="display:inline-block;padding:2px 9px;border-radius:99px;background:${color}22;color:${color};font-size:11px;font-weight:700;letter-spacing:.5px;border:1px solid ${color}44;">${label}</span>`;
+  const [color, label] = map[status] || ["#64748b", status || "Standard"];
+  return `<span class="vp-badge" style="background:${color}18; color:${color}; border-color:${color}44;">${label}</span>`;
 }
 
 function readOnlyBadge() {
-  return `<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:99px;background:#dc262622;color:#dc2626;font-size:11px;font-weight:700;border:1px solid #dc262644;">
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-    READ-ONLY
+  return `<span class="vp-readonly-badge">
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+    STRICTLY READ-ONLY
   </span>`;
 }
 
-// ─── Sidebar active link helper ───────────────────────────────────────────────
-function vendorSidebarActive(route) {
-  const routes = ["vendor-dashboard", "vendor-orders", "vendor-deliveries", "vendor-statements", "vendor-profile"];
-  return routes.map(r => {
-    const isActive = r === route;
-    const labels = {
-      "vendor-dashboard": "Overview",
-      "vendor-orders": "Issued Orders",
-      "vendor-deliveries": "Deliveries",
-      "vendor-statements": "Statements",
-      "vendor-profile": "Business Profile",
-    };
-    const icons = {
-      "vendor-dashboard": `<path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v9a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9"/>`,
-      "vendor-orders": `<path d="M6 6h15l-1.5 9h-12Z"/><circle cx="9" cy="19" r="1.4"/><circle cx="17" cy="19" r="1.4"/><path d="M3 3h2l1 3"/>`,
-      "vendor-deliveries": `<path d="M20 7 12 3 4 7v10l8 4 8-4Z"/><path d="M4 7l8 4 8-4M12 11v10"/>`,
-      "vendor-statements": `<path d="M12 1v22M17 5.5c0-1.9-2.2-3-5-3s-5 1.3-5 3 2.2 2.6 5 3 5 1.1 5 3-2.2 3-5 3-5-1.1-5-3"/>`,
-      "vendor-profile": `<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>`,
-    };
-    return `<a href="#${r}" id="vnav-${r}" class="vendor-nav-item${isActive ? " active" : ""}" role="menuitem" tabindex="0" data-route="${r}">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">${icons[r]}</svg>
-      ${labels[r]}
-    </a>`;
-  }).join("");
+function isDevOrLocalhost() {
+  return Boolean(
+    state.user?.isDevPreview ||
+    state.auth?.user?.isDevPreview ||
+    (typeof location !== "undefined" && (location.hostname === "localhost" || location.hostname === "127.0.0.1"))
+  );
 }
 
-// ─── Dashboard Panel ──────────────────────────────────────────────────────────
+// ─── High-Fidelity Canonical Fixtures (for Dev Preview / Localhost) ───────────
+const CANONICAL_FIXTURES = {
+  profile: {
+    vendorId: "VENDOR-DEMO-001",
+    legalBusinessName: "Malabar Roasters & Plantation Supplies Pvt Ltd",
+    tradeName: "Demo Supplier Co.",
+    vendorCategory: "Coffee & Beverage Raw Ingredients",
+    supplierType: "DIRECT_MANUFACTURER",
+    status: "ACTIVE / VERIFIED",
+    gstin: "32AAECM1234F1Z8",
+    panMasked: "AAECM••••F",
+    fssaiLicenseNumber: "10020042001984",
+    paymentTerms: "NET_30",
+    bankDetails: {
+      bankName: "HDFC Bank",
+      accountHolderName: "Malabar Roasters & Plantation Supplies Pvt Ltd",
+      accountNumberMasked: "•••• •••• •••• 8842",
+      ifscCode: "HDFC0000184",
+      branchName: "Calicut Main Branch",
+    },
+    primaryContact: {
+      name: "Rajesh Varma",
+      phone: "+91 98470 12345",
+      email: "supply@demoroasters.test",
+      designation: "Key Account Lead - HoReCa",
+    },
+    supportContact: {
+      role: "Café Central Procurement Desk",
+      phone: "+91 94470 12345",
+      email: "procurement@zamorin.test",
+      helpNotice: "To update tax registration, banking, or contact credentials, contact Central Operations via verified corporate email.",
+    },
+  },
+
+  dashboard: {
+    totalIssuedOrdersCount: 14,
+    pendingDeliveriesCount: 2,
+    completedOrdersCount: 12,
+    totalIssuedValuePaisa: 48520000,
+    pendingDeliveryValuePaisa: 3845000,
+    lastOrderDate: new Date(Date.now() - 86400000 * 2).toISOString(),
+    recentOrders: [
+      { purchaseOrderId: "PO-2026-0042", cafeId: "KOZHIKODE-BEACH", orderDate: new Date(Date.now() - 86400000 * 2).toISOString(), status: "ORDERED", totalPaisa: 2450000 },
+      { purchaseOrderId: "PO-2026-0039", cafeId: "CALICUT-CYBERPARK", orderDate: new Date(Date.now() - 86400000 * 5).toISOString(), status: "DISPATCHED", totalPaisa: 1395000 },
+      { purchaseOrderId: "PO-2026-0035", cafeId: "MALABAR-MALL", orderDate: new Date(Date.now() - 86400000 * 9).toISOString(), status: "RECEIVED", totalPaisa: 4120000 },
+      { purchaseOrderId: "PO-2026-0028", cafeId: "WAYANAD-ROAD", orderDate: new Date(Date.now() - 86400000 * 14).toISOString(), status: "RECEIVED", totalPaisa: 3875000 },
+      { purchaseOrderId: "PO-2026-0021", cafeId: "KOZHIKODE-BEACH", orderDate: new Date(Date.now() - 86400000 * 21).toISOString(), status: "CLOSED", totalPaisa: 5210000 },
+    ],
+  },
+
+  orders: [
+    { purchaseOrderId: "PO-2026-0042", cafeId: "KOZHIKODE-BEACH", orderDate: new Date(Date.now() - 86400000 * 2).toISOString(), expectedDeliveryDate: new Date(Date.now() + 86400000 * 3).toISOString(), status: "ORDERED", totalPaisa: 2450000, itemCount: 4 },
+    { purchaseOrderId: "PO-2026-0039", cafeId: "CALICUT-CYBERPARK", orderDate: new Date(Date.now() - 86400000 * 5).toISOString(), expectedDeliveryDate: new Date(Date.now() + 86400000 * 1).toISOString(), status: "DISPATCHED", totalPaisa: 1395000, itemCount: 2 },
+    { purchaseOrderId: "PO-2026-0035", cafeId: "MALABAR-MALL", orderDate: new Date(Date.now() - 86400000 * 9).toISOString(), expectedDeliveryDate: new Date(Date.now() - 86400000 * 6).toISOString(), status: "RECEIVED", totalPaisa: 4120000, itemCount: 6 },
+    { purchaseOrderId: "PO-2026-0028", cafeId: "WAYANAD-ROAD", orderDate: new Date(Date.now() - 86400000 * 14).toISOString(), expectedDeliveryDate: new Date(Date.now() - 86400000 * 11).toISOString(), status: "RECEIVED", totalPaisa: 3875000, itemCount: 5 },
+    { purchaseOrderId: "PO-2026-0021", cafeId: "KOZHIKODE-BEACH", orderDate: new Date(Date.now() - 86400000 * 21).toISOString(), expectedDeliveryDate: new Date(Date.now() - 86400000 * 18).toISOString(), status: "CLOSED", totalPaisa: 5210000, itemCount: 7 },
+  ],
+
+  deliveries: [
+    { grnId: "GRN-2026-089", purchaseOrderId: "PO-2026-0035", cafeId: "MALABAR-MALL", receivedAt: new Date(Date.now() - 86400000 * 6).toISOString(), status: "VERIFIED_PHYSICAL_RECEIPT", itemCount: 6 },
+    { grnId: "GRN-2026-074", purchaseOrderId: "PO-2026-0028", cafeId: "WAYANAD-ROAD", receivedAt: new Date(Date.now() - 86400000 * 11).toISOString(), status: "VERIFIED_PHYSICAL_RECEIPT", itemCount: 5 },
+    { grnId: "GRN-2026-052", purchaseOrderId: "PO-2026-0021", cafeId: "KOZHIKODE-BEACH", receivedAt: new Date(Date.now() - 86400000 * 18).toISOString(), status: "VERIFIED_PHYSICAL_RECEIPT", itemCount: 7 },
+  ],
+
+  statements: [
+    { entryId: "VLE-2026-019", postingDate: new Date(Date.now() - 86400000 * 3).toISOString(), transactionType: "BANK_PAYMENT_SETTLEMENT", documentReference: "UTR-HDFC-9912049", amountPaisa: 4120000, runningBalancePaisa: 3845000, status: "SETTLED" },
+    { entryId: "VLE-2026-016", postingDate: new Date(Date.now() - 86400000 * 7).toISOString(), transactionType: "PURCHASE_INVOICE_POSTED", documentReference: "INV-MR-4402", amountPaisa: 4120000, runningBalancePaisa: 7965000, status: "POSTED" },
+    { entryId: "VLE-2026-012", postingDate: new Date(Date.now() - 86400000 * 12).toISOString(), transactionType: "BANK_PAYMENT_SETTLEMENT", documentReference: "UTR-HDFC-8830114", amountPaisa: 3875000, runningBalancePaisa: 3845000, status: "SETTLED" },
+    { entryId: "VLE-2026-009", postingDate: new Date(Date.now() - 86400000 * 15).toISOString(), transactionType: "PURCHASE_INVOICE_POSTED", documentReference: "INV-MR-4389", amountPaisa: 3875000, runningBalancePaisa: 7720000, status: "POSTED" },
+  ],
+
+  sampleOrderDetails: {
+    purchaseOrderId: "PO-2026-0042",
+    cafeId: "KOZHIKODE-BEACH",
+    orderDate: new Date(Date.now() - 86400000 * 2).toISOString(),
+    expectedDeliveryDate: new Date(Date.now() + 86400000 * 3).toISOString(),
+    paymentTerms: "NET_30",
+    status: "ORDERED",
+    subtotalPaisa: 2333333,
+    taxPaisa: 116667,
+    totalPaisa: 2450000,
+    clarificationNotice: "Official Zamorin Café Enterprise Order. Delivery dock hours: 07:00 AM - 11:30 AM. Batch certificates and temperature logs must accompany cold-chain supplies.",
+    lineItems: [
+      { itemName: "Malabar Single Origin Arabica Beans", supplierItemCode: "BEANS-MSO-01", packSize: "5 KG BAG", quantityOrdered: 8, unitPricePaisa: 195000, gstPercent: 5, lineTotalPaisa: 1638000 },
+      { itemName: "Organic Barista Oat Milk", supplierItemCode: "DAIRY-OAT-01", packSize: "12x1L CTN", quantityOrdered: 4, unitPricePaisa: 125000, gstPercent: 5, lineTotalPaisa: 525000 },
+      { itemName: "Classic Filter Chicory Roast", supplierItemCode: "BEANS-CFR-02", packSize: "2 KG PACK", quantityOrdered: 5, unitPricePaisa: 55000, gstPercent: 5, lineTotalPaisa: 287000 },
+    ],
+  },
+};
+
+// ─── Section Definition ───────────────────────────────────────────────────────
+const SECTION_TITLES = {
+  "vendor-dashboard": "Supplier Overview",
+  "vendor-orders": "Issued Purchase Orders",
+  "vendor-deliveries": "Delivery Receipts",
+  "vendor-statements": "Account Statements",
+  "vendor-profile": "Business Profile",
+  "vendor-portal": "Issued Purchase Orders",
+};
+
+const SECTION_DESCRIPTIONS = {
+  "vendor-dashboard": "Executive procurement summary, delivery tracking, and recent purchase activity.",
+  "vendor-orders": "Official purchase orders issued by Zamorin Café outlets, with detailed line items and print capabilities.",
+  "vendor-deliveries": "Verified physical goods receipt notes (GRN) logged at café receiving docks.",
+  "vendor-statements": "Official accounts payable ledger records, settled disbursements, and running trade balances.",
+  "vendor-profile": "Verified corporate identity, banking details, and designated procurement support channels.",
+  "vendor-portal": "Official purchase orders issued by Zamorin Café outlets, with detailed line items and print capabilities.",
+};
+
+// ─── Panel Renderers ──────────────────────────────────────────────────────────
+
 function renderDashboardContent() {
   return `<div class="vp-loading" id="vp-dashboard-loading" aria-live="polite">Loading supplier overview…</div>
 <div id="vp-dashboard-data" hidden></div>`;
 }
 
-// ─── Orders Panel ─────────────────────────────────────────────────────────────
 function renderOrdersContent() {
   return `
 <div class="vp-toolbar" role="search" aria-label="Order search and filter">
   <div class="vp-search-wrap">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4.2-4.2"/></svg>
-    <input id="vp-order-search" class="vp-input" type="search" placeholder="Search order ID…" aria-label="Search orders" autocomplete="off">
+    <input id="vp-order-search" class="vp-input" type="search" placeholder="Search PO or outlet…" aria-label="Search orders" autocomplete="off">
   </div>
   <select id="vp-status-filter" class="vp-select" aria-label="Filter by status">
     <option value="ALL">All Statuses</option>
@@ -107,33 +203,20 @@ function renderOrdersContent() {
 <div id="vp-order-modal" class="vp-modal" role="dialog" aria-modal="true" aria-label="Order Details" hidden></div>`;
 }
 
-// ─── Deliveries Panel ─────────────────────────────────────────────────────────
 function renderDeliveriesContent() {
   return `<div class="vp-loading" id="vp-deliveries-loading" aria-live="polite">Loading delivery records…</div>
 <div id="vp-deliveries-data" hidden></div>`;
 }
 
-// ─── Statements Panel ─────────────────────────────────────────────────────────
 function renderStatementsContent() {
   return `<div class="vp-loading" id="vp-statements-loading" aria-live="polite">Loading account statements…</div>
 <div id="vp-statements-data" hidden></div>`;
 }
 
-// ─── Profile Panel ────────────────────────────────────────────────────────────
 function renderProfileContent() {
   return `<div class="vp-loading" id="vp-profile-loading" aria-live="polite">Loading business profile…</div>
 <div id="vp-profile-data" hidden></div>`;
 }
-
-// ─── Page sections ────────────────────────────────────────────────────────────
-const SECTION_TITLES = {
-  "vendor-dashboard": "Supplier Overview",
-  "vendor-orders": "Issued Purchase Orders",
-  "vendor-deliveries": "Delivery Receipts",
-  "vendor-statements": "Account Statements",
-  "vendor-profile": "Business Profile",
-  "vendor-portal": "Issued Purchase Orders",
-};
 
 const SECTION_CONTENT = {
   "vendor-dashboard": renderDashboardContent,
@@ -144,152 +227,612 @@ const SECTION_CONTENT = {
   "vendor-portal": renderOrdersContent,
 };
 
-// ─── CSS ─────────────────────────────────────────────────────────────────────
+// ─── Scoped CSS (Harmonized with ERP Tokens) ──────────────────────────────────
 const VENDOR_PORTAL_CSS = `
 <style id="vp-styles">
-.vp-shell { display:flex; min-height:100%; background:#0f172a; color:#e2e8f0; font-family:'Inter',system-ui,sans-serif; }
-.vp-sidebar { width:220px; flex-shrink:0; background:#0b1120; border-right:1px solid #1e293b; padding:24px 0 32px; display:flex; flex-direction:column; }
-.vp-brand { padding:0 20px 24px; border-bottom:1px solid #1e293b; margin-bottom:16px; }
-.vp-brand-title { font-size:12px; font-weight:800; letter-spacing:1.5px; color:#94a3b8; text-transform:uppercase; }
-.vp-brand-name { font-size:15px; font-weight:700; color:#f1f5f9; margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.vp-nav { display:flex; flex-direction:column; gap:2px; padding:0 8px; flex:1; }
-.vendor-nav-item { display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:8px; color:#94a3b8; font-size:13px; font-weight:500; text-decoration:none; transition:all 0.15s; cursor:pointer; border:none; background:transparent; }
-.vendor-nav-item:hover { color:#e2e8f0; background:#1e293b; }
-.vendor-nav-item.active { color:#38bdf8; background:#0ea5e920; font-weight:700; }
-.vendor-nav-item svg { flex-shrink:0; }
-.vp-sidebar-footer { padding:16px 20px 0; border-top:1px solid #1e293b; margin-top:auto; }
-.vp-sidebar-support { font-size:11px; color:#475569; line-height:1.5; }
-.vp-sidebar-support a { color:#38bdf8; text-decoration:none; }
-.vp-main { flex:1; display:flex; flex-direction:column; min-width:0; }
-.vp-topbar { display:flex; align-items:center; justify-content:space-between; padding:12px 24px; border-bottom:1px solid #1e293b; background:#0f172a; position:sticky; top:0; z-index:10; }
-.vp-topbar-left { display:flex; align-items:center; gap:12px; }
-.vp-topbar-title { font-size:16px; font-weight:700; color:#f1f5f9; }
-.vp-topbar-right { display:flex; align-items:center; gap:10px; }
-.vp-content { flex:1; padding:28px 28px 48px; overflow-y:auto; }
-.vp-loading { color:#64748b; font-size:14px; padding:40px 0; text-align:center; }
-.vp-error { color:#f87171; font-size:14px; padding:20px; background:#7f1d1d22; border-radius:8px; border:1px solid #7f1d1d44; }
-.vp-metric-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:16px; margin-bottom:28px; }
-.vp-metric-card { background:#1e293b; border:1px solid #334155; border-radius:12px; padding:20px 18px; }
-.vp-metric-label { font-size:11px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:.7px; margin-bottom:6px; }
-.vp-metric-value { font-size:22px; font-weight:800; color:#f1f5f9; }
-.vp-metric-sub { font-size:11px; color:#64748b; margin-top:4px; }
-.vp-table-wrap { overflow-x:auto; }
-.vp-table { width:100%; border-collapse:collapse; font-size:13px; }
-.vp-table th { background:#1e293b; color:#94a3b8; font-weight:700; font-size:11px; letter-spacing:.5px; text-transform:uppercase; padding:10px 12px; text-align:left; border-bottom:2px solid #334155; }
-.vp-table td { padding:11px 12px; border-bottom:1px solid #1e293b; color:#e2e8f0; vertical-align:middle; }
-.vp-table tr:hover td { background:#1e293b80; }
-.vp-table .vp-amount { text-align:right; font-variant-numeric:tabular-nums; }
-.vp-btn-link { background:transparent; border:none; color:#38bdf8; cursor:pointer; font-size:13px; padding:4px 0; text-decoration:underline; text-underline-offset:2px; font-weight:600; }
-.vp-btn-link:hover { color:#7dd3fc; }
-.vp-btn-icon { background:transparent; border:1px solid #334155; border-radius:6px; color:#94a3b8; cursor:pointer; padding:5px 8px; font-size:11px; font-weight:600; display:inline-flex; align-items:center; gap:5px; transition:all .15s; }
-.vp-btn-icon:hover { border-color:#38bdf8; color:#38bdf8; }
-.vp-toolbar { display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap; align-items:center; }
-.vp-search-wrap { position:relative; }
-.vp-search-wrap svg { position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#64748b; pointer-events:none; }
-.vp-input { background:#1e293b; border:1px solid #334155; border-radius:8px; color:#e2e8f0; font-size:13px; padding:8px 12px 8px 32px; outline:none; width:200px; transition:.15s; }
-.vp-input:focus { border-color:#38bdf8; box-shadow:0 0 0 2px #38bdf820; }
-.vp-select { background:#1e293b; border:1px solid #334155; border-radius:8px; color:#e2e8f0; font-size:13px; padding:8px 12px; outline:none; cursor:pointer; }
-.vp-select:focus { border-color:#38bdf8; }
-.vp-notice { display:flex; align-items:flex-start; gap:10px; background:#0ea5e912; border:1px solid #0ea5e930; border-radius:8px; padding:12px 16px; font-size:12px; color:#7dd3fc; margin-bottom:24px; line-height:1.5; }
-.vp-profile-grid { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
-.vp-profile-card { background:#1e293b; border:1px solid #334155; border-radius:12px; padding:20px; }
-.vp-profile-card h3 { font-size:11px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:.7px; margin:0 0 14px; }
-.vp-profile-row { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid #0f172a; font-size:13px; }
-.vp-profile-row:last-child { border-bottom:none; }
-.vp-profile-key { color:#64748b; font-weight:500; }
-.vp-profile-val { color:#e2e8f0; font-weight:600; }
-.vp-modal { position:fixed; inset:0; background:#00000090; z-index:1000; display:flex; align-items:center; justify-content:center; padding:16px; }
-.vp-modal-inner { background:#0f172a; border:1px solid #334155; border-radius:16px; max-width:760px; width:100%; max-height:90vh; display:flex; flex-direction:column; overflow:hidden; }
-.vp-modal-header { display:flex; align-items:center; justify-content:space-between; padding:18px 24px; border-bottom:1px solid #1e293b; }
-.vp-modal-title { font-size:16px; font-weight:700; color:#f1f5f9; }
-.vp-modal-body { padding:20px 24px; overflow-y:auto; }
-.vp-modal-close { background:transparent; border:none; color:#64748b; cursor:pointer; font-size:20px; line-height:1; padding:4px; border-radius:6px; }
-.vp-modal-close:hover { color:#e2e8f0; background:#1e293b; }
-.vp-empty { text-align:center; padding:60px 20px; color:#64748b; }
-.vp-empty-icon { margin-bottom:12px; opacity:.4; }
-.vp-empty-text { font-size:14px; }
-.vp-pagination { display:flex; align-items:center; gap:12px; justify-content:flex-end; margin-top:16px; font-size:13px; color:#64748b; }
-@media(max-width:700px){
-  .vp-shell{flex-direction:column;}
-  .vp-sidebar{width:100%;flex-direction:row;overflow-x:auto;padding:8px;border-right:none;border-bottom:1px solid #1e293b;}
-  .vp-brand{display:none;}
-  .vp-nav{flex-direction:row;gap:4px;padding:0;}
-  .vp-sidebar-footer{display:none;}
-  .vp-profile-grid{grid-template-columns:1fr;}
+.vp-page-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 8px 4px 48px;
+}
+
+.vp-header-card {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--line, #e7e2d5);
+  border-radius: var(--radius-lg, 12px);
+  padding: 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.vp-header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.vp-header-identity {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.vp-header-icon-box {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-md, 10px);
+  background: var(--surface-sunken, #f2f0e9);
+  border: 1px solid var(--line, #e7e2d5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.vp-header-kicker {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--bronze-600, #9a6a2c);
+  margin-bottom: 2px;
+}
+
+.vp-header-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink, #17140f);
+  margin: 0;
+  line-height: 1.25;
+}
+
+.vp-header-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vp-readonly-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 99px;
+  background: #dc262615;
+  color: #dc2626;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border: 1px solid #dc262633;
+}
+
+.vp-partner-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 99px;
+  background: var(--surface-sunken, #f2f0e9);
+  color: var(--muted, #6f6a5c);
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--line, #e7e2d5);
+}
+
+.vp-header-desc {
+  font-size: 13.5px;
+  color: var(--muted, #6f6a5c);
+  line-height: 1.5;
+  margin: 0 0 18px;
+}
+
+.vp-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-top: 14px;
+  border-top: 1px solid var(--line, #e7e2d5);
+}
+
+.vp-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border-radius: var(--radius-md, 8px);
+  background: var(--surface-sunken, #f2f0e9);
+  color: var(--muted, #6f6a5c);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: none;
+  border: 1px solid var(--line, #e7e2d5);
+  transition: all 0.15s ease;
+}
+
+.vp-tab:hover {
+  background: var(--surface-hover, #f7f5ef);
+  color: var(--ink, #17140f);
+  border-color: var(--line-strong, #d7d0bd);
+}
+
+.vp-tab.active {
+  background: var(--surface, #ffffff);
+  color: var(--bronze-600, #9a6a2c);
+  border-color: var(--bronze-400, #c99a5c);
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.vp-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: var(--info-soft, #eaf1fb);
+  border: 1px solid var(--info-border, rgba(44,92,158,0.2));
+  border-radius: var(--radius-md, 8px);
+  padding: 12px 16px;
+  font-size: 12.5px;
+  color: var(--info, #2c5c9e);
+  line-height: 1.5;
+}
+
+.vp-notice svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.vp-notice a {
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.vp-loading {
+  color: var(--muted, #6f6a5c);
+  font-size: 14px;
+  padding: 48px 0;
+  text-align: center;
+}
+
+.vp-error {
+  color: var(--danger, #b23b35);
+  font-size: 13.5px;
+  padding: 16px 20px;
+  background: var(--danger-soft, #fbeae7);
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--danger-border, rgba(178,59,53,0.2));
+}
+
+.vp-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.vp-metric-card {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--line, #e7e2d5);
+  border-radius: var(--radius-md, 10px);
+  padding: 18px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.vp-metric-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted, #6f6a5c);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+.vp-metric-value {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--ink, #17140f);
+  font-family: var(--font-mono, monospace);
+}
+
+.vp-toolbar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.vp-search-wrap {
+  position: relative;
+}
+
+.vp-search-wrap svg {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted, #6f6a5c);
+  pointer-events: none;
+}
+
+.vp-input {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--line, #e7e2d5);
+  border-radius: var(--radius-md, 8px);
+  color: var(--ink, #17140f);
+  font-size: 13px;
+  padding: 8px 12px 8px 32px;
+  outline: none;
+  width: 220px;
+  transition: border-color 0.15s;
+}
+
+.vp-input:focus {
+  border-color: var(--bronze-500, #b17d38);
+  box-shadow: 0 0 0 2px var(--bronze-100, #f4e7d2);
+}
+
+.vp-select {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--line, #e7e2d5);
+  border-radius: var(--radius-md, 8px);
+  color: var(--ink, #17140f);
+  font-size: 13px;
+  padding: 8px 12px;
+  outline: none;
+  cursor: pointer;
+}
+
+.vp-select:focus {
+  border-color: var(--bronze-500, #b17d38);
+}
+
+.vp-card {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--line, #e7e2d5);
+  border-radius: var(--radius-lg, 12px);
+  padding: 20px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+}
+
+.vp-table-wrap {
+  overflow-x: auto;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--line, #e7e2d5);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.vp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.vp-table th {
+  background: var(--surface-sunken, #f2f0e9);
+  color: var(--muted, #6f6a5c);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--line, #e7e2d5);
+}
+
+.vp-table td {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line, #e7e2d5);
+  color: var(--ink, #17140f);
+  vertical-align: middle;
+}
+
+.vp-table tr:last-child td {
+  border-bottom: none;
+}
+
+.vp-table tr:hover td {
+  background: var(--surface-hover, #f7f5ef);
+}
+
+.vp-table .vp-amount {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono, monospace);
+  font-weight: 600;
+}
+
+.vp-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  border: 1px solid transparent;
+}
+
+.vp-btn-link {
+  background: transparent;
+  border: none;
+  color: var(--color-info, #2c5c9e);
+  cursor: pointer;
+  font-size: 12.5px;
+  padding: 3px 6px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-weight: 600;
+}
+
+.vp-btn-link:hover {
+  color: var(--ink, #17140f);
+}
+
+.vp-btn-icon {
+  background: var(--surface-sunken, #f2f0e9);
+  border: 1px solid var(--line, #e7e2d5);
+  border-radius: 6px;
+  color: var(--muted, #6f6a5c);
+  cursor: pointer;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.15s;
+}
+
+.vp-btn-icon:hover {
+  border-color: var(--bronze-500, #b17d38);
+  color: var(--ink, #17140f);
+  background: var(--surface, #ffffff);
+}
+
+.vp-profile-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.vp-profile-card {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--line, #e7e2d5);
+  border-radius: var(--radius-lg, 12px);
+  padding: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.vp-profile-card h3 {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted, #6f6a5c);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 12px;
+}
+
+.vp-profile-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line, #e7e2d5);
+  font-size: 13px;
+}
+
+.vp-profile-row:last-child {
+  border-bottom: none;
+}
+
+.vp-profile-key {
+  color: var(--muted, #6f6a5c);
+  font-weight: 500;
+}
+
+.vp-profile-val {
+  color: var(--ink, #17140f);
+  font-weight: 600;
+  text-align: right;
+}
+
+.vp-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.vp-modal-inner {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--line-strong, #d7d0bd);
+  border-radius: var(--radius-lg, 14px);
+  max-width: 760px;
+  width: 100%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15);
+}
+
+.vp-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line, #e7e2d5);
+  background: var(--surface-sunken, #f2f0e9);
+}
+
+.vp-modal-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink, #17140f);
+}
+
+.vp-modal-body {
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.vp-modal-close {
+  background: transparent;
+  border: none;
+  color: var(--muted, #6f6a5c);
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.vp-modal-close:hover {
+  color: var(--ink, #17140f);
+  background: var(--line, #e7e2d5);
+}
+
+.vp-empty {
+  text-align: center;
+  padding: 56px 20px;
+  color: var(--muted, #6f6a5c);
+}
+
+.vp-empty-icon {
+  margin-bottom: 10px;
+  opacity: 0.5;
+}
+
+.vp-empty-text {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.vp-pagination {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--muted, #6f6a5c);
+}
+
+@media (max-width: 768px) {
+  .vp-profile-grid {
+    grid-template-columns: 1fr;
+  }
+  .vp-header-top {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 </style>`;
 
-// ─── Main render function ─────────────────────────────────────────────────────
+// ─── Main Render Function ─────────────────────────────────────────────────────
 export function renderVendorPortal(activeRoute = "vendor-orders", subroute = "") {
   const normalizedRoute = activeRoute || "vendor-orders";
   const title = SECTION_TITLES[normalizedRoute] || "Vendor Portal";
+  const description = SECTION_DESCRIPTIONS[normalizedRoute] || "Zamorin Café Enterprise Vendor Workspace.";
   const panelFn = SECTION_CONTENT[normalizedRoute] || renderOrdersContent;
-  const vendorName = state.user?.name || "Vendor";
+  const vendorName = state.user?.name || "Demo Supplier Co.";
+  const vendorId = state.user?.vendorId || "VENDOR-DEMO-001";
+
+  const tabs = [
+    { route: "vendor-dashboard", label: "Overview" },
+    { route: "vendor-orders", label: "Issued Orders" },
+    { route: "vendor-deliveries", label: "Deliveries" },
+    { route: "vendor-statements", label: "Statements" },
+    { route: "vendor-profile", label: "Business Profile" },
+  ];
 
   return `
 ${VENDOR_PORTAL_CSS}
-<div class="vp-shell" data-active-route="${normalizedRoute}">
-  <nav class="vp-sidebar" role="navigation" aria-label="Vendor Portal Navigation">
-    <div class="vp-brand">
-      <div class="vp-brand-title">Vendor Portal</div>
-      <div class="vp-brand-name" title="${vendorName}">${vendorName}</div>
-    </div>
-    <div class="vp-nav" role="menu">${vendorSidebarActive(normalizedRoute)}</div>
-    <div class="vp-sidebar-footer">
-      <div class="vp-sidebar-support">
-        <strong style="color:#e2e8f0;display:block;margin-bottom:4px;">Support</strong>
-        <a href="mailto:procurement@zamorin.test">procurement@zamorin.test</a><br>
-        Questions? Contact Café Operations via authenticated email.
+<div class="vp-page-container" data-active-route="${normalizedRoute}">
+  <!-- Header Card with Section Meta & Quick Navigation Tabs -->
+  <header class="vp-header-card">
+    <div class="vp-header-top">
+      <div class="vp-header-identity">
+        <div class="vp-header-icon-box">🏢</div>
+        <div>
+          <div class="vp-header-kicker">Zamorin Supplier Workspace · Fifth Window</div>
+          <h1 class="vp-header-title">${title}</h1>
+        </div>
       </div>
-    </div>
-  </nav>
-  <div class="vp-main">
-    <header class="vp-topbar">
-      <div class="vp-topbar-left">
-        <h1 class="vp-topbar-title" id="vp-page-title">${title}</h1>
-      </div>
-      <div class="vp-topbar-right">
+      <div class="vp-header-badges">
         ${readOnlyBadge()}
+        <span class="vp-partner-chip" title="${vendorName} (${vendorId})">
+          <span>${vendorName}</span>
+          <span style="opacity:0.6;">·</span>
+          <span style="font-family:var(--font-mono, monospace); font-size:10.5px;">${vendorId}</span>
+        </span>
       </div>
-    </header>
-    <main class="vp-content" id="vp-panel-content" aria-labelledby="vp-page-title">
-      <div class="vp-notice" role="note" aria-label="Read-only notice">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-        All data displayed here are official, read-only enterprise business records released by Zamorin Café ERP. To update any details, contact Café Operations directly.
-      </div>
-      ${panelFn()}
-    </main>
+    </div>
+
+    <p class="vp-header-desc">${description}</p>
+
+    <!-- Quick Navigation Pill Tabs -->
+    <nav class="vp-tabs" role="tablist" aria-label="Vendor Portal Sections">
+      ${tabs.map(t => {
+        const isActive = t.route === normalizedRoute || (normalizedRoute === "vendor-portal" && t.route === "vendor-orders");
+        return `<a href="#${t.route}" class="vp-tab${isActive ? " active" : ""}" role="tab" aria-selected="${isActive}">
+          ${t.label}
+        </a>`;
+      }).join("")}
+    </nav>
+  </header>
+
+  <!-- Notice Banner -->
+  <div class="vp-notice" role="note" aria-label="Portal Security Notice">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+    <div>
+      <strong>Strict Read-Only Enterprise Invariant:</strong>
+      All records shown in this window are official certifications released by Zamorin Café ERP. Mutation, cashiering, and inventory adjustments are strictly restricted to Central Operations. Inquiries: <a href="mailto:procurement@zamorin.test">procurement@zamorin.test</a>.
+    </div>
   </div>
+
+  <!-- Main Panel Body -->
+  <section class="vp-panel-wrap" aria-labelledby="vp-panel-heading">
+    <h2 id="vp-panel-heading" class="sr-only" style="display:none;">${title} Content</h2>
+    ${panelFn()}
+  </section>
 </div>`;
 }
 
-// ─── Wire function ─────────────────────────────────────────────────────────────
+// ─── Wire Function ─────────────────────────────────────────────────────────────
 export function wireVendorPortal(container, activeRoute = "vendor-orders") {
-  // Sidebar navigation clicks
-  container.querySelectorAll(".vendor-nav-item").forEach(link => {
-    link.addEventListener("click", (e) => {
-      e.preventDefault();
-      const route = link.dataset.route;
-      if (route && typeof window !== "undefined") {
-        window.location.hash = "#" + route;
-      }
-    });
-    link.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        link.click();
+  const normalizedRoute = activeRoute || "vendor-orders";
+
+  // Tab navigation
+  container.querySelectorAll(".vp-tab").forEach(tab => {
+    tab.addEventListener("click", (e) => {
+      const href = tab.getAttribute("href");
+      if (href && href.startsWith("#") && typeof window !== "undefined") {
+        window.location.hash = href;
       }
     });
   });
 
   // Load appropriate panel data
-  const normalizedRoute = activeRoute || "vendor-orders";
   switch (normalizedRoute) {
     case "vendor-dashboard":
-    case "vendor-portal":
       _loadDashboard(container);
       break;
     case "vendor-orders":
+    case "vendor-portal":
       _loadOrders(container, {});
       break;
     case "vendor-deliveries":
@@ -301,33 +844,50 @@ export function wireVendorPortal(container, activeRoute = "vendor-orders") {
     case "vendor-profile":
       _loadProfile(container);
       break;
+    default:
+      _loadOrders(container, {});
   }
 }
 
-// ─── Panel data loaders ───────────────────────────────────────────────────────
+// ─── Panel Data Loaders ───────────────────────────────────────────────────────
 
 async function _loadDashboard(container) {
   const loadEl = container.querySelector("#vp-dashboard-loading");
   const dataEl = container.querySelector("#vp-dashboard-data");
+
+  let d = null;
   try {
     const res = await apiGet("/vendor-portal/dashboard");
-    const d = res?.data || {};
-    loadEl?.remove();
-    if (dataEl) {
-      dataEl.hidden = false;
-      dataEl.innerHTML = `
+    if (res?.data) d = res.data;
+  } catch (err) {
+    if (isDevOrLocalhost()) {
+      d = CANONICAL_FIXTURES.dashboard;
+    } else {
+      if (loadEl) loadEl.outerHTML = `<div class="vp-error">Failed to load supplier overview: ${err?.message || "Authenticated session required"}</div>`;
+      return;
+    }
+  }
+
+  if (!d && isDevOrLocalhost()) {
+    d = CANONICAL_FIXTURES.dashboard;
+  }
+
+  loadEl?.remove();
+  if (dataEl && d) {
+    dataEl.hidden = false;
+    dataEl.innerHTML = `
 <div class="vp-metric-grid">
   <div class="vp-metric-card">
     <div class="vp-metric-label">Total Issued Orders</div>
-    <div class="vp-metric-value">${d.totalIssuedOrdersCount ?? "—"}</div>
+    <div class="vp-metric-value">${d.totalIssuedOrdersCount ?? 0}</div>
   </div>
   <div class="vp-metric-card">
     <div class="vp-metric-label">Pending Deliveries</div>
-    <div class="vp-metric-value" style="color:#f59e0b;">${d.pendingDeliveriesCount ?? "—"}</div>
+    <div class="vp-metric-value" style="color:var(--color-warning, #a9741a);">${d.pendingDeliveriesCount ?? 0}</div>
   </div>
   <div class="vp-metric-card">
     <div class="vp-metric-label">Completed Orders</div>
-    <div class="vp-metric-value" style="color:#22c55e;">${d.completedOrdersCount ?? "—"}</div>
+    <div class="vp-metric-value" style="color:var(--color-success, #1e7a4c);">${d.completedOrdersCount ?? 0}</div>
   </div>
   <div class="vp-metric-card">
     <div class="vp-metric-label">Total Issued Value</div>
@@ -335,41 +895,45 @@ async function _loadDashboard(container) {
   </div>
   <div class="vp-metric-card">
     <div class="vp-metric-label">Pending Delivery Value</div>
-    <div class="vp-metric-value" style="color:#f59e0b;">${formatRupees(d.pendingDeliveryValuePaisa)}</div>
+    <div class="vp-metric-value" style="color:var(--color-warning, #a9741a);">${formatRupees(d.pendingDeliveryValuePaisa)}</div>
   </div>
   <div class="vp-metric-card">
     <div class="vp-metric-label">Last Order Date</div>
-    <div class="vp-metric-value" style="font-size:16px;">${formatDate(d.lastOrderDate)}</div>
+    <div class="vp-metric-value" style="font-size:15px; padding-top:4px;">${formatDate(d.lastOrderDate)}</div>
   </div>
 </div>
+
 ${d.recentOrders?.length ? `
-<h2 style="font-size:14px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:14px;">Recent Orders</h2>
-<div class="vp-table-wrap"><table class="vp-table" role="table" aria-label="Recent orders">
-  <thead><tr><th>Order ID</th><th>Outlet</th><th>Date</th><th>Status</th><th class="vp-amount">Value</th></tr></thead>
-  <tbody>
-    ${d.recentOrders.map(o => `<tr>
-      <td><strong>${o.purchaseOrderId}</strong></td>
-      <td>${o.cafeId}</td>
-      <td>${formatDate(o.orderDate)}</td>
-      <td>${statusBadge(o.status)}</td>
-      <td class="vp-amount">${formatRupees(o.totalPaisa)}</td>
-    </tr>`).join("")}
-  </tbody>
-</table></div>` : ""}`;
-    }
-  } catch (err) {
-    if (loadEl) loadEl.outerHTML = `<div class="vp-error">Failed to load supplier overview: ${err?.message || "unknown error"}</div>`;
+<div class="vp-card" style="margin-top:14px;">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+    <h3 style="font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin:0;">Recent Purchase Orders</h3>
+    <a href="#vendor-orders" class="vp-btn-link">View All Orders →</a>
+  </div>
+  <div class="vp-table-wrap">
+    <table class="vp-table" role="table" aria-label="Recent orders">
+      <thead><tr><th>Order ID</th><th>Outlet</th><th>Date</th><th>Status</th><th class="vp-amount">Value</th></tr></thead>
+      <tbody>
+        ${d.recentOrders.map(o => `<tr>
+          <td><strong>${o.purchaseOrderId}</strong></td>
+          <td>${o.cafeId}</td>
+          <td>${formatDate(o.orderDate)}</td>
+          <td>${statusBadge(o.status)}</td>
+          <td class="vp-amount">${formatRupees(o.totalPaisa)}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>
+  </div>
+</div>` : ""}`;
   }
 }
 
 async function _loadOrders(container, { page = 1, status = "ALL", search = "" } = {}) {
   const loadEl = container.querySelector("#vp-orders-loading");
   const dataEl = container.querySelector("#vp-orders-data");
-
   const searchInput = container.querySelector("#vp-order-search");
   const statusSelect = container.querySelector("#vp-status-filter");
 
-  // Wire search/filter events once
+  // Wire search/filter once
   if (searchInput && !searchInput._wired) {
     searchInput._wired = true;
     const handleVendorSearch = debounce((searchVal) => {
@@ -390,71 +954,102 @@ async function _loadOrders(container, { page = 1, status = "ALL", search = "" } 
   if (status && status !== "ALL") params.set("status", status);
   if (search) params.set("search", search);
 
+  let orders = null;
+  let pagination = {};
+
   try {
     if (loadEl) loadEl.hidden = false;
     if (dataEl) dataEl.hidden = true;
 
     const res = await apiGet(`/vendor-portal/orders?${params.toString()}`);
-    const orders = res?.data || [];
-    const pagination = res?.pagination || {};
-
-    if (loadEl) loadEl.hidden = true;
-    if (dataEl) {
-      dataEl.hidden = false;
-      if (!orders.length) {
-        dataEl.innerHTML = `<div class="vp-empty"><div class="vp-empty-icon"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 6h15l-1.5 9h-12Z"/><circle cx="9" cy="19" r="1.4"/><circle cx="17" cy="19" r="1.4"/><path d="M3 3h2l1 3"/></svg></div><div class="vp-empty-text">No issued orders found.</div></div>`;
-      } else {
-        dataEl.innerHTML = `
-<div class="vp-table-wrap">
-<table class="vp-table" role="table" aria-label="Issued purchase orders">
-  <thead><tr>
-    <th scope="col">Order ID</th>
-    <th scope="col">Outlet</th>
-    <th scope="col">Order Date</th>
-    <th scope="col">Expected Delivery</th>
-    <th scope="col">Status</th>
-    <th scope="col" class="vp-amount">Value</th>
-    <th scope="col">Items</th>
-    <th scope="col"></th>
-  </tr></thead>
-  <tbody>
-    ${orders.map(o => `<tr>
-      <td><strong>${o.purchaseOrderId}</strong></td>
-      <td>${o.cafeId}</td>
-      <td>${formatDate(o.orderDate)}</td>
-      <td>${formatDate(o.expectedDeliveryDate)}</td>
-      <td>${statusBadge(o.status)}</td>
-      <td class="vp-amount">${formatRupees(o.totalPaisa)}</td>
-      <td>${o.itemCount}</td>
-      <td>
-        <button class="vp-btn-link" data-order-id="${o.purchaseOrderId}" aria-label="View details for order ${o.purchaseOrderId}">View</button>
-        <button class="vp-btn-icon" data-print-id="${o.purchaseOrderId}" aria-label="Print order ${o.purchaseOrderId}">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
-        </button>
-      </td>
-    </tr>`).join("")}
-  </tbody>
-</table>
-</div>
-<div class="vp-pagination" aria-label="Pagination">
-  <span>${pagination.total ?? orders.length} orders</span>
-</div>`;
-
-        // Wire view detail buttons
-        dataEl.querySelectorAll("[data-order-id]").forEach(btn => {
-          btn.addEventListener("click", () => _openOrderModal(container, btn.dataset.orderId));
-        });
-        // Wire print buttons
-        dataEl.querySelectorAll("[data-print-id]").forEach(btn => {
-          btn.addEventListener("click", () => _printOrder(btn.dataset.printId));
-        });
-      }
+    if (Array.isArray(res?.data)) {
+      orders = res.data;
+      pagination = res.pagination || {};
     }
   } catch (err) {
-    if (loadEl) loadEl.hidden = true;
-    if (dataEl) {
-      dataEl.hidden = false;
-      dataEl.innerHTML = `<div class="vp-error">Failed to load orders: ${err?.message || "unknown error"}</div>`;
+    if (isDevOrLocalhost()) {
+      let filtered = [...CANONICAL_FIXTURES.orders];
+      if (status && status !== "ALL") {
+        filtered = filtered.filter(o => o.status === status);
+      }
+      if (search) {
+        const q = search.toLowerCase();
+        filtered = filtered.filter(o => o.purchaseOrderId.toLowerCase().includes(q) || o.cafeId.toLowerCase().includes(q));
+      }
+      orders = filtered;
+      pagination = { total: filtered.length };
+    } else {
+      if (loadEl) loadEl.hidden = true;
+      if (dataEl) {
+        dataEl.hidden = false;
+        dataEl.innerHTML = `<div class="vp-error">Failed to load orders: ${err?.message || "Authenticated session required"}</div>`;
+      }
+      return;
+    }
+  }
+
+  if (orders === null && isDevOrLocalhost()) {
+    orders = CANONICAL_FIXTURES.orders;
+    pagination = { total: orders.length };
+  }
+
+  if (loadEl) loadEl.hidden = true;
+  if (dataEl && orders) {
+    dataEl.hidden = false;
+    if (!orders.length) {
+      dataEl.innerHTML = `
+        <div class="vp-empty">
+          <div class="vp-empty-icon">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 6h15l-1.5 9h-12Z"/><circle cx="9" cy="19" r="1.4"/><circle cx="17" cy="19" r="1.4"/><path d="M3 3h2l1 3"/></svg>
+          </div>
+          <div class="vp-empty-text">No issued orders match your current filters.</div>
+        </div>`;
+    } else {
+      dataEl.innerHTML = `
+<div class="vp-table-wrap">
+  <table class="vp-table" role="table" aria-label="Issued purchase orders">
+    <thead><tr>
+      <th scope="col">Order ID</th>
+      <th scope="col">Outlet</th>
+      <th scope="col">Order Date</th>
+      <th scope="col">Expected Delivery</th>
+      <th scope="col">Status</th>
+      <th scope="col" class="vp-amount">Value</th>
+      <th scope="col">Items</th>
+      <th scope="col" style="text-align:right;">Actions</th>
+    </tr></thead>
+    <tbody>
+      ${orders.map(o => `<tr>
+        <td><strong>${o.purchaseOrderId}</strong></td>
+        <td>${o.cafeId}</td>
+        <td>${formatDate(o.orderDate)}</td>
+        <td>${formatDate(o.expectedDeliveryDate)}</td>
+        <td>${statusBadge(o.status)}</td>
+        <td class="vp-amount">${formatRupees(o.totalPaisa)}</td>
+        <td>${o.itemCount} items</td>
+        <td style="text-align:right;">
+          <button class="vp-btn-link" data-order-id="${o.purchaseOrderId}" aria-label="View details for order ${o.purchaseOrderId}">View PO</button>
+          <button class="vp-btn-icon" data-print-id="${o.purchaseOrderId}" aria-label="Print order ${o.purchaseOrderId}" title="Print Official PDF">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+            Print
+          </button>
+        </td>
+      </tr>`).join("")}
+    </tbody>
+  </table>
+</div>
+<div class="vp-pagination" aria-label="Pagination">
+  <span>Showing ${orders.length} of ${pagination.total ?? orders.length} orders</span>
+</div>`;
+
+      // Wire view detail buttons
+      dataEl.querySelectorAll("[data-order-id]").forEach(btn => {
+        btn.addEventListener("click", () => _openOrderModal(container, btn.dataset.orderId));
+      });
+      // Wire print buttons
+      dataEl.querySelectorAll("[data-print-id]").forEach(btn => {
+        btn.addEventListener("click", () => _printOrder(btn.dataset.printId));
+      });
     }
   }
 }
@@ -463,35 +1058,67 @@ async function _openOrderModal(container, purchaseOrderId) {
   const modal = container.querySelector("#vp-order-modal");
   if (!modal) return;
   modal.hidden = false;
-  modal.innerHTML = `<div class="vp-modal-inner" role="document"><div class="vp-modal-header"><span class="vp-modal-title">Loading…</span><button class="vp-modal-close" aria-label="Close" id="vp-close-modal">×</button></div></div>`;
+  modal.innerHTML = `
+    <div class="vp-modal-inner" role="document">
+      <div class="vp-modal-header">
+        <span class="vp-modal-title">Loading Purchase Order…</span>
+        <button class="vp-modal-close" aria-label="Close" id="vp-close-modal">×</button>
+      </div>
+      <div class="vp-modal-body">
+        <div class="vp-loading">Fetching order details…</div>
+      </div>
+    </div>`;
+
   modal.querySelector("#vp-close-modal")?.addEventListener("click", () => { modal.hidden = true; modal.innerHTML = ""; });
   modal.addEventListener("click", (e) => { if (e.target === modal) { modal.hidden = true; modal.innerHTML = ""; } });
 
+  let o = null;
   try {
     const res = await apiGet(`/vendor-portal/orders/${encodeURIComponent(purchaseOrderId)}`);
-    const o = res?.data || {};
+    if (res?.data) o = res.data;
+  } catch (err) {
+    if (isDevOrLocalhost()) {
+      o = {
+        ...CANONICAL_FIXTURES.sampleOrderDetails,
+        purchaseOrderId,
+      };
+    }
+  }
+
+  if (!o && isDevOrLocalhost()) {
+    o = {
+      ...CANONICAL_FIXTURES.sampleOrderDetails,
+      purchaseOrderId,
+    };
+  }
+
+  if (o) {
     const li = o.lineItems || [];
     modal.querySelector(".vp-modal-inner").innerHTML = `
 <div class="vp-modal-header">
   <div>
     <div class="vp-modal-title">PO: ${o.purchaseOrderId}</div>
-    <div style="font-size:12px;color:#64748b;margin-top:3px;">${statusBadge(o.status)} ${readOnlyBadge()}</div>
+    <div style="font-size:12px; color:var(--muted); margin-top:3px; display:flex; align-items:center; gap:6px;">
+      ${statusBadge(o.status)}
+      ${readOnlyBadge()}
+    </div>
   </div>
   <button class="vp-modal-close" aria-label="Close order details" id="vp-close-modal2">×</button>
 </div>
 <div class="vp-modal-body">
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px;font-size:13px;">
-    <div><span style="color:#64748b;">Outlet:</span> <strong>${o.cafeId}</strong></div>
-    <div><span style="color:#64748b;">Order Date:</span> <strong>${formatDate(o.orderDate)}</strong></div>
-    <div><span style="color:#64748b;">Expected Delivery:</span> <strong>${formatDate(o.expectedDeliveryDate)}</strong></div>
-    <div><span style="color:#64748b;">Payment Terms:</span> <strong>${o.paymentTerms || "NET_30"}</strong></div>
+  <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:12px; margin-bottom:18px; font-size:12.5px; background:var(--surface-sunken); padding:12px 16px; border-radius:8px;">
+    <div><span style="color:var(--muted);">Outlet:</span> <strong style="display:block; color:var(--ink);">${o.cafeId}</strong></div>
+    <div><span style="color:var(--muted);">Order Date:</span> <strong style="display:block; color:var(--ink);">${formatDate(o.orderDate)}</strong></div>
+    <div><span style="color:var(--muted);">Expected Delivery:</span> <strong style="display:block; color:var(--ink);">${formatDate(o.expectedDeliveryDate)}</strong></div>
+    <div><span style="color:var(--muted);">Payment Terms:</span> <strong style="display:block; color:var(--ink);">${o.paymentTerms || "NET_30"}</strong></div>
   </div>
+
   <table class="vp-table" aria-label="Line items">
-    <thead><tr><th>#</th><th>Item</th><th>Pack Size</th><th class="vp-amount">Qty</th><th class="vp-amount">Rate</th><th class="vp-amount">GST</th><th class="vp-amount">Total</th></tr></thead>
+    <thead><tr><th>#</th><th>Item & Code</th><th>Pack Size</th><th class="vp-amount">Qty</th><th class="vp-amount">Rate</th><th class="vp-amount">GST</th><th class="vp-amount">Total</th></tr></thead>
     <tbody>
       ${li.map((item, idx) => `<tr>
         <td>${idx + 1}</td>
-        <td><strong>${item.itemName}</strong>${item.supplierItemCode ? `<br><span style="font-size:11px;color:#64748b;">${item.supplierItemCode}</span>` : ""}</td>
+        <td><strong>${item.itemName}</strong>${item.supplierItemCode ? `<br><span style="font-size:11px; color:var(--muted); font-family:var(--font-mono, monospace);">${item.supplierItemCode}</span>` : ""}</td>
         <td>${item.packSize || "1 UNIT"}</td>
         <td class="vp-amount">${item.quantityOrdered}</td>
         <td class="vp-amount">${formatRupees(item.unitPricePaisa)}</td>
@@ -500,16 +1127,18 @@ async function _openOrderModal(container, purchaseOrderId) {
       </tr>`).join("")}
     </tbody>
     <tfoot>
-      <tr><td colspan="6" style="text-align:right;font-weight:700;color:#94a3b8;">Subtotal</td><td class="vp-amount" style="font-weight:700;">${formatRupees(o.subtotalPaisa)}</td></tr>
-      <tr><td colspan="6" style="text-align:right;font-weight:700;color:#94a3b8;">Tax</td><td class="vp-amount" style="font-weight:700;">${formatRupees(o.taxPaisa)}</td></tr>
-      <tr><td colspan="6" style="text-align:right;font-weight:800;color:#38bdf8;font-size:15px;">Grand Total</td><td class="vp-amount" style="font-weight:800;color:#38bdf8;font-size:15px;">${formatRupees(o.totalPaisa)}</td></tr>
+      <tr><td colspan="6" style="text-align:right; font-weight:700; color:var(--muted);">Subtotal</td><td class="vp-amount" style="font-weight:700;">${formatRupees(o.subtotalPaisa)}</td></tr>
+      <tr><td colspan="6" style="text-align:right; font-weight:700; color:var(--muted);">Tax</td><td class="vp-amount" style="font-weight:700;">${formatRupees(o.taxPaisa)}</td></tr>
+      <tr><td colspan="6" style="text-align:right; font-weight:800; color:var(--bronze-600, #9a6a2c); font-size:15px;">Grand Total</td><td class="vp-amount" style="font-weight:800; color:var(--bronze-600, #9a6a2c); font-size:15px;">${formatRupees(o.totalPaisa)}</td></tr>
     </tfoot>
   </table>
-  <div style="margin-top:16px;font-size:12px;color:#64748b;">${o.clarificationNotice || ""}</div>
+  <div style="margin-top:14px; font-size:11.5px; color:var(--muted); line-height:1.4;">${o.clarificationNotice || ""}</div>
 </div>`;
     modal.querySelector("#vp-close-modal2")?.addEventListener("click", () => { modal.hidden = true; modal.innerHTML = ""; });
-  } catch (err) {
-    modal.querySelector(".vp-modal-inner").innerHTML = `<div class="vp-modal-header"><span class="vp-modal-title">Error</span><button class="vp-modal-close" id="vp-close-modal3">×</button></div><div class="vp-modal-body"><div class="vp-error">${err?.message || "Could not load order details."}</div></div>`;
+  } else {
+    modal.querySelector(".vp-modal-inner").innerHTML = `
+      <div class="vp-modal-header"><span class="vp-modal-title">Error</span><button class="vp-modal-close" id="vp-close-modal3">×</button></div>
+      <div class="vp-modal-body"><div class="vp-error">Could not load details for order ${purchaseOrderId}.</div></div>`;
     modal.querySelector("#vp-close-modal3")?.addEventListener("click", () => { modal.hidden = true; modal.innerHTML = ""; });
   }
 }
@@ -522,130 +1151,194 @@ function _printOrder(purchaseOrderId) {
 async function _loadDeliveries(container) {
   const loadEl = container.querySelector("#vp-deliveries-loading");
   const dataEl = container.querySelector("#vp-deliveries-data");
+
+  let deliveries = null;
   try {
     const res = await apiGet("/vendor-portal/deliveries");
-    const deliveries = res?.data || [];
-    if (loadEl) loadEl.hidden = true;
-    if (dataEl) {
-      dataEl.hidden = false;
-      if (!deliveries.length) {
-        dataEl.innerHTML = `<div class="vp-empty"><div class="vp-empty-icon"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 7 12 3 4 7v10l8 4 8-4Z"/></svg></div><div class="vp-empty-text">No delivery receipts found.</div></div>`;
-      } else {
-        dataEl.innerHTML = `<div class="vp-table-wrap"><table class="vp-table" role="table" aria-label="Delivery receipts">
-  <thead><tr><th>GRN ID</th><th>Purchase Order</th><th>Outlet</th><th>Received At</th><th>Status</th><th>Items</th></tr></thead>
-  <tbody>
-    ${deliveries.map(d => `<tr>
-      <td><strong>${d.grnId}</strong></td>
-      <td>${d.purchaseOrderId}</td>
-      <td>${d.cafeId}</td>
-      <td>${formatDate(d.receivedAt)}</td>
-      <td>${statusBadge(d.status || "VERIFIED_PHYSICAL_RECEIPT")}</td>
-      <td>${d.itemCount}</td>
-    </tr>`).join("")}
-  </tbody>
-</table></div>`;
-      }
-    }
+    if (Array.isArray(res?.data)) deliveries = res.data;
   } catch (err) {
-    if (loadEl) loadEl.outerHTML = `<div class="vp-error">Failed to load deliveries: ${err?.message || "unknown error"}</div>`;
+    if (isDevOrLocalhost()) {
+      deliveries = CANONICAL_FIXTURES.deliveries;
+    } else {
+      if (loadEl) loadEl.outerHTML = `<div class="vp-error">Failed to load deliveries: ${err?.message || "Authenticated session required"}</div>`;
+      return;
+    }
+  }
+
+  if (!deliveries && isDevOrLocalhost()) {
+    deliveries = CANONICAL_FIXTURES.deliveries;
+  }
+
+  if (loadEl) loadEl.hidden = true;
+  if (dataEl && deliveries) {
+    dataEl.hidden = false;
+    if (!deliveries.length) {
+      dataEl.innerHTML = `
+        <div class="vp-empty">
+          <div class="vp-empty-icon">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 7 12 3 4 7v10l8 4 8-4Z"/></svg>
+          </div>
+          <div class="vp-empty-text">No delivery receipts found for this vendor account.</div>
+        </div>`;
+    } else {
+      dataEl.innerHTML = `
+<div class="vp-table-wrap">
+  <table class="vp-table" role="table" aria-label="Delivery receipts">
+    <thead><tr><th>GRN ID</th><th>Purchase Order</th><th>Outlet</th><th>Received At</th><th>Status</th><th>Items Received</th></tr></thead>
+    <tbody>
+      ${deliveries.map(d => `<tr>
+        <td><strong>${d.grnId}</strong></td>
+        <td>${d.purchaseOrderId}</td>
+        <td>${d.cafeId}</td>
+        <td>${formatDate(d.receivedAt)}</td>
+        <td>${statusBadge(d.status || "VERIFIED_PHYSICAL_RECEIPT")}</td>
+        <td>${d.itemCount} line items</td>
+      </tr>`).join("")}
+    </tbody>
+  </table>
+</div>`;
+    }
   }
 }
 
 async function _loadStatements(container) {
   const loadEl = container.querySelector("#vp-statements-loading");
   const dataEl = container.querySelector("#vp-statements-data");
+
+  let entries = null;
+  let notice = null;
+
   try {
     const res = await apiGet("/vendor-portal/statements");
-    const entries = res?.data || [];
-    if (loadEl) loadEl.hidden = true;
-    if (dataEl) {
-      dataEl.hidden = false;
-      if (!entries.length) {
-        dataEl.innerHTML = `<div class="vp-empty"><div class="vp-empty-icon"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 1v22M17 5.5c0-1.9-2.2-3-5-3s-5 1.3-5 3 2.2 2.6 5 3 5 1.1 5 3-2.2 3-5 3-5-1.1-5-3"/></svg></div><div class="vp-empty-text">No ledger statements found.</div></div>`;
-      } else {
-        dataEl.innerHTML = `
-<div class="vp-notice">
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-  ${res?.readOnlyNotice || "Financial ledger records are maintained by Enterprise Accounts Payable."}
-</div>
-<div class="vp-table-wrap"><table class="vp-table" role="table" aria-label="Account statements">
-  <thead><tr><th>Entry ID</th><th>Date</th><th>Transaction Type</th><th>Reference</th><th class="vp-amount">Amount</th><th class="vp-amount">Balance</th><th>Status</th></tr></thead>
-  <tbody>
-    ${entries.map(e => `<tr>
-      <td style="font-size:11px;color:#64748b;">${e.entryId}</td>
-      <td>${formatDate(e.postingDate)}</td>
-      <td>${e.transactionType}</td>
-      <td>${e.documentReference || "—"}</td>
-      <td class="vp-amount">${formatRupees(e.amountPaisa)}</td>
-      <td class="vp-amount" style="font-weight:700;">${formatRupees(e.runningBalancePaisa)}</td>
-      <td>${statusBadge(e.status || "SETTLED")}</td>
-    </tr>`).join("")}
-  </tbody>
-</table></div>`;
-      }
+    if (Array.isArray(res?.data)) {
+      entries = res.data;
+      notice = res.readOnlyNotice;
     }
   } catch (err) {
-    if (loadEl) loadEl.outerHTML = `<div class="vp-error">Failed to load statements: ${err?.message || "unknown error"}</div>`;
+    if (isDevOrLocalhost()) {
+      entries = CANONICAL_FIXTURES.statements;
+      notice = "Official financial ledger maintained by Enterprise Accounts Payable.";
+    } else {
+      if (loadEl) loadEl.outerHTML = `<div class="vp-error">Failed to load statements: ${err?.message || "Authenticated session required"}</div>`;
+      return;
+    }
+  }
+
+  if (!entries && isDevOrLocalhost()) {
+    entries = CANONICAL_FIXTURES.statements;
+    notice = "Official financial ledger maintained by Enterprise Accounts Payable.";
+  }
+
+  if (loadEl) loadEl.hidden = true;
+  if (dataEl && entries) {
+    dataEl.hidden = false;
+    if (!entries.length) {
+      dataEl.innerHTML = `
+        <div class="vp-empty">
+          <div class="vp-empty-icon">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 1v22M17 5.5c0-1.9-2.2-3-5-3s-5 1.3-5 3 2.2 2.6 5 3 5 1.1 5 3-2.2 3-5 3-5-1.1-5-3"/></svg>
+          </div>
+          <div class="vp-empty-text">No ledger entries recorded yet.</div>
+        </div>`;
+    } else {
+      dataEl.innerHTML = `
+<div class="vp-table-wrap">
+  <table class="vp-table" role="table" aria-label="Account statements">
+    <thead><tr><th>Entry ID</th><th>Posting Date</th><th>Transaction Type</th><th>Reference</th><th class="vp-amount">Amount</th><th class="vp-amount">Running Balance</th><th>Status</th></tr></thead>
+    <tbody>
+      ${entries.map(e => `<tr>
+        <td style="font-size:11px; color:var(--muted); font-family:var(--font-mono, monospace);">${e.entryId}</td>
+        <td>${formatDate(e.postingDate || e.entryDate)}</td>
+        <td><strong>${e.transactionType || e.entryType}</strong></td>
+        <td>${e.documentReference || "—"}</td>
+        <td class="vp-amount">${formatRupees(e.amountPaisa || (e.creditPaisa || e.debitPaisa))}</td>
+        <td class="vp-amount" style="font-weight:700; color:var(--ink);">${formatRupees(e.runningBalancePaisa)}</td>
+        <td>${statusBadge(e.status || "SETTLED")}</td>
+      </tr>`).join("")}
+    </tbody>
+  </table>
+</div>`;
+    }
   }
 }
 
 async function _loadProfile(container) {
   const loadEl = container.querySelector("#vp-profile-loading");
   const dataEl = container.querySelector("#vp-profile-data");
+
+  let p = null;
   try {
     const res = await apiGet("/vendor-portal/profile");
-    const p = res?.data || {};
-    if (loadEl) loadEl.hidden = true;
-    if (dataEl) {
-      dataEl.hidden = false;
-      dataEl.innerHTML = `
+    if (res?.data) p = res.data;
+  } catch (err) {
+    if (isDevOrLocalhost()) {
+      p = CANONICAL_FIXTURES.profile;
+    } else {
+      if (loadEl) loadEl.outerHTML = `<div class="vp-error">Failed to load business profile: ${err?.message || "Authenticated session required"}</div>`;
+      return;
+    }
+  }
+
+  if (!p && isDevOrLocalhost()) {
+    p = CANONICAL_FIXTURES.profile;
+  }
+
+  if (loadEl) loadEl.hidden = true;
+  if (dataEl && p) {
+    dataEl.hidden = false;
+    dataEl.innerHTML = `
 <div class="vp-profile-grid">
   <div class="vp-profile-card">
-    <h3>Business Identity</h3>
+    <h3>Enterprise Business Identity</h3>
     ${[
       ["Legal Business Name", p.legalBusinessName],
       ["Trade Name", p.tradeName],
       ["Category", p.vendorCategory],
       ["Supplier Type", p.supplierType],
-      ["Status", p.status],
+      ["Verification Status", p.status],
       ["GSTIN", p.gstin || "—"],
-      ["PAN", p.panMasked || "—"],
-      ["FSSAI Licence", p.fssaiLicenseNumber || "—"],
+      ["PAN (Masked)", p.panMasked || "—"],
+      ["FSSAI Licence No.", p.fssaiLicenseNumber || "—"],
       ["Payment Terms", p.paymentTerms],
     ].map(([k, v]) => `<div class="vp-profile-row"><span class="vp-profile-key">${k}</span><span class="vp-profile-val">${v || "—"}</span></div>`).join("")}
   </div>
+
   <div class="vp-profile-card">
-    <h3>Bank Details</h3>
+    <h3>Disbursement Banking Details</h3>
     ${[
       ["Bank Name", p.bankDetails?.bankName],
       ["Account Holder", p.bankDetails?.accountHolderName],
-      ["Account No.", p.bankDetails?.accountNumberMasked],
-      ["IFSC", p.bankDetails?.ifscCode],
-      ["Branch", p.bankDetails?.branchName],
+      ["Account No. (Masked)", p.bankDetails?.accountNumberMasked],
+      ["IFSC Code", p.bankDetails?.ifscCode],
+      ["Branch Name", p.bankDetails?.branchName],
     ].map(([k, v]) => `<div class="vp-profile-row"><span class="vp-profile-key">${k}</span><span class="vp-profile-val">${v || "—"}</span></div>`).join("")}
-    <div style="margin-top:14px;font-size:11px;color:#64748b;line-height:1.5;">To update banking details, contact Café Operations via authenticated email.</div>
+    <div style="margin-top:14px; font-size:11.5px; color:var(--muted); line-height:1.5; background:var(--surface-sunken); padding:10px 12px; border-radius:6px;">
+      🔒 Bank account modifications require dual-key verification via authenticated communication with Central Accounts.
+    </div>
   </div>
-  ${p.primaryContact ? `<div class="vp-profile-card">
-    <h3>Primary Contact</h3>
+
+  ${p.primaryContact ? `
+  <div class="vp-profile-card">
+    <h3>Primary Account Contact</h3>
     ${[
-      ["Name", p.primaryContact?.name],
-      ["Phone", p.primaryContact?.phone],
-      ["Email", p.primaryContact?.email],
+      ["Contact Name", p.primaryContact?.name],
+      ["Telephone", p.primaryContact?.phone],
+      ["Email Address", p.primaryContact?.email],
       ["Designation", p.primaryContact?.designation],
     ].map(([k, v]) => `<div class="vp-profile-row"><span class="vp-profile-key">${k}</span><span class="vp-profile-val">${v || "—"}</span></div>`).join("")}
   </div>` : ""}
+
   <div class="vp-profile-card">
-    <h3>Support Contact</h3>
+    <h3>Procurement Help Desk</h3>
     ${[
-      ["Role", p.supportContact?.role],
-      ["Phone", p.supportContact?.phone],
-      ["Email", p.supportContact?.email],
+      ["Support Channel", p.supportContact?.role],
+      ["Direct Phone", p.supportContact?.phone],
+      ["Inquiries Email", p.supportContact?.email],
     ].map(([k, v]) => `<div class="vp-profile-row"><span class="vp-profile-key">${k}</span><span class="vp-profile-val">${v || "—"}</span></div>`).join("")}
-    <div style="margin-top:10px;font-size:11px;color:#64748b;">${p.supportContact?.helpNotice || ""}</div>
+    <div style="margin-top:12px; font-size:11.5px; color:var(--muted); line-height:1.4;">
+      ${p.supportContact?.helpNotice || "Contact Café Operations directly for order inquiries or delivery dock scheduling."}
+    </div>
   </div>
 </div>`;
-    }
-  } catch (err) {
-    if (loadEl) loadEl.outerHTML = `<div class="vp-error">Failed to load business profile: ${err?.message || "unknown error"}</div>`;
   }
 }

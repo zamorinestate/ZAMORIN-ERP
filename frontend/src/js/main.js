@@ -956,6 +956,52 @@ async function boot() {
     return;
   }
 
+  // Local development explicit persona resolution (?role=vendor, ?role=staff, etc.)
+  if (isDirectDashboardAllowed() && (params?.get("role") || params?.get("devRole"))) {
+    const devKey = getRequestedDevRole();
+    if (!devKey || !DEV_PREVIEW_USERS[devKey]) {
+      clearAllAuthTokens();
+      setState({
+        auth: {
+          authenticated: false,
+          loading: false,
+          user: null,
+          authentication: null,
+          error: "The Normal Master persona has been permanently retired.",
+        },
+        user: null,
+        isPrimaryMaster: false,
+      });
+      mountAuthScreen("login");
+      return;
+    }
+    const devUser = DEV_PREVIEW_USERS[devKey];
+    const canonicalRole = devKey;
+    const isPrimary = Boolean(devUser?.isPrimaryMaster);
+    const roleNavigation = NAVIGATION[canonicalRole] || NAVIGATION.master;
+    const defaultRoute = roleNavigation?.items?.[0]?.route || (canonicalRole === "staff" ? "staff-home" : canonicalRole === "vendor" ? "vendor-dashboard" : "dashboard");
+    const initialRoute = urlHash ? (isRouteAllowed(canonicalRole, urlHash, isPrimary) ? urlHash : defaultRoute) : defaultRoute;
+
+    setState({
+      auth: {
+        authenticated: true,
+        loading: false,
+        user: devUser,
+        authentication: null,
+        error: null,
+      },
+      user: devUser,
+      isPrimaryMaster: isPrimary,
+      role: canonicalRole,
+      route: initialRoute,
+      activeWorkspace: canonicalRole,
+    });
+
+    renderShell();
+    registerServiceWorker().catch(() => {});
+    return;
+  }
+
   // Active Authenticated Session Check (Authoritative Backend Session Validation via HttpOnly Cookies & In-Memory Bearer)
   try {
     const payload = await apiGet("/auth/me");
@@ -974,8 +1020,8 @@ async function boot() {
     clearAllAuthTokens();
   }
 
-  // Local development / automated testing persona resolution
-  if (isDirectDashboardAllowed() && (params?.get("role") || params?.get("devRole") || localStorage.getItem("zamorin-dev-role"))) {
+  // Local development / automated testing persona resolution (fallback via localStorage)
+  if (isDirectDashboardAllowed() && localStorage.getItem("zamorin-dev-role")) {
     const devKey = getRequestedDevRole();
     if (!devKey || !DEV_PREVIEW_USERS[devKey]) {
       clearAllAuthTokens();
