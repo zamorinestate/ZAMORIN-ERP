@@ -988,13 +988,10 @@ export function toggleMobileDrawer() {
    Universal Modal Manager (Design System v2) — Accessible & Focus-Trapped
    ------------------------------------------------------------------------- */
 let currentModalResolve = null;
-let lastFocusedElementBeforeModal = null;
-let activeModalKeydownHandler = null;
+const modalStack = [];
 
 export function openModal(options = {}) {
-  // Capture the element that triggered the modal for WCAG focus restoration
-  lastFocusedElementBeforeModal = document.activeElement;
-  closeModal();
+  const opener = document.activeElement;
 
   let root = document.getElementById("modal-root");
   if (!root) {
@@ -1003,11 +1000,28 @@ export function openModal(options = {}) {
     document.body.appendChild(root);
   }
 
+  // If explicit replace requested, close top modal first
+  if (options.replace && modalStack.length > 0) {
+    closeModal();
+  }
+
+  const depth = modalStack.length;
+  // If stacking on an existing modal, disable interaction on parent modal until child closes
+  if (depth > 0) {
+    const parentRecord = modalStack[depth - 1];
+    if (parentRecord && parentRecord.element) {
+      parentRecord.element.setAttribute("aria-hidden", "true");
+      parentRecord.element.style.pointerEvents = "none";
+    }
+  }
+
   const modalEl = document.createElement("div");
-  modalEl.className = "modal-backdrop open";
-  modalEl.id = "zamorin-global-modal";
+  modalEl.className = `modal-backdrop open ${depth > 0 ? "is-nested" : ""}`;
+  modalEl.id = depth === 0 ? "zamorin-global-modal" : `zamorin-modal-nested-${depth}`;
   modalEl.setAttribute("role", "dialog");
   modalEl.setAttribute("aria-modal", "true");
+  modalEl.dataset.modalDepth = String(depth);
+  modalEl.style.zIndex = String(700 + depth * 20);
 
   if (typeof options === "string") {
     modalEl.innerHTML = `
@@ -1059,9 +1073,9 @@ export function openModal(options = {}) {
         try {
           if (typeof onSave === "function") {
             const result = await onSave(modalEl);
-            if (result !== false) closeModal();
+            if (result !== false) closeModal(modalEl);
           } else {
-            closeModal();
+            closeModal(modalEl);
           }
         } catch (err) {
           showToast(err?.message || "Operation failed", "coral");
@@ -1078,22 +1092,27 @@ export function openModal(options = {}) {
   const cancelBtns = modalEl.querySelectorAll("[data-modal-cancel]");
   cancelBtns.forEach((b) =>
     b.addEventListener("click", () => {
-      closeModal();
+      closeModal(modalEl);
       if (typeof options.onCancel === "function") options.onCancel();
     })
   );
 
   modalEl.addEventListener("click", (e) => {
     if (e.target === modalEl) {
-      closeModal();
+      closeModal(modalEl);
       if (typeof options.onCancel === "function") options.onCancel();
     }
   });
 
-  // WCAG 2.2 Focus Trap and Escape Key Handler
-  activeModalKeydownHandler = (e) => {
+  // WCAG 2.2 Focus Trap and Escape Key Handler scoped to this modal
+  const keydownHandler = (e) => {
+    // Only handle if this modal is currently the topmost in stack
+    if (modalStack.length === 0 || modalStack[modalStack.length - 1].element !== modalEl) {
+      return;
+    }
+
     if (e.key === "Escape") {
-      closeModal();
+      closeModal(modalEl);
       if (typeof options.onCancel === "function") options.onCancel();
       return;
     }
@@ -1126,9 +1145,16 @@ export function openModal(options = {}) {
       }
     }
   };
-  document.addEventListener("keydown", activeModalKeydownHandler);
+  document.addEventListener("keydown", keydownHandler);
 
-  modalEl.close = closeModal;
+  modalStack.push({
+    element: modalEl,
+    opener,
+    keydownHandler,
+    onCancel: options.onCancel,
+  });
+
+  modalEl.close = () => closeModal(modalEl);
 
   // Focus entry into modal (first editable field or primary action)
   setTimeout(() => {
@@ -1139,21 +1165,60 @@ export function openModal(options = {}) {
   return modalEl;
 }
 
-export function closeModal() {
-  if (activeModalKeydownHandler) {
-    document.removeEventListener("keydown", activeModalKeydownHandler);
-    activeModalKeydownHandler = null;
+export function closeModal(targetModal = null) {
+  if (modalStack.length === 0) {
+    const existing = document.getElementById("zamorin-global-modal");
+    if (existing) existing.remove();
+    return;
   }
-  const existing = document.getElementById("zamorin-global-modal");
-  if (existing) existing.remove();
 
-  // Restore focus to opener element
-  if (lastFocusedElementBeforeModal && typeof lastFocusedElementBeforeModal.focus === "function") {
-    try {
-      lastFocusedElementBeforeModal.focus();
-    } catch (_) {}
-    lastFocusedElementBeforeModal = null;
+  let recordToClose;
+  if (targetModal) {
+    const idx = modalStack.findIndex((m) => m.element === targetModal);
+    if (idx !== -1) {
+      recordToClose = modalStack.splice(idx, 1)[0];
+    } else {
+      recordToClose = { element: targetModal };
+    }
+  } else {
+    recordToClose = modalStack.pop();
   }
+
+  if (recordToClose) {
+    if (recordToClose.keydownHandler) {
+      document.removeEventListener("keydown", recordToClose.keydownHandler);
+    }
+    if (recordToClose.element && recordToClose.element.parentNode) {
+      recordToClose.element.remove();
+    }
+    // Restore focus to opener element
+    if (recordToClose.opener && typeof recordToClose.opener.focus === "function") {
+      try {
+        recordToClose.opener.focus();
+      } catch (_) {}
+    }
+  }
+
+  // Reactivate parent modal if any remain
+  if (modalStack.length > 0) {
+    const topRecord = modalStack[modalStack.length - 1];
+    if (topRecord && topRecord.element) {
+      topRecord.element.removeAttribute("aria-hidden");
+      topRecord.element.style.pointerEvents = "";
+      if (topRecord.keydownHandler) {
+        document.removeEventListener("keydown", topRecord.keydownHandler);
+        document.addEventListener("keydown", topRecord.keydownHandler);
+      }
+    }
+  }
+}
+
+export function closeAllModals() {
+  while (modalStack.length > 0) {
+    closeModal();
+  }
+  const root = document.getElementById("modal-root");
+  if (root) root.innerHTML = "";
 }
 
 /* -------------------------------------------------------------------------
@@ -1256,6 +1321,7 @@ export function showToast(message, type = "mint", title = "") {
     <button class="toast-close-btn" type="button" aria-label="Close notification">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
     </button>
+    <div class="toast-progress"></div>
   `;
 
   stack.appendChild(toast);

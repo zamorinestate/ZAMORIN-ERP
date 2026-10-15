@@ -158,6 +158,45 @@
   --focus-ring: 0 0 0 3px rgba(177,125,56,0.22);
 
   --font-scale: 1;
+
+  /* ---- Glass & Modern Depth Tokens ---- */
+  --glass-blur: 16px;
+  --glass-saturate: 180%;
+  --glass-bg: rgba(255, 255, 255, 0.78);
+  --glass-border: rgba(23, 20, 15, 0.08);
+  --glass-shadow: 0 12px 36px rgba(16, 26, 48, 0.08);
+}
+
+/* ---- UI Density Scales ---- */
+[data-density="compact"] {
+  --control-height: 32px;
+  --control-height-sm: 26px;
+  --control-height-lg: 38px;
+  --space-sm: 4px;
+  --space-md: 10px;
+  --space-lg: 16px;
+  --radius-card: 12px;
+  --radius-control: 8px;
+}
+
+[data-density="standard"] {
+  --control-height: 40px;
+  --control-height-sm: 32px;
+  --control-height-lg: 48px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+}
+
+[data-density="comfortable"] {
+  --control-height: 46px;
+  --control-height-sm: 36px;
+  --control-height-lg: 52px;
+  --space-sm: 10px;
+  --space-md: 20px;
+  --space-lg: 28px;
+  --radius-card: 20px;
+  --radius-control: 14px;
 }
 
 [data-font-size="small"],

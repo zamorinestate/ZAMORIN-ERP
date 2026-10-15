@@ -11,7 +11,8 @@
 /* ============================================================
    THEME: PAPER (default — warm white)
    ============================================================ */
-:root {
+:root,
+[data-theme="paper"] {
   color-scheme: light;
 
   --ink-950: #0b1424;
@@ -941,6 +942,11 @@ h1, h2, h3, .font-display { font-family: var(--font-display); }
 }
 .btn:active:not(:disabled) { transform: translateY(0) scale(0.985); box-shadow: none; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important; box-shadow: none !important; }
+.btn[aria-busy="true"],
+.btn.is-busy {
+  cursor: wait !important;
+  opacity: 0.85;
+}
 
 .btn-primary {
   background: var(--ink-900);
