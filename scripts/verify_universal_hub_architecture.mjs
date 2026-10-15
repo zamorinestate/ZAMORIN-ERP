@@ -6,7 +6,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const FRONTEND_DIR = 'd:/Zamorin_Cafe_ERP_Build/15_INTEGRATION_WORKSPACE/frontend/src/js';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const FRONTEND_DIR = path.resolve(__dirname, '../frontend/src/js');
 
 const MODULES = [
   { name: 'Payroll Management', file: 'pages/payrollManagement.js', setter: 'setPayrollActiveTab', tileAttr: 'data-payroll-hub-tile', backBtn: 'payroll-back-to-hub-btn' },
@@ -81,7 +84,7 @@ const routerPath = path.join(FRONTEND_DIR, 'router.js');
 const routerContent = fs.readFileSync(routerPath, 'utf-8');
 
 const routerChecks = [
-  { name: 'Base route and subroute split', passed: routerContent.includes('const [baseRoute, ...subSegments] = (route || "").split("/")') },
+  { name: 'Base route and subroute split', passed: routerContent.includes('const [baseRoute, ...subSegments] = routePath.split("/")') },
   { name: 'Subroute dispatch switch (baseRoute)', passed: routerContent.includes('switch (baseRoute)') },
   { name: 'updateSidebarActive with state.route', passed: routerContent.includes('updateSidebarActive(state.route)') },
 ];
