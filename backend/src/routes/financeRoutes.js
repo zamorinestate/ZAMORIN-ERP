@@ -379,7 +379,7 @@ router.get(
 // A020 / F108: Advance-Slip Lookup
 router.get(
   '/advance-deposits/by-slip/:slipNumber',
-  authorize('FINANCE:READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STAFF'] }),
+  authorize('FINANCE:READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
   getAdvanceDepositBySlip
 );
 

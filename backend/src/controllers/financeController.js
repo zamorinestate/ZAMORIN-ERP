@@ -1817,8 +1817,7 @@ const listAdvanceDeposits = asyncHandler(async (request, response) => {
  */
 const getAdvanceDepositBySlip = asyncHandler(async (request, response) => {
   const { slipNumber } = request.params;
-  const { organisationId } = request.auth;
-  const cafeId = request.query.cafeId || request.auth.cafeId;
+  const { organisationId, role, isPrimaryMaster } = request.auth;
   const { AdvanceDeposit } = require('../models/AdvanceDeposit');
 
   const query = {
@@ -1829,8 +1828,51 @@ const getAdvanceDepositBySlip = asyncHandler(async (request, response) => {
       { bookingReference: String(slipNumber).trim() },
     ],
   };
-  if (cafeId && cafeId !== '*' && cafeId !== 'ALL') {
-    query.cafeId = cafeId.toUpperCase();
+
+  const isCrossCafePermitted = (role === 'MASTER' && isPrimaryMaster === true) || role === 'OWNER';
+  const requestedCafe = request.query.cafeId ? String(request.query.cafeId).trim().toUpperCase() : null;
+
+  if (role === 'CAFE_ADMIN') {
+    const userAssignedCafes = Array.isArray(request.auth.assignedCafeIds) && request.auth.assignedCafeIds.length > 0
+      ? request.auth.assignedCafeIds.map((c) => String(c).trim().toUpperCase())
+      : request.auth.cafeId ? [String(request.auth.cafeId).trim().toUpperCase()] : [];
+
+    if (!userAssignedCafes || userAssignedCafes.length === 0) {
+      return response.status(403).json({
+        success: false,
+        error: {
+          code: 'CAFE_SCOPE_REQUIRED',
+          message: 'A café scope is required for this action.',
+        },
+      });
+    }
+
+    if (requestedCafe) {
+      if (requestedCafe === '*' || requestedCafe === 'ALL' || !userAssignedCafes.includes(requestedCafe)) {
+        return response.status(403).json({
+          success: false,
+          error: {
+            code: 'CROSS_CAFE_ACCESS_DENIED',
+            message: 'Cross-café access is denied. You are not authorized for the requested café.',
+          },
+        });
+      }
+      query.cafeId = requestedCafe;
+    } else {
+      query.cafeId = userAssignedCafes.length === 1 ? userAssignedCafes[0] : { $in: userAssignedCafes };
+    }
+  } else if (isCrossCafePermitted) {
+    if (requestedCafe && requestedCafe !== '*' && requestedCafe !== 'ALL') {
+      query.cafeId = requestedCafe;
+    }
+  } else {
+    return response.status(403).json({
+      success: false,
+      error: {
+        code: 'ROLE_NOT_ALLOWED',
+        message: 'Your role is not permitted to perform this action.',
+      },
+    });
   }
 
   const deposit = await AdvanceDeposit.findOne(query).lean();
@@ -1838,7 +1880,30 @@ const getAdvanceDepositBySlip = asyncHandler(async (request, response) => {
     return response.status(404).json({ success: false, message: `Advance slip #${slipNumber} not found.` });
   }
 
-  return response.status(200).json({ success: true, data: deposit });
+  // Sanitize sensitive PII / financial metadata
+  const sanitizedDeposit = {
+    depositId: deposit.depositId,
+    receiptVoucherNumber: deposit.receiptVoucherNumber,
+    bookingReference: deposit.bookingReference || deposit.eventReference || '',
+    eventReference: deposit.eventReference || deposit.bookingReference || '',
+    eventDate: deposit.eventDate || null,
+    cafeId: deposit.cafeId,
+    customerName: deposit.customerName,
+    depositAmountPaisa: deposit.depositAmountPaisa,
+    unappliedAmountPaisa: deposit.unappliedAmountPaisa,
+    appliedAmountPaisa: deposit.appliedAmountPaisa || 0,
+    refundedAmountPaisa: deposit.refundedAmountPaisa || 0,
+    status: deposit.status,
+    receivedAt: deposit.receivedAt || deposit.createdAt || null,
+  };
+
+  // Full enterprise PII only exposed to executive governance (Master / Owner)
+  if (role === 'MASTER' || role === 'OWNER') {
+    sanitizedDeposit.customerPhone = deposit.customerPhone || '';
+    sanitizedDeposit.customerGstin = deposit.customerGstin || '';
+  }
+
+  return response.status(200).json({ success: true, data: sanitizedDeposit });
 });
 
 const applyAdvanceDeposit = asyncHandler(async (request, response) => {
