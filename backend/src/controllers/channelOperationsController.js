@@ -392,7 +392,9 @@ async function listChannelOrdersHandler(req, res, next) {
       .limit(100)
       .lean();
 
-    return res.status(200).json({ success: true, data: orders });
+    // `data` is the canonical key; `orders` is added for the Emergency Terminal
+    // fallback consumer (GET /channels/live-orders) which reads res.orders.
+    return res.status(200).json({ success: true, orders, data: orders });
   } catch (err) {
     next(err);
   }
@@ -1311,6 +1313,22 @@ async function decideEmergencyOnlineOrderHandler(req, res, next) {
   }
 }
 
+/**
+ * Emergency Terminal fallback aliases (frontend posts /orders/:orderId/accept
+ * with { prepTimeMinutes } and /orders/:orderId/reject with { reason } after the
+ * primary emergency-decision route errors). They reuse the same decision flow,
+ * which maps ACCEPT → ACCEPTED and REJECT → CANCELLED.
+ */
+async function acceptChannelOrderFallbackHandler(req, res, next) {
+  req.body = { ...(req.body || {}), decision: 'ACCEPT' };
+  return decideEmergencyOnlineOrderHandler(req, res, next);
+}
+
+async function rejectChannelOrderFallbackHandler(req, res, next) {
+  req.body = { ...(req.body || {}), decision: 'REJECT' };
+  return decideEmergencyOnlineOrderHandler(req, res, next);
+}
+
 module.exports = {
   // Tables & Sessions
   listTablesHandler,
@@ -1385,5 +1403,7 @@ module.exports = {
   // Emergency Online Order Acceptance (A007 / F086 / F089)
   getEmergencyOnlineOrdersHandler,
   decideEmergencyOnlineOrderHandler,
+  acceptChannelOrderFallbackHandler,
+  rejectChannelOrderFallbackHandler,
 };
 

@@ -35,6 +35,8 @@ const {
   // Channel Orders & Config
   listChannelOrdersHandler,
   updateOrderStatusHandler,
+  acceptChannelOrderFallbackHandler,
+  rejectChannelOrderFallbackHandler,
   getChannelConfigHandler,
   updateChannelConfigHandler,
   // Pickup Tokens
@@ -143,6 +145,11 @@ router.post('/waitlist/:waitlistId/pre-order', authorize('RESERVATIONS_WRITE', {
 router.get('/orders', authorize('ORDERS_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }), listChannelOrdersHandler);
 router.patch('/orders/:orderId/status', authorize('ORDERS_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }), updateOrderStatusHandler);
 router.post('/orders/:orderId/verify-rider-handover', authorize('ORDERS_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN', 'STAFF'] }), verifyRiderHandoverHandler);
+// Emergency Terminal fallbacks: it lists live orders from /live-orders and posts
+// /orders/:orderId/accept|reject when the primary emergency-decision route is unavailable.
+router.get('/live-orders', authorize('ORDERS_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STAFF'] }), listChannelOrdersHandler);
+router.post('/orders/:orderId/accept', authorize('ORDERS_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STAFF'] }), acceptChannelOrderFallbackHandler);
+router.post('/orders/:orderId/reject', authorize('ORDERS_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STAFF'] }), rejectChannelOrderFallbackHandler);
 
 // Channel Config
 router.get('/config', authorize('CONFIG_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }), getChannelConfigHandler);
@@ -156,6 +163,8 @@ router.patch('/pickup-tokens/:tokenId/status', authorize('TOKENS_WRITE', { allow
 // Aggregator Reconciliation & Store Pause Controls (F088 / A081 / F100-F106)
 router.post('/aggregators/reconcile', authorize('FINANCE_RECONCILE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }), reconcileAggregatorPayoutsHandler);
 router.post('/aggregators/pause', authorize('AGGREGATOR_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }), pauseAggregatorStoreHandler);
+// POS A081 "kitchen snooze" + emergency terminal snooze post to /pause (all providers).
+router.post('/pause', authorize('AGGREGATOR_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }), pauseAggregatorStoreHandler);
 router.post('/aggregators/resume', authorize('AGGREGATOR_WRITE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }), resumeAggregatorStoreHandler);
 router.get('/aggregators/status', authorize('AGGREGATOR_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STAFF'] }), getAggregatorStoreStatusHandler);
 router.post('/aggregators/statement-audit', authorize('FINANCE_RECONCILE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }), auditAggregatorStatementHandler);
