@@ -366,6 +366,19 @@ const verifyBiometricFingerprint = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Biometric scanner connection test — device diagnostics screen.
+ * Frontend posts /hardware/biometric/device-test { model } and reads
+ * data.status ('ONLINE'/'OFFLINE') and data.driverStatus ('ACTIVE').
+ */
+const testBiometricDevice = asyncHandler(async (req, res) => {
+  const { model, deviceModel } = req.body || {};
+  const result = await BiometricFingerprintAdapter.testDeviceConnection(
+    model || deviceModel || 'SIMULATED_SCANNER'
+  );
+  return res.status(200).json({ success: true, data: result });
+});
+
+/**
  * Push Sale to EDC Card Terminal (F070, A054-A056)
  */
 const pushEdcSale = asyncHandler(async (req, res) => {
@@ -576,6 +589,7 @@ module.exports = {
   submitShiftChecklist,
   enrollBiometricFingerprint,
   verifyBiometricFingerprint,
+  testBiometricDevice,
   pushEdcSale,
   getEdcStatus,
   cancelEdcSale,
