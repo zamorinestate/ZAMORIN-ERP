@@ -97,6 +97,8 @@ router.post('/tables/merge', mergeTablesPosController);
 router.post('/tables/shift', shiftTablePosController);
 router.get('/orders/lookup-barcode/:barcode', lookupBarcodeOrderController);
 router.get('/orders/lookup-barcode', lookupBarcodeOrderController);
+// POS till header recall: KOT#/ADV#/BILL#/ZAM codes are fetched from this path.
+router.get('/bills/barcode/:barcode', lookupBarcodeOrderController);
 router.get('/advance-orders/by-slip/:slipNumber', (req, res, next) => {
   const { getAdvanceDepositBySlip } = require('../controllers/financeController');
   return getAdvanceDepositBySlip(req, res, next);

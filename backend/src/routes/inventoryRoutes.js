@@ -271,6 +271,13 @@ router.post(
 );
 
 // 8. Replenishment & PAR (P06 Automatic Engine)
+// Procurement recommendations modal reads GET /inventory/recommendations?status=…
+router.get(
+  '/recommendations',
+  authorize('INVENTORY_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  getReplenishmentRecommendations
+);
+
 router.get(
   '/replenishment/recommendations',
   authorize('INVENTORY_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
