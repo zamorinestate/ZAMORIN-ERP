@@ -32,7 +32,7 @@ const { RevenueShareSettlement } = require('../models/RevenueShareSettlement');
 const { EmployeeTraining } = require('../models/EmployeeTraining');
 const { TrainingCourse } = require('../models/TrainingCourse');
 const { ScenarioSandbox } = require('../models/ScenarioSandbox');
-const { ApiError } = require('../utils/apiError');
+const { ApiError } = require('../utils/ApiError');
 
 class PortfolioGovernanceFollowThroughService {
   /**
