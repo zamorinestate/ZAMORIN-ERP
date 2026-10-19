@@ -586,12 +586,15 @@ async function startServer() {
     }
   }
 
-  // Validate durable document storage configuration before accepting traffic (Fails safe if unconfigured in production)
-  documentStorageAdapter.validateStartupConfiguration(environment);
+  // Validate durable document storage configuration before accepting traffic (Fails safe if unconfigured in production).
+  // Both validators read raw env-var keys, so they MUST receive process.env —
+  // passing the normalised frozen config object silently disabled every
+  // production invariant (env.NODE_ENV was undefined on it).
+  documentStorageAdapter.validateStartupConfiguration(process.env);
 
   // Universal production configuration & secrets validator (Fails safe: reports PRESENT/MISSING/INVALID/UNSAFE without revealing secrets)
   const { validateStartupConfiguration: validateConfig } = require('./config/startupValidator');
-  validateConfig(environment, { failClosed: true });
+  validateConfig(process.env, { failClosed: true });
 
   const app =
     createApp(environment);
