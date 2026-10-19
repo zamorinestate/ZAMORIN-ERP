@@ -36,6 +36,8 @@ const {
   recordMeterReading,
   getDepositLedger,
   recordDepositTransaction,
+  createSecurityDeposit,
+  createRecoveryCharge,
   listDisputes,
   createDispute,
   resolveDispute,
@@ -92,10 +94,14 @@ router.get('/outstanding', getOutstandingAndAgeing);
 
 // 11. Recoveries & Meters
 router.get('/recoveries', listRecoveries);
+// Frontend "Add Recovery Charge" modal (derives operator/agreement from the outlet).
+router.post('/recoveries', createRecoveryCharge);
 router.post('/recoveries/meter-readings', recordMeterReading);
 
 // 12. Security Deposits
 router.get('/deposits', getDepositLedger);
+// Frontend "Record Security Deposit" modal (derives outlet/agreement from the operator).
+router.post('/deposits', createSecurityDeposit);
 router.post('/deposits/transactions', recordDepositTransaction);
 
 // 13. Disputes & Default Cases

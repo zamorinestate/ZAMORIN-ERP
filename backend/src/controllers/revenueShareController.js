@@ -1106,6 +1106,146 @@ const recordDepositTransaction = asyncHandler(async (request, response) => {
   });
 });
 
+/**
+ * POST /revenue-share/deposits — "Record Security Deposit" modal.
+ * Body: { operatorId, heldBalancePaisa, requiredAmountPaisa, status: 'HELD' }.
+ * The modal only knows the operator, but SecurityDeposit requires outletId and
+ * agreementId — derive both from the operator's agreement. The UI status token
+ * 'HELD' maps to the model's 'HELD_ACTIVE'. One deposit ledger is kept per
+ * agreement (unique index), so an existing deposit is topped up instead of duplicated.
+ */
+const createSecurityDeposit = asyncHandler(async (request, response) => {
+  const { organisationId, userId } = request.auth;
+  const { operatorId, heldBalancePaisa, requiredAmountPaisa } = request.body || {};
+
+  if (!operatorId || heldBalancePaisa === undefined) {
+    throw new ApiError(400, 'MISSING_FIELDS', 'operatorId and heldBalancePaisa are required.');
+  }
+
+  const held = Number(heldBalancePaisa) || 0;
+  if (held <= 0) {
+    throw new ApiError(400, 'INVALID_AMOUNT', 'heldBalancePaisa must be greater than zero.');
+  }
+
+  const normOperatorId = String(operatorId).trim().toUpperCase();
+  const agreement = await RevenueShareAgreement.findOne({
+    organisationId,
+    operatorId: normOperatorId,
+  }).lean();
+
+  if (!agreement) {
+    throw new ApiError(404, 'AGREEMENT_NOT_FOUND', `No revenue-share agreement found for operator ${normOperatorId}.`);
+  }
+
+  const required = Number(requiredAmountPaisa) || held;
+
+  let deposit = await SecurityDeposit.findOne({ organisationId, agreementId: agreement.agreementId });
+
+  if (deposit) {
+    deposit.heldBalancePaisa = held;
+    deposit.requiredAmountPaisa = required;
+    deposit.status = 'HELD_ACTIVE';
+    deposit.ledgerTransactions.push({
+      transactionType: 'TOP_UP',
+      amountPaisa: held,
+      balanceAfterPaisa: held,
+      authorizedByUserId: userId,
+      reason: 'Recorded from Revenue Share deposits screen',
+    });
+    await deposit.save();
+  } else {
+    const count = await SecurityDeposit.countDocuments({ organisationId });
+    deposit = await SecurityDeposit.create({
+      depositId: `DEP-${String(count + 1).padStart(4, '0')}`,
+      organisationId,
+      operatorId: normOperatorId,
+      outletId: agreement.outletId,
+      agreementId: agreement.agreementId,
+      requiredAmountPaisa: required,
+      heldBalancePaisa: held,
+      status: 'HELD_ACTIVE',
+      ledgerTransactions: [
+        {
+          transactionType: 'INITIAL_DEPOSIT',
+          amountPaisa: held,
+          balanceAfterPaisa: held,
+          authorizedByUserId: userId,
+          reason: 'Recorded from Revenue Share deposits screen',
+        },
+      ],
+    });
+  }
+
+  return response.status(201).json({
+    success: true,
+    message: 'Security deposit recorded.',
+    data: { deposit },
+  });
+});
+
+/**
+ * POST /revenue-share/recoveries — "Add Recovery Charge" modal.
+ * Body: { outletId, utilityType, periodKey, unitsConsumed, amountPaisa, status: 'BILLED' }.
+ * The modal only knows the outlet, but RecoveryCharge requires operatorId and
+ * agreementId — derive both from the outlet's agreement. The UI utility tokens
+ * CAM_CHARGES / HVAC are outside the model enum and map to CAM_COMMON_AREA, and
+ * the UI status token 'BILLED' maps to the model's PENDING_BILLING.
+ */
+const createRecoveryCharge = asyncHandler(async (request, response) => {
+  const { organisationId, userId } = request.auth;
+  const { outletId, utilityType, periodKey, unitsConsumed, amountPaisa, status } = request.body || {};
+
+  if (!outletId || !periodKey || !utilityType) {
+    throw new ApiError(400, 'MISSING_FIELDS', 'outletId, utilityType and periodKey are required.');
+  }
+
+  const amount = Number(amountPaisa) || 0;
+  if (amount <= 0) {
+    throw new ApiError(400, 'INVALID_AMOUNT', 'amountPaisa must be greater than zero.');
+  }
+
+  const normOutletId = String(outletId).trim().toUpperCase();
+  const agreement = await RevenueShareAgreement.findOne({
+    organisationId,
+    outletId: normOutletId,
+  }).lean();
+
+  if (!agreement) {
+    throw new ApiError(404, 'AGREEMENT_NOT_FOUND', `No revenue-share agreement found for outlet ${normOutletId}.`);
+  }
+
+  const UTILITY_TYPE_ALIASES = { CAM_CHARGES: 'CAM_COMMON_AREA', HVAC: 'CAM_COMMON_AREA' };
+  const rawUtility = String(utilityType).trim().toUpperCase();
+  const normUtility = UTILITY_TYPE_ALIASES[rawUtility] || rawUtility;
+
+  const MODEL_STATUSES = ['ESTIMATED', 'PENDING_BILLING', 'BILLED_IN_SETTLEMENT', 'SETTLED', 'ADJUSTED'];
+  const rawStatus = String(status || '').trim().toUpperCase();
+  const normStatus = rawStatus === 'BILLED'
+    ? 'PENDING_BILLING'
+    : (MODEL_STATUSES.includes(rawStatus) ? rawStatus : 'PENDING_BILLING');
+
+  const count = await RecoveryCharge.countDocuments({ organisationId });
+  const recovery = await RecoveryCharge.create({
+    recoveryId: `REC-${String(count + 1).padStart(4, '0')}`,
+    organisationId,
+    outletId: normOutletId,
+    operatorId: agreement.operatorId,
+    agreementId: agreement.agreementId,
+    periodKey: String(periodKey).trim().toUpperCase(),
+    utilityType: normUtility,
+    unitsConsumed: Number(unitsConsumed) || 0,
+    amountPaisa: amount,
+    status: normStatus,
+    createdByUserId: userId,
+  });
+
+  return response.status(201).json({
+    success: true,
+    message: 'Recovery charge recorded.',
+    data: { recovery },
+  });
+});
+
 // ── 13. Disputes & Default Cases ────────────────────────────────────────────
 
 const listDisputes = asyncHandler(async (request, response) => {
@@ -1248,6 +1388,8 @@ module.exports = {
   recordMeterReading,
   getDepositLedger,
   recordDepositTransaction,
+  createSecurityDeposit,
+  createRecoveryCharge,
   listDisputes,
   createDispute,
   resolveDispute,
