@@ -105,6 +105,14 @@ router.delete('/delegations/:delegationId', revokeDelegation);
 
 // ── Privacy & Data ────────────────────────────────────────────────────────────
 router.post('/privacy/requests', submitPrivacyRequest);
+// Frontend Settings page submits { requestType, details } to /privacy/request (singular).
+// Map details → reason so the canonical submit flow handles it — no duplicated logic.
+router.post('/privacy/request', (req, res, next) => {
+  if (req.body && !req.body.reason && req.body.details) {
+    req.body = { ...req.body, reason: req.body.details };
+  }
+  return submitPrivacyRequest(req, res, next);
+});
 router.get('/privacy/requests', listMyPrivacyRequests);
 router.get('/privacy/notice', getPrivacyNotice);
 
