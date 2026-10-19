@@ -1,51 +1,51 @@
 {
-    "name":  "zamorin-cafe-erp-root",
-    "version":  "1.0.0",
-    "description":  "Zamorin Cafe ERP â€” Enterprise Management System Root Workspace",
-    "type":  "module",
-    "private":  true,
-    "scripts":  {
-                    "dev":  "node scripts/start_dev_all.mjs",
-                    "start":  "node scripts/start_dev_all.mjs",
-                    "start:backend":  "npm --prefix Backend start",
-                    "start:backend:dev":  "npm --prefix Backend run dev",
-                    "start:frontend":  "node scripts/serve_frontend.js",
-                    "test":  "npm run test:backend \u0026\u0026 npm run test:frontend",
-                    "test:backend":  "npm --prefix Backend test",
-                    "test:frontend":  "node Frontend/verifyRouterImports.mjs \u0026\u0026 node Scripts/verify_all.js",
-                    "check":  "npm --prefix Backend run check \u0026\u0026 node Frontend/verifyRouterImports.mjs",
-                    "seed":  "npm --prefix Backend run seed",
-                    "verify":  "node Scripts/master_system_verification.mjs",
-                    "sbom":  "node scripts/generate_sbom.mjs",
-                    "audit:deps":  "node scripts/audit_dependencies.mjs",
-                    "validate:env":  "node scripts/validate_environment.mjs",
-                    "validate:routes":  "node scripts/validate_routes.mjs",
-                    "test:smoke":  "node scripts/smoke_test.mjs",
-                    "test:load":  "node scripts/load_test.mjs",
-                    "benchmark:real":  "node scripts/run_real_scalability_benchmark.mjs",
-                    "benchmark:synthetic":  "node scripts/run_scalability_stress.mjs",
-                    "verify:backup":  "node scripts/verify_backup_config.mjs",
-                    "verify:rollback":  "node scripts/verify_rollback_compatibility.mjs",
-                    "rollback:manage":  "node scripts/rollback_manager.mjs",
-                    "triage:incident":  "node scripts/incident_triage_cli.mjs",
-                    "check:deploy-readiness":  "node scripts/check_deploy_readiness.mjs",
-                    "scan:secrets":  "node scripts/scan_secrets.mjs",
-                    "migrate:dry-run":  "node scripts/migration_runner.mjs --dry-run",
-                    "build":  "echo \"Zamorin Cafe ERP uses zero-build Vanilla JS frontend and CommonJS backend. No compile step required.\""
-                },
-    "keywords":  [
-                     "zamorin-cafe-erp",
-                     "enterprise-resource-planning",
-                     "restaurant-management",
-                     "cafe-pos"
-                 ],
-    "author":  "Zamorin Cafe Operations Engineering",
-    "license":  "UNLICENSED",
-    "devDependencies": {
-        "puppeteer-core": "^25.9.0"
-    },
-    "engines": {
-        "node": ">=22.12.0 <25.0.0",
-        "npm": ">=10.0.0"
-    }
+  "name": "zamorin-cafe-erp-root",
+  "version": "1.0.0",
+  "description": "Zamorin Cafe ERP — Enterprise Management System Root Workspace",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/start_dev_all.mjs",
+    "start": "node scripts/start_dev_all.mjs",
+    "start:backend": "npm --prefix backend start",
+    "start:backend:dev": "npm --prefix backend run dev",
+    "start:frontend": "node scripts/serve_frontend.js",
+    "test": "npm run test:backend && npm run test:frontend",
+    "test:backend": "npm --prefix backend test",
+    "test:frontend": "node frontend/verifyRouterImports.mjs && node scripts/verify_all.js",
+    "check": "npm --prefix backend run check && node frontend/verifyRouterImports.mjs",
+    "seed": "npm --prefix backend run seed",
+    "verify": "node scripts/master_system_verification.mjs",
+    "sbom": "node scripts/generate_sbom.mjs",
+    "audit:deps": "node scripts/audit_dependencies.mjs",
+    "validate:env": "node scripts/validate_environment.mjs",
+    "validate:routes": "node scripts/validate_routes.mjs",
+    "test:smoke": "node scripts/smoke_test.mjs",
+    "test:load": "node scripts/load_test.mjs",
+    "benchmark:real": "node scripts/run_real_scalability_benchmark.mjs",
+    "benchmark:synthetic": "node scripts/run_scalability_stress.mjs",
+    "verify:backup": "node scripts/verify_backup_config.mjs",
+    "verify:rollback": "node scripts/verify_rollback_compatibility.mjs",
+    "rollback:manage": "node scripts/rollback_manager.mjs",
+    "triage:incident": "node scripts/incident_triage_cli.mjs",
+    "check:deploy-readiness": "node scripts/check_deploy_readiness.mjs",
+    "scan:secrets": "node scripts/scan_secrets.mjs",
+    "migrate:dry-run": "node scripts/migration_runner.mjs --dry-run",
+    "build": "echo \"Zamorin Cafe ERP uses zero-build Vanilla JS frontend and CommonJS backend. No compile step required.\""
+  },
+  "keywords": [
+    "zamorin-cafe-erp",
+    "enterprise-resource-planning",
+    "restaurant-management",
+    "cafe-pos"
+  ],
+  "author": "Zamorin Cafe Operations Engineering",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "puppeteer-core": "^25.9.0"
+  },
+  "engines": {
+    "node": ">=22.12.0 <25.0.0",
+    "npm": ">=10.0.0"
+  }
 }
