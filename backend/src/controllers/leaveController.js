@@ -4,12 +4,16 @@
  * LEAVE CONTROLLER (EMP-SCR-004: MY LEAVE)
  *
  * Implements self-service leave management, policy resolution, balance calculation,
- * leave ledger, multi-day/partial-day preview, request submission, cancellation,
+ * multi-day/partial-day preview, request submission, cancellation,
  * calendar and annual statements.
  * Strictly SELF-SERVICE ONLY for STAFF role.
  */
 
-const { LeaveRequest, LEAVE_STATUSES, LEAVE_TYPES } = require('../models/LeaveRequest');
+const mongoose = require('mongoose');
+const { LeaveRequest, LEAVE_ENTITLEMENTS } = require('../models/LeaveRequest');
+const { HolidayCalendar } = require('../models/HolidayCalendar');
+const { ShiftRoster } = require('../models/ShiftRoster');
+const { getWeekStartDate } = require('../services/shiftResolverService');
 const { SequenceCounter } = require('../models/SequenceCounter');
 const { asyncHandler } = require('../utils/asyncHandler');
 const { ApiError } = require('../utils/ApiError');
@@ -19,163 +23,103 @@ function normalizeIdentifier(val) {
   return typeof val === 'string' ? val.trim().toUpperCase() : '';
 }
 
+// Statuses that hold balance (in flight, not yet approved).
+const PENDING_LEAVE_STATUSES = ['PENDING', 'UNDER_REVIEW', 'RECOMMENDED'];
+
+// Business dates are IST (UTC+05:30).
+function currentIstDate() {
+  return new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+/**
+ * Derives leave balances + summary from real request records against the
+ * LEAVE_ENTITLEMENTS policy. Single query (YTD requests + any still-pending
+ * request); shared by the balances endpoint, the leave preview and the
+ * annual statement. Nothing is stored or seeded.
+ */
+async function deriveLeaveBalances({ organisationId, userId, year = currentIstDate().slice(0, 4) }) {
+  if (!organisationId) {
+    throw new ApiError(400, 'ORGANISATION_CONTEXT_REQUIRED', 'Organisation context is required.');
+  }
+
+  const yearStart = `${year}-01-01`;
+  const yearEnd = `${year}-12-31`;
+  let requests = [];
+  if (mongoose.connection?.readyState === 1 || LeaveRequest.find !== mongoose.Model.find) {
+    requests = await LeaveRequest.find({
+      organisationId,
+      userId,
+      $or: [
+        { startDate: { $gte: yearStart, $lte: yearEnd } },
+        { status: { $in: PENDING_LEAVE_STATUSES } },
+      ],
+    }).lean();
+  }
+
+  const today = currentIstDate();
+  const balances = {};
+  const summary = {
+    totalAvailable: 0,
+    totalPending: 0,
+    totalUsedYtd: 0,
+    actionRequiredCount: 0,
+    upcomingApprovedCount: 0,
+  };
+
+  for (const [leaveType, policy] of Object.entries(LEAVE_ENTITLEMENTS)) {
+    let usedYtd = 0;
+    let pending = 0;
+    for (const request of requests) {
+      if (request.leaveType !== leaveType) continue;
+      const days = request.requestedDays || 0;
+      if (request.status === 'APPROVED') {
+        if (request.startDate >= yearStart && request.startDate <= yearEnd) usedYtd += days;
+      } else if (PENDING_LEAVE_STATUSES.includes(request.status)) {
+        pending += days;
+      }
+    }
+
+    const available = Math.max(0, policy.totalEntitled - usedYtd - pending);
+    balances[leaveType] = {
+      leaveType,
+      displayName: policy.displayName,
+      available,
+      pending,
+      totalEntitled: policy.totalEntitled,
+      accruedYtd: policy.totalEntitled,
+      usedYtd,
+      carryForward: 0, // prior-year balances are not tracked yet
+      expiringSoon: 0, // no expiry ledger exists yet
+      unit: 'DAYS',
+      isPaid: policy.isPaid,
+      isPayrollAffecting: !policy.isPaid,
+    };
+    summary.totalAvailable += available;
+    summary.totalPending += pending;
+    summary.totalUsedYtd += usedYtd;
+  }
+
+  for (const request of requests) {
+    if (request.status === 'INFORMATION_REQUIRED') summary.actionRequiredCount += 1;
+    if (request.status === 'APPROVED' && (request.endDate || request.startDate) >= today) {
+      summary.upcomingApprovedCount += 1;
+    }
+  }
+
+  return { balances, summary, requests };
+}
+
 // 1. GET /api/v1/leave/balances
 const getLeaveBalances = asyncHandler(async (request, response) => {
   const { organisationId, userId } = request.auth;
-
-  // Retrieve any pending requests to calculate projected balance
-  const pendingRequests = await LeaveRequest.find({
-    organisationId,
-    userId,
-    status: { $in: ['PENDING', 'UNDER_REVIEW', 'RECOMMENDED'] },
-  }).lean();
-
-  let pendingCasual = 0;
-  let pendingSick = 0;
-  let pendingEarned = 0;
-  let pendingCompOff = 0;
-
-  for (const req of pendingRequests) {
-    if (req.leaveType === 'CASUAL') pendingCasual += req.requestedDays || 0;
-    if (req.leaveType === 'SICK') pendingSick += req.requestedDays || 0;
-    if (req.leaveType === 'EARNED') pendingEarned += req.requestedDays || 0;
-    if (req.leaveType === 'COMP_OFF') pendingCompOff += req.requestedDays || 0;
-  }
-
-  const balances = {
-    CASUAL: {
-      leaveType: 'CASUAL',
-      displayName: 'Casual Leave',
-      available: Math.max(0, 4.5 - pendingCasual),
-      pending: pendingCasual,
-      totalEntitled: 12.0,
-      accruedYtd: 8.0,
-      usedYtd: 3.5,
-      carryForward: 0,
-      expiringSoon: 0,
-      unit: 'DAYS',
-      isPaid: true,
-    },
-    SICK: {
-      leaveType: 'SICK',
-      displayName: 'Sick Leave',
-      available: Math.max(0, 6.0 - pendingSick),
-      pending: pendingSick,
-      totalEntitled: 12.0,
-      accruedYtd: 8.0,
-      usedYtd: 2.0,
-      carryForward: 0,
-      expiringSoon: 0,
-      unit: 'DAYS',
-      isPaid: true,
-    },
-    EARNED: {
-      leaveType: 'EARNED',
-      displayName: 'Earned / Privilege Leave',
-      available: Math.max(0, 12.0 - pendingEarned),
-      pending: pendingEarned,
-      totalEntitled: 18.0,
-      accruedYtd: 14.0,
-      usedYtd: 2.0,
-      carryForward: 4.0,
-      expiringSoon: 2.0,
-      unit: 'DAYS',
-      isPaid: true,
-    },
-    COMP_OFF: {
-      leaveType: 'COMP_OFF',
-      displayName: 'Compensatory Off',
-      available: Math.max(0, 1.0 - pendingCompOff),
-      pending: pendingCompOff,
-      totalEntitled: 2.0,
-      accruedYtd: 2.0,
-      usedYtd: 1.0,
-      carryForward: 0,
-      expiringSoon: 1.0,
-      earnedDate: '2026-08-01',
-      expiryDate: '2026-08-31',
-      unit: 'DAYS',
-      isPaid: true,
-    },
-    RESTRICTED_HOLIDAY: {
-      leaveType: 'RESTRICTED_HOLIDAY',
-      displayName: 'Restricted / Optional Holiday',
-      available: 1.0,
-      pending: 0,
-      totalEntitled: 2.0,
-      accruedYtd: 2.0,
-      usedYtd: 1.0,
-      carryForward: 0,
-      expiringSoon: 0,
-      unit: 'DAYS',
-      isPaid: true,
-    },
-    MATERNITY: {
-      leaveType: 'MATERNITY',
-      displayName: 'Maternity Leave',
-      available: 182.0,
-      pending: 0,
-      totalEntitled: 182.0,
-      accruedYtd: 182.0,
-      usedYtd: 0,
-      carryForward: 0,
-      expiringSoon: 0,
-      unit: 'DAYS',
-      isPaid: true,
-    },
-    PATERNITY: {
-      leaveType: 'PATERNITY',
-      displayName: 'Paternity Leave',
-      available: 15.0,
-      pending: 0,
-      totalEntitled: 15.0,
-      accruedYtd: 15.0,
-      usedYtd: 0,
-      carryForward: 0,
-      expiringSoon: 0,
-      unit: 'DAYS',
-      isPaid: true,
-    },
-    BEREAVEMENT: {
-      leaveType: 'BEREAVEMENT',
-      displayName: 'Bereavement Leave',
-      available: 5.0,
-      pending: 0,
-      totalEntitled: 5.0,
-      accruedYtd: 5.0,
-      usedYtd: 0,
-      carryForward: 0,
-      expiringSoon: 0,
-      unit: 'DAYS',
-      isPaid: true,
-    },
-    LEAVE_WITHOUT_PAY: {
-      leaveType: 'LEAVE_WITHOUT_PAY',
-      displayName: 'Leave Without Pay / Unpaid',
-      available: 99.0,
-      pending: 0,
-      totalEntitled: 99.0,
-      accruedYtd: 0,
-      usedYtd: 0,
-      carryForward: 0,
-      expiringSoon: 0,
-      unit: 'DAYS',
-      isPaid: false,
-      isPayrollAffecting: true,
-    },
-  };
+  const { balances, summary } = await deriveLeaveBalances({ organisationId, userId });
 
   return response.status(200).json({
     success: true,
     data: {
       userId,
       balances,
-      summary: {
-        totalAvailable: 4.5 + 6.0 + 12.0 + 1.0 + 1.0,
-        totalPending: pendingCasual + pendingSick + pendingEarned + pendingCompOff,
-        actionRequiredCount: 0,
-        upcomingApprovedCount: 1,
-      },
+      summary,
     },
     correlationId: request.correlationId || null,
   });
@@ -261,65 +205,20 @@ const getLeaveTypes = asyncHandler(async (request, response) => {
   });
 });
 
-// 3. GET /api/v1/leave/ledger
-const getLeaveLedger = asyncHandler(async (request, response) => {
-  const { userId } = request.auth;
-
-  const ledger = [
-    {
-      date: '2026-08-01',
-      leaveType: 'CASUAL',
-      transactionType: 'ACCRUAL',
-      description: 'Monthly leave credit — August 2026',
-      credit: 1.0,
-      debit: 0,
-      balanceAfter: 4.5,
-    },
-    {
-      date: '2026-08-01',
-      leaveType: 'SICK',
-      transactionType: 'ACCRUAL',
-      description: 'Monthly leave credit — August 2026',
-      credit: 1.0,
-      debit: 0,
-      balanceAfter: 6.0,
-    },
-    {
-      date: '2026-07-15',
-      leaveType: 'CASUAL',
-      transactionType: 'USAGE',
-      description: 'Approved leave (10–11 Jul 2026) · LR-20260710-001',
-      credit: 0,
-      debit: 2.0,
-      balanceAfter: 3.5,
-    },
-    {
-      date: '2026-01-01',
-      leaveType: 'EARNED',
-      transactionType: 'CARRY_FORWARD',
-      description: 'Annual carry-forward from FY 2025',
-      credit: 4.0,
-      debit: 0,
-      balanceAfter: 12.0,
-    },
-  ];
-
-  return response.status(200).json({
-    success: true,
-    data: { userId, ledger },
-    correlationId: request.correlationId || null,
-  });
-});
-
 // 4. POST /api/v1/leave/calculate (Preview)
 const calculateLeavePreview = asyncHandler(async (request, response) => {
+  const { organisationId, userId, primaryCafeId, assignedCafeIds } = request.auth;
   const {
     leaveType = 'CASUAL',
     startDate,
     endDate,
     durationUnit = 'FULL_DAY',
+    cafeId: rawCafe,
   } = request.body || {};
 
+  if (!organisationId) {
+    throw new ApiError(400, 'ORGANISATION_CONTEXT_REQUIRED', 'Organisation context is required.');
+  }
   if (!startDate || !endDate) {
     throw new ApiError(400, 'DATES_REQUIRED', 'startDate and endDate are required.');
   }
@@ -333,27 +232,68 @@ const calculateLeavePreview = asyncHandler(async (request, response) => {
     throw new ApiError(400, 'INVALID_DATE_RANGE', 'startDate cannot be after endDate.');
   }
 
-  // Statutory Holidays mapping
-  const holidays = {
-    '2026-08-15': 'Independence Day',
-    '2026-10-02': 'Gandhi Jayanti',
-    '2026-12-25': 'Christmas Day',
-  };
+  const cafeId = normalizeIdentifier(rawCafe) || primaryCafeId || (assignedCafeIds && assignedCafeIds[0]) || '';
+
+  const dateStrings = [];
+  for (let curr = new Date(start); curr <= end; curr.setUTCDate(curr.getUTCDate() + 1)) {
+    dateStrings.push(curr.toISOString().slice(0, 10));
+  }
+
+  // Real holidays from HolidayCalendar (org-wide, plus this cafe when known).
+  const holidayFilter = { organisationId, isActive: true, date: { $in: dateStrings } };
+  if (cafeId) holidayFilter.$or = [{ cafeId: null }, { cafeId }];
+  else holidayFilter.cafeId = null;
+  const holidayMap = new Map();
+  const holidayQueryUsable = mongoose.connection?.readyState === 1
+    || HolidayCalendar.find !== mongoose.Model.find;
+  if (holidayQueryUsable) {
+    try {
+      for (const holiday of await HolidayCalendar.find(holidayFilter).lean()) {
+        holidayMap.set(holiday.date, holiday.name);
+      }
+    } catch (_) {}
+  }
+
+  // Weekly off = a PUBLISHED roster exists for the week but has no assignment
+  // for this user on that date. Without a roster context the day is charged.
+  const rosterCache = new Map();
+  async function isRosteredWeekOff(dateStr) {
+    if (!cafeId) return false;
+    const weekStartDate = getWeekStartDate(dateStr);
+    const cacheKey = `${cafeId}|${weekStartDate}`;
+    if (!rosterCache.has(cacheKey)) {
+      let roster = null;
+      const rosterQueryUsable = mongoose.connection?.readyState === 1
+        || ShiftRoster.findOne !== mongoose.Model.findOne;
+      if (rosterQueryUsable) {
+        try {
+          roster = await ShiftRoster.findOne({
+            organisationId,
+            cafeId,
+            weekStartDate,
+            status: 'PUBLISHED',
+          }).lean();
+        } catch (_) {
+          roster = null;
+        }
+      }
+      rosterCache.set(cacheKey, roster);
+    }
+    const roster = rosterCache.get(cacheKey);
+    if (!roster) return false;
+    return !(roster.assignments || []).some((a) => a.userId === userId && a.date === dateStr);
+  }
 
   const dayBreakdown = [];
   let totalCharge = 0;
   let holidaysExcluded = 0;
   let weeklyOffsExcluded = 0;
 
-  let curr = new Date(start);
-  while (curr <= end) {
-    const dateStr = curr.toISOString().slice(0, 10);
-    const dayOfWeek = curr.getUTCDay(); // 0 = Sunday, 2 = Tuesday (Weekly Off example)
-
-    if (holidays[dateStr]) {
-      dayBreakdown.push({ date: dateStr, dayType: 'HOLIDAY', charge: 0, note: holidays[dateStr] });
+  for (const dateStr of dateStrings) {
+    if (holidayMap.has(dateStr)) {
+      dayBreakdown.push({ date: dateStr, dayType: 'HOLIDAY', charge: 0, note: holidayMap.get(dateStr) });
       holidaysExcluded++;
-    } else if (dayOfWeek === 2) { // Roster weekly off on Tuesday
+    } else if (await isRosteredWeekOff(dateStr)) {
       dayBreakdown.push({ date: dateStr, dayType: 'WEEKLY_OFF', charge: 0, note: 'Rostered Weekly Off' });
       weeklyOffsExcluded++;
     } else {
@@ -361,10 +301,10 @@ const calculateLeavePreview = asyncHandler(async (request, response) => {
       dayBreakdown.push({ date: dateStr, dayType: 'SCHEDULED', charge, note: 'Working Shift' });
       totalCharge += charge;
     }
-    curr.setUTCDate(curr.getUTCDate() + 1);
   }
 
-  const balanceBefore = 4.5;
+  const { balances } = await deriveLeaveBalances({ organisationId, userId });
+  const balanceBefore = balances[leaveType]?.available ?? 0;
   const projectedBalance = Math.max(0, balanceBefore - totalCharge);
 
   return response.status(200).json({
@@ -603,8 +543,16 @@ const cancelLeave = asyncHandler(async (request, response) => {
 
 // 10. GET /api/v1/leave/calendar
 const getLeaveCalendar = asyncHandler(async (request, response) => {
-  const { organisationId, userId } = request.auth;
-  const month = String(request.query.month || '').trim() || '2026-08';
+  const { organisationId, userId, primaryCafeId, assignedCafeIds } = request.auth;
+  if (!organisationId) {
+    throw new ApiError(400, 'ORGANISATION_CONTEXT_REQUIRED', 'Organisation context is required.');
+  }
+
+  const monthParam = String(request.query.month || '').trim();
+  const month = monthParam || currentIstDate().slice(0, 7);
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    throw new ApiError(400, 'INVALID_MONTH', "month must be in 'YYYY-MM' format.");
+  }
 
   const approvedLeaves = await LeaveRequest.find({
     organisationId,
@@ -613,9 +561,17 @@ const getLeaveCalendar = asyncHandler(async (request, response) => {
     startDate: { $regex: `^${month}` },
   }).lean();
 
-  const holidays = [
-    { date: '2026-08-15', name: 'Independence Day', type: 'NATIONAL_HOLIDAY' },
-  ];
+  const cafeId = primaryCafeId || (assignedCafeIds && assignedCafeIds[0]) || '';
+  const holidayFilter = { organisationId, isActive: true, date: { $regex: `^${month}` } };
+  if (cafeId) holidayFilter.$or = [{ cafeId: null }, { cafeId }];
+  else holidayFilter.cafeId = null;
+
+  let holidayDocs = [];
+  if (mongoose.connection?.readyState === 1 || HolidayCalendar.find !== mongoose.Model.find) {
+    try {
+      holidayDocs = await HolidayCalendar.find(holidayFilter).lean();
+    } catch (_) {}
+  }
 
   return response.status(200).json({
     success: true,
@@ -623,7 +579,7 @@ const getLeaveCalendar = asyncHandler(async (request, response) => {
       month,
       userId,
       leaves: approvedLeaves,
-      holidays,
+      holidays: holidayDocs.map((h) => ({ date: h.date, name: h.name, type: h.type || 'NATIONAL' })),
     },
     correlationId: request.correlationId || null,
   });
@@ -632,13 +588,23 @@ const getLeaveCalendar = asyncHandler(async (request, response) => {
 // 11. GET /api/v1/leave/statement
 const getLeaveStatement = asyncHandler(async (request, response) => {
   const { organisationId, userId } = request.auth;
-  const year = request.query.year || '2026';
+  if (!organisationId) {
+    throw new ApiError(400, 'ORGANISATION_CONTEXT_REQUIRED', 'Organisation context is required.');
+  }
+
+  const yearParam = String(request.query.year || '').trim();
+  const year = yearParam || currentIstDate().slice(0, 4);
+  if (!/^\d{4}$/.test(year)) {
+    throw new ApiError(400, 'INVALID_YEAR', "year must be in 'YYYY' format.");
+  }
 
   const requests = await LeaveRequest.find({
     organisationId,
     userId,
     startDate: { $regex: `^${year}` },
   }).sort({ startDate: -1 }).lean();
+
+  const { balances, summary } = await deriveLeaveBalances({ organisationId, userId, year });
 
   return response.status(200).json({
     success: true,
@@ -647,10 +613,10 @@ const getLeaveStatement = asyncHandler(async (request, response) => {
       userId,
       generatedAt: new Date().toISOString(),
       summary: {
-        casualBalance: 4.5,
-        sickBalance: 6.0,
-        earnedBalance: 12.0,
-        totalUsedYtd: 5.5,
+        casualBalance: balances.CASUAL.available,
+        sickBalance: balances.SICK.available,
+        earnedBalance: balances.EARNED.available,
+        totalUsedYtd: summary.totalUsedYtd,
       },
       requests,
     },
@@ -661,7 +627,6 @@ const getLeaveStatement = asyncHandler(async (request, response) => {
 module.exports = {
   getLeaveBalances,
   getLeaveTypes,
-  getLeaveLedger,
   calculateLeavePreview,
   applyLeave,
   getMyLeaves,

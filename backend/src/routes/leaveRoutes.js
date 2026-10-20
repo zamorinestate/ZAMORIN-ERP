@@ -11,7 +11,6 @@ const { attachDeviceContext } = require('../middleware/deviceContext');
 const {
   getLeaveBalances,
   getLeaveTypes,
-  getLeaveLedger,
   calculateLeavePreview,
   applyLeave,
   getMyLeaves,
@@ -30,7 +29,6 @@ router.use(attachDeviceContext);
 // Self-Service Leave Endpoints
 router.get('/balances', getLeaveBalances);
 router.get('/types', getLeaveTypes);
-router.get('/ledger', getLeaveLedger);
 router.post('/calculate', calculateLeavePreview);
 router.post('/preview', calculateLeavePreview);
 router.post('/requests', applyLeave);

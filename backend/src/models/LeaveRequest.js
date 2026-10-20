@@ -213,9 +213,26 @@ leaveRequestSchema.index({ organisationId: 1, status: 1, createdAt: -1 });
 
 const LeaveRequest = mongoose.model('LeaveRequest', leaveRequestSchema);
 
+/**
+ * Leave entitlement policy (single source of truth for balance derivation).
+ * Keys align exactly with the LEAVE_TYPES enum so every requestable type has
+ * a balance; entitlements are annual, granted upfront, and consumed
+ * derive-on-read from real LeaveRequest records — never stored or seeded.
+ */
+const LEAVE_ENTITLEMENTS = {
+  CASUAL: { displayName: 'Casual Leave', totalEntitled: 12, isPaid: true },
+  SICK: { displayName: 'Sick Leave', totalEntitled: 12, isPaid: true },
+  EARNED: { displayName: 'Earned / Privilege Leave', totalEntitled: 18, isPaid: true },
+  UNPAID: { displayName: 'Leave Without Pay (Unpaid)', totalEntitled: 99, isPaid: false },
+  COMP_OFF: { displayName: 'Compensatory Off', totalEntitled: 2, isPaid: true },
+  RESTRICTED_HOLIDAY: { displayName: 'Restricted / Optional Holiday', totalEntitled: 2, isPaid: true },
+  OTHER: { displayName: 'Other Leave', totalEntitled: 99, isPaid: false },
+};
+
 module.exports = {
   LeaveRequest,
   LEAVE_STATUSES,
   LEAVE_TYPES,
   DURATION_UNITS,
+  LEAVE_ENTITLEMENTS,
 };

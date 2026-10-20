@@ -5,7 +5,6 @@ const assert = require('node:assert/strict');
 const {
   getLeaveBalances,
   getLeaveTypes,
-  getLeaveLedger,
   calculateLeavePreview,
   applyLeave,
   getMyLeaves,
@@ -16,6 +15,7 @@ const {
   getLeaveStatement,
 } = require('../src/controllers/leaveController');
 const { LeaveRequest } = require('../src/models/LeaveRequest');
+const { HolidayCalendar } = require('../src/models/HolidayCalendar');
 const { SequenceCounter } = require('../src/models/SequenceCounter');
 const { AuditEvent } = require('../src/models/AuditEvent');
 
@@ -48,9 +48,18 @@ test('EMP-SCR-004: getLeaveBalances returns balances by type and projected value
   assert.equal(responseJson.success, true);
   assert.ok(responseJson.data.balances.CASUAL, 'CASUAL leave must exist');
   assert.equal(responseJson.data.balances.CASUAL.pending, 1.0);
-  assert.equal(responseJson.data.balances.CASUAL.available, 3.5);
+  // Derived, not fabricated: available must equal entitled - used - pending.
+  const casual = responseJson.data.balances.CASUAL;
+  assert.equal(casual.available, Math.max(0, casual.totalEntitled - casual.usedYtd - casual.pending));
+  assert.equal(casual.available, casual.totalEntitled - 1.0);
   assert.ok(responseJson.data.balances.SICK, 'SICK leave must exist');
   assert.ok(responseJson.data.balances.EARNED, 'EARNED leave must exist');
+  // Summary totals must be derived from the balances map.
+  assert.equal(
+    responseJson.data.summary.totalAvailable,
+    Object.values(responseJson.data.balances).reduce((sum, b) => sum + b.available, 0)
+  );
+  assert.equal(responseJson.data.summary.totalPending, 1.0);
 
   LeaveRequest.find = originalFind;
 });
@@ -80,11 +89,11 @@ test('EMP-SCR-004: getLeaveTypes returns configured leave policies and rules', a
 
 test('EMP-SCR-004: calculateLeavePreview correctly excludes holidays and weekly offs', async () => {
   const req = {
-    auth: { userId: 'STAFF-001' },
+    auth: { userId: 'STAFF-001', organisationId: 'ZAMORIN' },
     body: {
       leaveType: 'CASUAL',
       startDate: '2026-08-14',
-      endDate: '2026-08-16', // 14 (Fri=1.0), 15 (Sat Holiday=0), 16 (Sun=1.0)
+      endDate: '2026-08-16', // 14 (Fri=1.0), 15 (Holiday=0), 16 (Sun=1.0)
       durationUnit: 'FULL_DAY',
     },
   };
@@ -101,12 +110,26 @@ test('EMP-SCR-004: calculateLeavePreview correctly excludes holidays and weekly 
     },
   };
 
-  await calculateLeavePreview(req, res);
+  // Holidays are resolved from HolidayCalendar — stub the collection with the
+  // same Independence Day entry the old hardcoded map carried.
+  const originalHolidayFind = HolidayCalendar.find;
+  HolidayCalendar.find = () => ({
+    lean: async () => [{ date: '2026-08-15', name: 'Independence Day', cafeId: null }],
+  });
+
+  try {
+    await calculateLeavePreview(req, res);
+  } finally {
+    HolidayCalendar.find = originalHolidayFind;
+  }
 
   assert.equal(responseJson.success, true);
   assert.equal(responseJson.data.calendarDays, 3);
   assert.equal(responseJson.data.holidaysExcluded, 1);
   assert.equal(responseJson.data.totalChargeableDays, 2.0);
+  // Balance before is derived from real request records, never a constant.
+  assert.equal(typeof responseJson.data.balanceBefore, 'number');
+  assert.ok(responseJson.data.balanceBefore >= 0);
 });
 
 test('EMP-SCR-004: applyLeave requires mandatory reason and creates leave request', async () => {

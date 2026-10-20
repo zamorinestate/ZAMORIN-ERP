@@ -23,6 +23,17 @@ const { recordRequestAudit } = auditService;
 const { resolveEmployeeShiftForDate, getWeekStartDate } = require('../services/shiftResolverService');
 const employeeService = require('../services/employeeService');
 
+// Business date in IST — must match the attendance module exactly
+// (UTC dates drift by ~5.5h and disagree with Attendance.businessDate).
+function getIstBusinessDate(date = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
 // ─── 1. OVERVIEW & WORKFORCE KPIS ─────────────────────────────────────────────
 const getWorkforceOverview = asyncHandler(async (req, res) => {
   const { organisationId, role, assignedCafeIds } = req.auth;
@@ -528,7 +539,7 @@ const createEmployeeMovement = asyncHandler(async (req, res) => {
   });
 
   // If effective date is today or past, apply immediately
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getIstBusinessDate();
   if (effectiveDate <= todayStr) {
     if (toCafeId) user.primaryCafeId = toCafeId;
     if (toPosition) user.designation = toPosition;
@@ -848,7 +859,7 @@ const initiateOffboarding = asyncHandler(async (req, res) => {
     payrollNotified: true,
   };
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getIstBusinessDate();
   if (lastWorkingDay <= todayStr && assetsReturned && accessRevoked) {
     user.employmentStatus = 'EXITED';
     user.accountStatus = 'DISABLED';
@@ -1014,7 +1025,7 @@ const getSelfDashboard = asyncHandler(async (req, res) => {
   } catch (e) {}
 
   // 2. Today's date & Attendance state
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = getIstBusinessDate();
   const { Attendance } = require('../modules/attendance/Attendance');
   let todayAttendance = null;
   try {
@@ -1163,11 +1174,15 @@ const getSelfDashboard = asyncHandler(async (req, res) => {
     overtimeHours: Math.round((monthlyAttendances.reduce((acc, a) => acc + (a.overtimeMinutes || 0), 0) / 60) * 10) / 10,
   };
 
-  // 5. Leave Balances & Requests
-  const { LeaveRequest } = require('../models/LeaveRequest');
+  // 5. Leave Balances & Requests (derived from real records against the
+  // LEAVE_ENTITLEMENTS policy — same single source the /leave/balances page uses)
+  const { LeaveRequest, LEAVE_ENTITLEMENTS } = require('../models/LeaveRequest');
   let usedCasual = 0;
   let usedSick = 0;
   let usedEarned = 0;
+  let pendingDaysCasual = 0;
+  let pendingDaysSick = 0;
+  let pendingDaysEarned = 0;
   let pendingRequestsCount = 0;
   try {
     if (mongoose.connection?.readyState === 1 || LeaveRequest.find !== mongoose.Model.find) {
@@ -1182,17 +1197,32 @@ const getSelfDashboard = asyncHandler(async (req, res) => {
         if (req.leaveType === 'SICK') usedSick += req.requestedDays || 0;
         if (req.leaveType === 'EARNED') usedEarned += req.requestedDays || 0;
       }
-      pendingRequestsCount = await LeaveRequest.countDocuments({
+      const pendingLeaves = await LeaveRequest.find({
         organisationId,
         userId,
-        status: { $in: ['PENDING', 'UNDER_REVIEW'] },
-      });
+        status: { $in: ['PENDING', 'UNDER_REVIEW', 'RECOMMENDED'] },
+      }).lean() || [];
+      pendingRequestsCount = pendingLeaves.length;
+      for (const req of pendingLeaves) {
+        if (req.leaveType === 'CASUAL') pendingDaysCasual += req.requestedDays || 0;
+        if (req.leaveType === 'SICK') pendingDaysSick += req.requestedDays || 0;
+        if (req.leaveType === 'EARNED') pendingDaysEarned += req.requestedDays || 0;
+      }
     }
   } catch (e) {}
 
-  const earnedLeaveBalance = Math.max(0, 12 - usedEarned);
-  const casualLeaveBalance = Math.max(0, 4.5 - usedCasual);
-  const sickLeaveBalance = Math.max(0, 6 - usedSick);
+  const earnedLeaveBalance = Math.max(
+    0,
+    LEAVE_ENTITLEMENTS.EARNED.totalEntitled - usedEarned - pendingDaysEarned
+  );
+  const casualLeaveBalance = Math.max(
+    0,
+    LEAVE_ENTITLEMENTS.CASUAL.totalEntitled - usedCasual - pendingDaysCasual
+  );
+  const sickLeaveBalance = Math.max(
+    0,
+    LEAVE_ENTITLEMENTS.SICK.totalEntitled - usedSick - pendingDaysSick
+  );
 
   const leaveSummary = {
     earnedLeaveBalance,
