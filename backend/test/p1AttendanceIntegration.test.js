@@ -886,15 +886,21 @@ test('P1-27: Detected OT derived from shift duration (worked > scheduled)', () =
 
 test('P1-28: OT list targets correct record (returns records with detected OT)', async () => {
   const origFind = Attendance.find;
+  const origCount = Attendance.countDocuments;
   Attendance.find = () => ({
     select: () => ({
       sort: () => ({
-        lean: async () => [
-          { attendanceId: 'AT-OT-001', userId: 'EMP-001', detectedOvertimeMinutes: 60, overtimeStatus: 'PENDING_REVIEW' },
-        ],
+        skip: () => ({
+          limit: () => ({
+            lean: async () => [
+              { attendanceId: 'AT-OT-001', userId: 'EMP-001', detectedOvertimeMinutes: 60, overtimeStatus: 'PENDING_REVIEW' },
+            ],
+          }),
+        }),
       }),
     }),
   });
+  Attendance.countDocuments = async () => 1;
 
   const req = {
     auth: { userId: 'MU-PRIMARY-01', role: 'MASTER', isPrimaryMaster: true, organisationId: 'ORG-ZAMORIN' },
@@ -908,8 +914,10 @@ test('P1-28: OT list targets correct record (returns records with detected OT)',
   assert.equal(data.success, true);
   assert.equal(data.data.records.length, 1);
   assert.equal(data.data.records[0].attendanceId, 'AT-OT-001');
+  assert.equal(data.data.total, 1);
 
   Attendance.find = origFind;
+  Attendance.countDocuments = origCount;
 });
 
 test('P1-29: CAFE_ADMIN recommendation sets status to VERIFIED_BY_ADMIN', async () => {

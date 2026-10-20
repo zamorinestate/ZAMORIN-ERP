@@ -10,7 +10,12 @@ const { Attendance } = require('../modules/attendance/Attendance');
 const { Cafe } = require('../models/Cafe');
 const ApiError = require('../utils/ApiError');
 
-const QR_SIGNING_SECRET = process.env.QR_SIGNING_SECRET || 'zamorin_qr_master_signing_secret_key_2026_dsec';
+// Fail closed in production: the rotating QR challenge must be signed with a
+// configured secret (validated at boot by the startup validator). Dev/test keep
+// a deterministic local fallback.
+const QR_SIGNING_SECRET =
+  process.env.QR_SIGNING_SECRET ||
+  (process.env.NODE_ENV === 'production' ? null : 'zamorin_qr_master_signing_secret_key_2026_dsec');
 
 function calculateDistanceMetres(lat1, lon1, lat2, lon2) {
   const R = 6371000; // Earth radius in metres
@@ -49,6 +54,9 @@ class AttendanceQrService {
    * Generates HMAC-SHA256 signature for challenge payload.
    */
   signPayload(payload) {
+    if (!QR_SIGNING_SECRET) {
+      throw new ApiError(500, 'QR_SIGNING_SECRET_NOT_CONFIGURED', 'QR_SIGNING_SECRET must be configured.');
+    }
     const serialized = JSON.stringify(payload);
     return crypto.createHmac('sha256', QR_SIGNING_SECRET).update(serialized).digest('hex');
   }

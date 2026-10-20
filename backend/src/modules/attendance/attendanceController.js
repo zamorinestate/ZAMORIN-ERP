@@ -228,8 +228,6 @@ const getAttendanceOverview = asyncHandler(async (request, response) => {
     }
   }
 
-  const scheduledToday = attendanceRecords.length || 12;
-
   const cafeWorkforce = await Promise.all(allCafes.map(async (cafe) => {
     const cafeRecords = attendanceRecords.filter((r) => r.cafeId === cafe.cafeId);
     const checkedIn = cafeRecords.filter((r) => r.status === 'CHECKED_IN' || r.status === 'ON_BREAK').length;
@@ -257,6 +255,10 @@ const getAttendanceOverview = asyncHandler(async (request, response) => {
       adequacyStatus: scheduledCount > 0 ? (checkedIn >= scheduledCount ? 'ADEQUATE' : 'UNDERSTAFFED') : 'NO_ROSTER',
     };
   }));
+
+  // Real roster-based denominator (sum of per-cafe published-roster counts);
+  // 0 when no roster is published — never a fabricated constant.
+  const scheduledToday = cafeWorkforce.reduce((sum, cafe) => sum + (cafe.scheduled || 0), 0);
 
   return response.status(200).json({
     success: true,
@@ -1261,7 +1263,16 @@ const staffCheckIn = asyncHandler(async (request, response) => {
     });
   }
 
-  await attendance.save();
+  try {
+    await attendance.save();
+  } catch (error) {
+    // Concurrent punch: the unique (organisationId, userId, businessDate) index
+    // picked a single winner. Report "already checked in" instead of a 500.
+    if (error && error.code === 11000) {
+      throw new ApiError(400, 'ALREADY_CHECKED_IN', 'You already have an active check-in session.');
+    }
+    throw error;
+  }
 
   // Persist submission record for idempotency & replay protection
   if (qrValidation?.challengeId || idempotencyKey) {
@@ -1566,7 +1577,16 @@ const staffCheckOut = asyncHandler(async (request, response) => {
   if (typeof attendance.calculateWorkedMinutes === 'function') {
     attendance.calculateWorkedMinutes();
   }
-  await attendance.save();
+  try {
+    await attendance.save();
+  } catch (error) {
+    // Concurrent check-out: optimistic concurrency already committed a winner.
+    // Report the session as closed instead of surfacing a VersionError 500.
+    if (error && error.name === 'VersionError') {
+      throw new ApiError(400, 'NOT_CHECKED_IN', 'You must be checked in before checking out.');
+    }
+    throw error;
+  }
 
   // Save submission for idempotency & replay protection
   if (qrValidation?.challengeId || idempotencyKey) {
@@ -1957,11 +1977,21 @@ const getPendingCorrections = asyncHandler(async (request, response) => {
     filter.cafeId = { $in: request.auth.assignedCafeIds };
   }
 
-  const requests = await AttendanceCorrectionRequest.find(filter).sort({ createdAt: -1 }).lean();
+  const page = Math.max(1, Number(request.query.page) || 1);
+  const limit = Math.min(200, Math.max(1, Number(request.query.limit) || 50));
+
+  const [requests, total] = await Promise.all([
+    AttendanceCorrectionRequest.find(filter)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean(),
+    AttendanceCorrectionRequest.countDocuments(filter),
+  ]);
 
   return response.status(200).json({
     success: true,
-    data: { requests },
+    data: { requests, total, page, limit },
     correlationId: request.correlationId || null,
   });
 });
@@ -2153,14 +2183,22 @@ const getOvertimeList = asyncHandler(async (request, response) => {
   if (request.query.date) filter.businessDate = request.query.date;
   else if (request.query.month) filter.businessDate = { $regex: `^${request.query.month}` };
 
-  const records = await Attendance.find(filter)
-    .select('attendanceId userId cafeId businessDate shiftId shiftName totalWorkedMinutes scheduledDurationMinutes detectedOvertimeMinutes approvedOvertimeMinutes overtimeStatus overtimeDecidedByUserId overtimeDecidedAt')
-    .sort({ businessDate: -1 })
-    .lean();
+  const page = Math.max(1, Number(request.query.page) || 1);
+  const limit = Math.min(200, Math.max(1, Number(request.query.limit) || 50));
+
+  const [records, total] = await Promise.all([
+    Attendance.find(filter)
+      .select('attendanceId userId cafeId businessDate shiftId shiftName totalWorkedMinutes scheduledDurationMinutes detectedOvertimeMinutes approvedOvertimeMinutes overtimeStatus overtimeDecidedByUserId overtimeDecidedAt')
+      .sort({ businessDate: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean(),
+    Attendance.countDocuments(filter),
+  ]);
 
   return response.status(200).json({
     success: true,
-    data: { records, total: records.length },
+    data: { records, total, page, limit },
     correlationId: request.correlationId || null,
   });
 });
@@ -2193,11 +2231,21 @@ const getExceptionList = asyncHandler(async (request, response) => {
   if (request.query.date) filter.businessDate = request.query.date;
   else if (request.query.month) filter.businessDate = { $regex: `^${request.query.month}` };
 
-  const exceptions = await AttendanceException.find(filter).sort({ businessDate: -1, severity: 1 }).lean();
+  const page = Math.max(1, Number(request.query.page) || 1);
+  const limit = Math.min(200, Math.max(1, Number(request.query.limit) || 50));
+
+  const [exceptions, total] = await Promise.all([
+    AttendanceException.find(filter)
+      .sort({ businessDate: -1, severity: 1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean(),
+    AttendanceException.countDocuments(filter),
+  ]);
 
   return response.status(200).json({
     success: true,
-    data: { exceptions, total: exceptions.length },
+    data: { exceptions, total, page, limit },
     correlationId: request.correlationId || null,
   });
 });

@@ -67,6 +67,13 @@ const PRODUCTION_MANDATORY_SPECS = [
     },
   },
   {
+    key: 'QR_SIGNING_SECRET',
+    requiredInProduction: true,
+    description: 'HMAC-SHA256 secret for signing rotating attendance QR challenges (min 32 chars in prod)',
+    isSecret: true,
+    validate: (val, isProd) => typeof val === 'string' && val.trim().length >= (isProd ? 32 : 8) && !val.includes('placeholder'),
+  },
+  {
     key: 'DOCUMENT_STORAGE_PROVIDER',
     altKeys: ['DOCUMENT_STORAGE_DRIVER'],
     requiredInProduction: false,

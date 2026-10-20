@@ -27,6 +27,10 @@ services:
         sync: false
       - key: JWT_ACCESS_SECRET
         sync: false
+      # HMAC signing secret for the rotating attendance QR challenge (min 32
+      # chars). Boot fails closed in production without it (startup validator).
+      - key: QR_SIGNING_SECRET
+        sync: false
       - key: JWT_ACCESS_TTL_MINUTES
         value: 15
       - key: REFRESH_TOKEN_TTL_DAYS

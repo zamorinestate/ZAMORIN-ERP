@@ -51,6 +51,7 @@ services:
       ALLOWED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,${PRODUCTION_FRONTEND_URL:-http://localhost:3000}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-zamorin_production_access_secret_32_chars_min}
       MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      QR_SIGNING_SECRET: ${QR_SIGNING_SECRET:-zamorin_qr_signing_secret_32_chars_min_val}
       INITIAL_ORGANISATION_ID: ZAMORIN
       INITIAL_MASTER_NAME: Zamorin Master
       INITIAL_MASTER_EMAIL: ${INITIAL_MASTER_EMAIL:-master@zamorincafe.com}
