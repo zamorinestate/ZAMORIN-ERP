@@ -20,6 +20,7 @@ const { Payslip } = require('../models/Payslip');
 const { RegisterSession } = require('../models/RegisterSession');
 const { MetricsService, METRICS_DICTIONARY } = require('../services/metricsService');
 const { ZurfService, COMPANY_CONFIG, getCompanyConfig, sanitizeCsvCell } = require('../services/zurfService');
+const { calculateCogs } = require('../services/cogsService');
 const { asyncHandler } = require('../utils/asyncHandler');
 const { ApiError } = require('../utils/ApiError');
 const { resolveEffectiveCafeScope, assertResourceCafeOwnership } = require('../utils/cafeScope');
@@ -2507,6 +2508,16 @@ const generateZurfExport = asyncHandler(async (request, response) => {
       dateTo: dateFilters.dateTo,
     });
 
+    let cogsData = null;
+    try {
+      cogsData = await calculateCogs({
+        organisationId: baseFilter.organisationId,
+        cafeScope: baseFilter.cafeId || null,
+        dateFrom: dateFilters.dateFrom,
+        dateTo: dateFilters.dateTo,
+      });
+    } catch (_) {}
+
     const isPayPartial = finResult.payrollIntelligence?.payrollAvailability === 'PARTIAL_SOURCE';
     kpiCards[0] = { label: 'Net Sales', value: formatInrShort(finResult.overview.netSalesPaisa) };
     kpiCards[1] = { label: 'Operating Expenses', value: formatInrShort(finResult.overview.totalOpexPaisa) };
@@ -2521,17 +2532,43 @@ const generateZurfExport = asyncHandler(async (request, response) => {
     ];
 
     const isRefundPartial = finResult.revenueBridge.refundQuality !== 'CLEAN' || salesResult.summary?.preTaxRefundAvailability === 'PARTIAL_SOURCE';
+
+    const hasCogs = cogsData && cogsData.status === 'AVAILABLE' && cogsData.cogsPaisa !== null;
+    const cogsAmount = hasCogs
+      ? '-' + (cogsData.cogs || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })
+      : 'Unavailable';
+    const cogsActuality = hasCogs ? 'ESTIMATED' : 'UNAVAILABLE';
+    const cogsStatus = hasCogs ? 'AVAILABLE (Basis: LAST_PO_PRICE)' : 'UNAVAILABLE (Unposted Cost Ledger)';
+
+    const grossProfitVal = hasCogs
+      ? (finResult.revenueBridge.netSales || 0) - (cogsData.cogs || 0)
+      : null;
+    const grossProfitAmount = hasCogs
+      ? grossProfitVal.toLocaleString('en-IN', { minimumFractionDigits: 2 })
+      : 'Unavailable';
+    const grossProfitActuality = hasCogs ? 'ESTIMATED' : 'UNAVAILABLE';
+    const grossProfitStatus = hasCogs ? 'AVAILABLE (Basis: LAST_PO_PRICE)' : 'UNAVAILABLE (Missing COGS)';
+
+    const totalOpex = finResult.expenseIntelligence?.totalOpex || 0;
+    const knownLabourDeduction = finResult.payrollIntelligence?.grossPayroll !== null ? (finResult.payrollIntelligence?.grossPayroll || 0) : 0;
+    const ebitdaVal = hasCogs ? grossProfitVal - totalOpex - knownLabourDeduction : null;
+    const ebitdaAmount = hasCogs
+      ? ebitdaVal.toLocaleString('en-IN', { minimumFractionDigits: 2 })
+      : 'Unavailable';
+    const ebitdaActuality = hasCogs ? 'ESTIMATED' : 'UNAVAILABLE';
+    const ebitdaStatus = hasCogs ? 'AVAILABLE (Estimated EBITDA)' : 'UNAVAILABLE (Cannot calculate without COGS)';
+
     const plSummaryRows = [
       { lineItem: 'Gross Sales Revenue', amount: (finResult.revenueBridge.grossSales || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }), actuality: 'ACTUAL', status: 'COMPLETE' },
       { lineItem: 'Discounts & Allowances', amount: '-' + (finResult.revenueBridge.discounts || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }), actuality: 'ACTUAL', status: 'COMPLETE' },
       { lineItem: 'Pre-Tax Customer Refunds', amount: isRefundPartial ? 'Partial (Allocation Unavailable)' : '-' + (finResult.revenueBridge.preTaxRefunds || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }), actuality: isRefundPartial ? 'PARTIAL' : 'ACTUAL', status: isRefundPartial ? 'PARTIAL_SOURCE (Allocation Unavailable)' : 'COMPLETE' },
       { lineItem: 'Net Sales Revenue', amount: (finResult.revenueBridge.netSales || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) + (isRefundPartial ? ' (Partial)' : ''), actuality: isRefundPartial ? 'PARTIAL' : 'ACTUAL', status: isRefundPartial ? 'PARTIAL_SOURCE' : 'COMPLETE' },
-      { lineItem: 'Cost of Goods Sold (COGS)', amount: 'Unavailable', actuality: 'UNAVAILABLE', status: 'UNAVAILABLE (Unposted Cost Ledger)' },
-      { lineItem: 'Gross Profit', amount: 'Unavailable', actuality: 'UNAVAILABLE', status: 'UNAVAILABLE (Missing COGS)' },
+      { lineItem: 'Cost of Goods Sold (COGS)', amount: cogsAmount, actuality: cogsActuality, status: cogsStatus },
+      { lineItem: 'Gross Profit', amount: grossProfitAmount, actuality: grossProfitActuality, status: grossProfitStatus },
       { lineItem: 'Operating Expenses (Opex)', amount: (finResult.expenseIntelligence.totalOpex || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }), actuality: 'ACTUAL', status: 'COMPLETE (Approved/Paid Only)' },
       { lineItem: 'Gross Employee Payroll', amount: finResult.payrollIntelligence.grossPayroll !== null ? ((finResult.payrollIntelligence.grossPayroll || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) + (isPayPartial ? ' (Partial)' : '')) : 'Unavailable', actuality: finResult.payrollIntelligence.grossPayroll !== null ? (isPayPartial ? 'PARTIAL' : 'ACTUAL') : 'UNAVAILABLE', status: finResult.payrollIntelligence.grossPayroll !== null ? (isPayPartial ? 'PARTIAL_SOURCE (Incomplete Payslip Gross)' : 'PARTIAL_SOURCE (Excludes Employer Overheads)') : 'UNAVAILABLE' },
       { lineItem: 'Known Operating Result Components', amount: (finResult.waterfall.find(w => w.label === 'Known Operating Result Components')?.value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }), actuality: 'ACTUAL', status: 'OPERATIONAL' },
-      { lineItem: 'Store Operating Profit (EBITDA)', amount: 'Unavailable', actuality: 'UNAVAILABLE', status: 'UNAVAILABLE (Cannot calculate without COGS)' },
+      { lineItem: 'Store Operating Profit (EBITDA)', amount: ebitdaAmount, actuality: ebitdaActuality, status: ebitdaStatus },
     ];
 
     const bridgeRows = [
@@ -4179,6 +4216,25 @@ const getStaffPerformanceByAssignee = asyncHandler(async (request, response) => 
   });
 });
 
+// ─── 41. GET /api/v1/reports/cogs (SCR-022 / Issue #2) ───────────────────────
+
+const getCogsReport = asyncHandler(async (request, response) => {
+  const dateFilters = validateAndParseDateFilters(request);
+  const baseFilter = buildBaseFilter(request, dateFilters);
+
+  const cogsData = await calculateCogs({
+    organisationId: baseFilter.organisationId,
+    cafeScope: baseFilter.cafeId || null,
+    dateFrom: dateFilters.dateFrom,
+    dateTo: dateFilters.dateTo,
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: cogsData,
+  });
+});
+
 module.exports = {
   getAnalyticsOverview,
   getReportCatalogue,
@@ -4221,4 +4277,5 @@ module.exports = {
   runSensitivityAnalysis,
   getTrustCentreOverview,
   getStaffPerformanceByAssignee,
+  getCogsReport,
 };

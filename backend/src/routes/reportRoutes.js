@@ -50,6 +50,7 @@ const {
   runSensitivityAnalysis,
   getTrustCentreOverview,
   getStaffPerformanceByAssignee,
+  getCogsReport,
 } = require('../controllers/reportController');
 
 const router = express.Router();
@@ -321,6 +322,13 @@ router.get(
   '/staff-performance-by-assignee',
   authorize('REPORTS_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
   getStaffPerformanceByAssignee
+);
+
+// ── SCR-022 / Issue #2: Cost of Goods Sold (COGS) & Margins ─────────────────
+router.get(
+  '/cogs',
+  authorize('REPORTS_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
+  getCogsReport
 );
 
 module.exports = router;
