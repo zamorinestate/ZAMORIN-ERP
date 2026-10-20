@@ -68,19 +68,19 @@ jobs:
           cache: 'gradle'
 
       - name: Grant Execute Permission to Gradlew
-        working-directory: ./android
+        working-directory: ./Platform/Android
         run: chmod +x gradlew
 
       - name: Run Android Native Unit Tests
-        working-directory: ./android
+        working-directory: ./Platform/Android
         run: ./gradlew test
 
       - name: Run Android Lint
-        working-directory: ./android
+        working-directory: ./Platform/Android
         run: ./gradlew lintDebug
 
       - name: Compile Debug APK
-        working-directory: ./android
+        working-directory: ./Platform/Android
         run: ./gradlew assembleDebug
 
   windows:
@@ -98,14 +98,14 @@ jobs:
 
       - name: Restore Dependencies
         run: |
-          dotnet restore windows/ZamorinCafeERP/ZamorinCafeERP.csproj
-          dotnet restore windows/ZamorinCafeERP.Tests/ZamorinCafeERP.Tests.csproj
+          dotnet restore Platform/Windows/ZamorinCafeERP/ZamorinCafeERP.csproj
+          dotnet restore Platform/Windows/ZamorinCafeERP.Tests/ZamorinCafeERP.Tests.csproj
 
       - name: Run Windows Native Unit Tests
-        run: dotnet test windows/ZamorinCafeERP.Tests -c Release
+        run: dotnet test Platform/Windows/ZamorinCafeERP.Tests -c Release
 
       - name: Publish Windows Native Shell
-        run: dotnet publish windows/ZamorinCafeERP -c Release
+        run: dotnet publish Platform/Windows/ZamorinCafeERP -c Release
 
   apple:
     name: Apple Native Client CI
@@ -174,7 +174,7 @@ jobs:
       - name: Build iOS Application (iPhone Simulator)
         run: |
           xcodebuild build \
-            -project apple/ios/ZamorinCafeERP.xcodeproj \
+            -project Platform/Apple/ios/ZamorinCafeERP.xcodeproj \
             -scheme ZamorinCafeERP \
             -destination "generic/platform=iOS Simulator" \
             CODE_SIGNING_ALLOWED=NO \
@@ -185,7 +185,7 @@ jobs:
           IPHONE_ID=$(xcrun simctl list devices available -j | jq -r '[.devices[] | .[] | select(.name | contains("iPhone"))][0].udid')
           echo "Targeting iPhone Simulator UDID: $IPHONE_ID"
           xcodebuild test \
-            -project apple/ios/ZamorinCafeERP.xcodeproj \
+            -project Platform/Apple/ios/ZamorinCafeERP.xcodeproj \
             -scheme ZamorinCafeERP \
             -destination "id=$IPHONE_ID" \
             -resultBundlePath build/artifacts/iPhoneSimulator.xcresult \
@@ -195,7 +195,7 @@ jobs:
       - name: Build iPadOS Application (iPad Simulator)
         run: |
           xcodebuild build \
-            -project apple/ios/ZamorinCafeERP.xcodeproj \
+            -project Platform/Apple/ios/ZamorinCafeERP.xcodeproj \
             -scheme ZamorinCafeERP \
             -destination "generic/platform=iOS Simulator" \
             TARGETED_DEVICE_FAMILY="2" \
@@ -207,7 +207,7 @@ jobs:
           IPAD_ID=$(xcrun simctl list devices available -j | jq -r '[.devices[] | .[] | select(.name | contains("iPad"))][0].udid')
           echo "Targeting iPad Simulator UDID: $IPAD_ID"
           xcodebuild test \
-            -project apple/ios/ZamorinCafeERP.xcodeproj \
+            -project Platform/Apple/ios/ZamorinCafeERP.xcodeproj \
             -scheme ZamorinCafeERP \
             -destination "id=$IPAD_ID" \
             -resultBundlePath build/artifacts/iPadSimulator.xcresult \
@@ -217,7 +217,7 @@ jobs:
       - name: Build macOS Application
         run: |
           xcodebuild build \
-            -project apple/macos/ZamorinCafeERP.xcodeproj \
+            -project Platform/Apple/macos/ZamorinCafeERP.xcodeproj \
             -scheme ZamorinCafeERPMac \
             -destination "platform=macOS" \
             CODE_SIGNING_ALLOWED=NO \
@@ -226,7 +226,7 @@ jobs:
       - name: Run macOS Unit Tests (macOS XCTest)
         run: |
           xcodebuild test \
-            -project apple/macos/ZamorinCafeERP.xcodeproj \
+            -project Platform/Apple/macos/ZamorinCafeERP.xcodeproj \
             -scheme ZamorinCafeERPMac \
             -destination "platform=macOS" \
             -resultBundlePath build/artifacts/macOS.xcresult \

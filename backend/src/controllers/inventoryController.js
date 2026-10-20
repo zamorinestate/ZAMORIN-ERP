@@ -1386,13 +1386,16 @@ const getReplenishmentRecommendations = asyncHandler(async (request, response) =
     .sort({ updatedAt: -1 })
     .lean();
 
-  return response.status(200).json({
+  const payload = {
     recommendations,
     totalCount: recommendations.length,
     activeCount: recommendations.filter((r) => r.isActiveNeed).length,
     blockedDataQualityCount: recommendations.filter((r) => r.status === 'BLOCKED_DATA_QUALITY').length,
     blockedConstraintCount: recommendations.filter((r) => r.status === 'BLOCKED_CONSTRAINT').length,
-  });
+  };
+  // `data` wrapper for the Procurement recommendations modal (reads
+  // res.data.recommendations); top-level keys kept for existing consumers.
+  return response.status(200).json({ success: true, data: payload, ...payload });
 });
 
 const triggerReplenishmentEvaluation = asyncHandler(async (request, response) => {

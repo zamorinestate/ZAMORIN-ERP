@@ -7,7 +7,7 @@
  */
 
 const PortfolioGovernanceFollowThroughService = require('../services/portfolioGovernanceFollowThroughService');
-const { ApiError } = require('../utils/apiError');
+const { ApiError } = require('../utils/ApiError');
 const { asyncHandler } = require('../utils/asyncHandler');
 
 // Helper to assert persona access and role invariants

@@ -17,6 +17,12 @@ services:
         value: 8.8.8.8,1.1.1.1
       - key: MONGODB_URI
         sync: false
+      # Production forces the Redis distributed adapter (rate limiting, locks,
+      # job coordination) and boot fails without it (CLUSTER_REDIS_CONFIG_MISSING).
+      # Provision any Redis (Render Redis, Upstash, etc.) and paste its URL here,
+      # e.g. redis://default:PASSWORD@HOST:6379 — use rediss:// for TLS endpoints.
+      - key: REDIS_URL
+        sync: false
       - key: ALLOWED_ORIGINS
         sync: false
       - key: JWT_ACCESS_SECRET

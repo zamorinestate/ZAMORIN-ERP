@@ -25,6 +25,7 @@ const {
   submitShiftChecklist,
   enrollBiometricFingerprint,
   verifyBiometricFingerprint,
+  testBiometricDevice,
   pushEdcSale,
   getEdcStatus,
   cancelEdcSale,
@@ -184,6 +185,12 @@ router.post(
   authorize('POS:OPERATE', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN', 'STAFF'] }),
   verifyBiometricFingerprint
 );
+// Device diagnostics screen: scanner connection test (same persona as caller-id test).
+router.post(
+  '/biometric/device-test',
+  authorize('POS:OPERATE', { allowedRoles: ['MASTER', 'CAFE_ADMIN', 'STAFF'] }),
+  testBiometricDevice
+);
 
 // 20. EDC Card Terminal Push-to-Pay (F070, A054-A056)
 router.post(
@@ -212,6 +219,12 @@ router.post(
 // 22. Caller ID USB Modem Delivery Pop-Up (F097)
 router.post(
   '/caller-id/simulate-call',
+  authorize('POS:OPERATE', { allowedRoles: ['MASTER', 'CAFE_ADMIN', 'STAFF'] }),
+  handleCallerIdEvent
+);
+// Frontend device diagnostics posts the same payload to /caller-id/incoming.
+router.post(
+  '/caller-id/incoming',
   authorize('POS:OPERATE', { allowedRoles: ['MASTER', 'CAFE_ADMIN', 'STAFF'] }),
   handleCallerIdEvent
 );

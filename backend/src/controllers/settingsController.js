@@ -958,7 +958,15 @@ async function submitPrivacyRequest(req, res) {
     }
   }
 
-  const requestId = await SequenceCounter.generateId({ prefix: 'PRV', sequenceKey: 'privacy_request', organisationId });
+  // PrivacyRequest.requestId must match /^PRV-\d{6}-\d{5}$/ (model contract) — the bare
+  // SequenceCounter output (PRV-0002) fails validation, breaking every Settings submit.
+  const seqId = await SequenceCounter.generateId({
+    prefix: 'PRV',
+    sequenceKey: 'privacy_request',
+    organisationId,
+    minimumDigits: 6,
+  });
+  const requestId = `${seqId}-${String(Math.floor(10000 + Math.random() * 90000))}`;
 
   const pr = await PrivacyRequest.create({
     requestId,
