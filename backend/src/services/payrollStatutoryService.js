@@ -539,8 +539,8 @@ async function renderZamorinCorporatePayslipPdf(payslipData, cafeBranding = {}) 
   const p = payslipData.toObject ? payslipData.toObject() : payslipData;
 
   const empName = p.employeeName || 'Staff Member';
-  const empId = p.employeeNumber || p.employeeId || 'EMP-ZC-000001';
-  const designation = p.designation || 'Barista';
+  const empId = p.employeeNumber || p.employeeId || p.employeeUserId || 'EMP-ZC-000001';
+  const designation = p.designation || p.jobTitle || 'Barista';
   const department = p.department || 'Café Operations';
   const periodKey = p.periodKey || '2026-09';
   const cafeName = cafeBranding.tradeName || cafeBranding.name || 'Zamorin Café';
@@ -554,16 +554,31 @@ async function renderZamorinCorporatePayslipPdf(payslipData, cafeBranding = {}) 
   const hra = (earnings.houseRentAllowancePaise || 0) / 100;
   const allowances = (earnings.otherAllowancePaise || 0) / 100;
   const overtime = (earnings.overtimePayPaise || 0) / 100;
-  const grossPay = (p.totalGrossPaise || (basicPay + hra + allowances + overtime) * 100) / 100;
+  const incentive = (earnings.incentivePaise || 0) / 100;
+  const otherEarning = (earnings.otherEarningPaise || 0) / 100;
+  // Payslip.earnings.grossPayPaise is the authoritative backend total; the
+  // legacy top-level/derived values remain as fallbacks for older fixtures.
+  const grossPay =
+    (earnings.grossPayPaise ||
+      p.totalGrossPaise ||
+      (basicPay + hra + allowances + overtime + incentive + otherEarning) * 100) / 100;
 
   const epf = (deductions.providentFundPaise || 0) / 100;
   const esi = (deductions.employeeStateInsurancePaise || 0) / 100;
   const pt = (deductions.professionalTaxPaise || 0) / 100;
   const tds = (deductions.incomeTaxPaise || 0) / 100;
   const advance = (deductions.loanAdvanceDeductionPaise || 0) / 100;
-  const totalDeductions = (p.totalDeductionPaise || (epf + esi + pt + tds + advance) * 100) / 100;
+  const unpaidLeave = (deductions.unpaidLeaveDeductionPaise || 0) / 100;
+  const otherDeduction = (deductions.otherDeductionPaise || 0) / 100;
+  const totalDeductions =
+    (deductions.totalDeductionPaise ||
+      p.totalDeductionPaise ||
+      (epf + esi + pt + tds + advance + unpaidLeave + otherDeduction) * 100) / 100;
 
-  const netPay = (p.netSalaryPayablePaise || (grossPay - totalDeductions) * 100) / 100;
+  const netPay =
+    (p.netPayPaise ||
+      p.netSalaryPayablePaise ||
+      (grossPay - totalDeductions) * 100) / 100;
   const netInWords = p.netPayableInWords || numberToIndianRupeeWords(Math.round(netPay * 100));
 
   // Masked sensitive details
@@ -617,6 +632,8 @@ async function renderZamorinCorporatePayslipPdf(payslipData, cafeBranding = {}) 
     { name: 'House Rent Allowance (HRA)', amount: hra },
     { name: 'Special / Other Allowances', amount: allowances },
     { name: 'Approved Overtime Pay', amount: overtime },
+    { name: 'Incentive / Bonus', amount: incentive },
+    { name: 'Other Earnings', amount: otherEarning },
   ];
 
   const deductionsList = [
@@ -625,6 +642,8 @@ async function renderZamorinCorporatePayslipPdf(payslipData, cafeBranding = {}) 
     { name: 'Professional Tax (PT)', amount: pt },
     { name: 'Income Tax TDS (Sec 192)', amount: tds },
     { name: 'Salary Advance / Loan Recovery', amount: advance },
+    { name: 'Unpaid Leave Adjustment', amount: unpaidLeave },
+    { name: 'Other Deductions', amount: otherDeduction },
   ];
 
   let rowY = currentY - 35;

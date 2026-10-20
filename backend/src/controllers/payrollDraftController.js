@@ -20,20 +20,13 @@ const {
   ApiError,
 } = require('../utils/ApiError');
 
+const {
+  buildPayslipAttendanceSnapshot,
+} = require('../services/attendancePayrollSummaryService');
+
 const PAYROLL_MANAGEMENT_ROLES = [
   'MASTER',
   'OWNER',
-];
-
-const ATTENDANCE_FIELDS = [
-  'totalCalendarDays',
-  'presentDays',
-  'paidLeaveDays',
-  'unpaidLeaveDays',
-  'weeklyOffDays',
-  'holidayDays',
-  'payableDays',
-  'overtimeMinutes',
 ];
 
 const EARNING_FIELDS = [
@@ -465,22 +458,24 @@ const updateDraftPayrollRunPayslip =
         );
       }
 
+      // attendanceSummary is always re-derived from real Attendance / Leave /
+      // Holiday records; a client-supplied value (the editable attendance
+      // inputs in the UI) is accepted but ignored.
       const attendanceSummary =
-        Object.prototype.hasOwnProperty.call(
-          body,
-          'attendanceSummary'
-        )
-          ? parseIntegerPatch({
-              value:
-                body.attendanceSummary,
-              currentValue:
-                payslip.attendanceSummary,
-              allowedFields:
-                ATTENDANCE_FIELDS,
-              sectionName:
-                'attendanceSummary',
-            })
-          : payslip.attendanceSummary;
+        await buildPayslipAttendanceSnapshot(
+          {
+            organisationId:
+              request.auth.organisationId,
+            cafeId:
+              payrollRun.cafeId ||
+              payslip.cafeId,
+            userId:
+              payslip.employeeUserId,
+            periodKey:
+              payslip.periodKey ||
+              payrollRun.periodKey,
+          }
+        );
 
       const earnings =
         Object.prototype.hasOwnProperty.call(
@@ -580,15 +575,8 @@ const updateDraftPayrollRunPayslip =
         notes: payslip.notes || '',
       };
 
-      if (
-        Object.prototype.hasOwnProperty.call(
-          body,
-          'attendanceSummary'
-        )
-      ) {
-        payslip.attendanceSummary =
-          attendanceSummary;
-      }
+      payslip.attendanceSummary =
+        attendanceSummary;
 
       payslip.earnings = {
         ...earnings,

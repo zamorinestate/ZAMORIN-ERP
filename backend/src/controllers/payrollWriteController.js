@@ -6,6 +6,7 @@ const {
 
 const {
   Payslip,
+  EMPLOYEE_USER_ID_PATTERN,
 } = require('../models/Payslip');
 
 const {
@@ -29,6 +30,10 @@ const {
 } = require('../services/auditService');
 
 const {
+  buildPayslipAttendanceSnapshot,
+} = require('../services/attendancePayrollSummaryService');
+
+const {
   asyncHandler,
 } = require('../utils/asyncHandler');
 
@@ -44,17 +49,6 @@ const PAYROLL_MANAGEMENT_ROLES = [
 const CAFE_ASSIGNED_EMPLOYEE_ROLES = [
   'CAFE_ADMIN',
   'STAFF',
-];
-
-const ATTENDANCE_FIELDS = [
-  'totalCalendarDays',
-  'presentDays',
-  'paidLeaveDays',
-  'unpaidLeaveDays',
-  'weeklyOffDays',
-  'holidayDays',
-  'payableDays',
-  'overtimeMinutes',
 ];
 
 const EARNING_FIELDS = [
@@ -233,7 +227,7 @@ function normalizeEmployeeUserId(value) {
     normalizeIdentifier(value);
 
   if (
-    !/^(MU|OW|AD|ST)-\d{4,}$/.test(
+    !EMPLOYEE_USER_ID_PATTERN.test(
       employeeUserId
     )
   ) {
@@ -733,15 +727,18 @@ const createPayrollRunPayslip =
         );
       }
 
+      // attendanceSummary is derived from real Attendance / Leave / Holiday
+      // records; any client-supplied value is accepted but ignored.
       const attendanceSummary =
-        parseIntegerSection({
-          value:
-            body.attendanceSummary,
-          allowedFields:
-            ATTENDANCE_FIELDS,
-          sectionName:
-            'attendanceSummary',
-        });
+        await buildPayslipAttendanceSnapshot(
+          {
+            organisationId:
+              request.auth.organisationId,
+            cafeId: payrollRun.cafeId,
+            userId: employeeUserId,
+            periodKey: payrollRun.periodKey,
+          }
+        );
 
       const earnings =
         parseIntegerSection({

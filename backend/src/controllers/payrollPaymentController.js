@@ -98,10 +98,17 @@ function normalizePayrollRunId(value) {
   return payrollRunId;
 }
 
+/**
+ * Returns the caller-supplied paymentReference (normalized), or null when the
+ * caller omitted it. A null result means the backend synthesizes one — the
+ * self-service "Record Pay" action sends an empty body.
+ */
 function validatePaymentRequestBody(body) {
+  if (body === undefined || body === null) {
+    return null;
+  }
+
   if (
-    body === undefined ||
-    body === null ||
     typeof body !== 'object' ||
     Array.isArray(body)
   ) {
@@ -114,15 +121,25 @@ function validatePaymentRequestBody(body) {
 
   const keys = Object.keys(body);
 
-  if (
-    keys.length === 0 ||
-    !('paymentReference' in body)
-  ) {
+  const forbiddenKeys = keys.filter(
+    (key) => key !== 'paymentReference'
+  );
+
+  if (forbiddenKeys.length > 0) {
     throw new ApiError(
       400,
-      'INVALID_PAYMENT_REFERENCE',
-      'paymentReference is required in the request body.'
+      'PROTECTED_PAYROLL_PAYMENT_FIELD',
+      'Payroll payment lifecycle fields are controlled by the backend.'
     );
+  }
+
+  if (
+    !('paymentReference' in body) ||
+    body.paymentReference === undefined ||
+    body.paymentReference === null ||
+    body.paymentReference === ''
+  ) {
+    return null;
   }
 
   const { paymentReference } = body;
@@ -136,18 +153,6 @@ function validatePaymentRequestBody(body) {
       400,
       'INVALID_PAYMENT_REFERENCE',
       'paymentReference must be a non-empty string of 200 characters or less.'
-    );
-  }
-
-  const forbiddenKeys = keys.filter(
-    (key) => key !== 'paymentReference'
-  );
-
-  if (forbiddenKeys.length > 0) {
-    throw new ApiError(
-      400,
-      'PROTECTED_PAYROLL_PAYMENT_FIELD',
-      'Payroll payment lifecycle fields are controlled by the backend.'
     );
   }
 
@@ -495,14 +500,14 @@ const payPayrollRun = asyncHandler(
       request
     );
 
-    const normalizedPaymentReference =
-      validatePaymentRequestBody(
-        request.body
-      );
-
     const payrollRunId =
       normalizePayrollRunId(
         request.params.payrollRunId
+      );
+
+    const suppliedPaymentReference =
+      validatePaymentRequestBody(
+        request.body
       );
 
     const payrollRun =
@@ -510,6 +515,18 @@ const payPayrollRun = asyncHandler(
         request,
         payrollRunId
       );
+
+    // Callers may omit the reference entirely (the self-service "Record Pay"
+    // action sends {}): reuse the run's own reference when re-recording a
+    // payment, otherwise synthesize a traceable backend reference.
+    const normalizedPaymentReference =
+      suppliedPaymentReference ||
+      (payrollRun.status === 'PAID' &&
+      payrollRun.paymentReference
+        ? payrollRun.paymentReference
+        : `PAY-${payrollRunId}-${Date.now()
+            .toString(36)
+            .toUpperCase()}`);
 
     const runTotals =
       verifyPayablePayrollRun(

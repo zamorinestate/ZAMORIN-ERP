@@ -9,6 +9,11 @@ const PAYSLIP_STATUSES = [
   'VOIDED',
 ];
 
+// Mirrors User.userId's pattern exactly: payroll must be able to pay every
+// user id the User model can create (incl. VU-* vendors and EMP-ZC-* staff).
+const EMPLOYEE_USER_ID_PATTERN =
+  /^((MU|OW|AD|ST|VU)-\d{4,}|EMP-ZC-\d{4,})$/;
+
 function createPaiseField() {
   return {
     type: Number,
@@ -195,7 +200,7 @@ const payslipSchema =
         immutable: true,
         trim: true,
         uppercase: true,
-        match: /^(MU|OW|AD|ST)-\d{4,}$/,
+        match: EMPLOYEE_USER_ID_PATTERN,
         index: true,
       },
 
@@ -623,4 +628,5 @@ const Payslip =
 module.exports = {
   Payslip,
   PAYSLIP_STATUSES,
+  EMPLOYEE_USER_ID_PATTERN,
 };

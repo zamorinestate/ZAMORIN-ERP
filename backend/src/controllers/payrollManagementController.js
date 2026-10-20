@@ -8,6 +8,7 @@ const {
 const {
   Payslip,
   PAYSLIP_STATUSES,
+  EMPLOYEE_USER_ID_PATTERN,
 } = require('../models/Payslip');
 
 const {
@@ -434,7 +435,7 @@ const listPayrollRunPayslips =
 
       if (employeeUserId) {
         if (
-          !/^(MU|OW|AD|ST)-\d{4,}$/.test(
+          !EMPLOYEE_USER_ID_PATTERN.test(
             employeeUserId
           )
         ) {

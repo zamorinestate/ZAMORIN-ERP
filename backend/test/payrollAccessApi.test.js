@@ -630,7 +630,20 @@ test('MASTER issues approved payroll payslips with backend issuance metadata', a
 });
 
 
-test('MASTER pays an issued approved payroll run with normalized backend payment metadata', async (t) => {
+/**
+ * Full mock fixture for POST /payroll/runs/:id/pay. `expectedReference` may be
+ * an exact string, or a RegExp for the references the backend synthesizes when
+ * the caller omits paymentReference.
+ */
+function mockPayablePayrollRun(t, expectedReference) {
+  const assertReference = (actual) => {
+    if (expectedReference instanceof RegExp) {
+      assert.match(actual, expectedReference);
+    } else {
+      assert.equal(actual, expectedReference);
+    }
+  };
+
   mockAuth(t);
   mockAudit(t);
 
@@ -746,7 +759,7 @@ test('MASTER pays an issued approved payroll run with normalized backend payment
     assert.equal(update.$set.status, 'PAID');
     assert.ok(update.$set.paidAt instanceof Date);
     assert.equal(update.$set.paidBy, 'MU-0001');
-    assert.equal(update.$set.paymentReference, 'BANK-REF-001');
+    assertReference(update.$set.paymentReference);
     assert.equal(update.$set.updatedBy, 'MU-0001');
     payslipPaymentUpdate = update;
     return { matchedCount: 1, modifiedCount: 1 };
@@ -762,22 +775,35 @@ test('MASTER pays an issued approved payroll run with normalized backend payment
     assert.equal(update.$set.status, 'PAID');
     assert.ok(update.$set.paidAt instanceof Date);
     assert.equal(update.$set.paidBy, 'MU-0001');
-    assert.equal(update.$set.paymentReference, 'BANK-REF-001');
+    assertReference(update.$set.paymentReference);
     assert.equal(update.$set.updatedBy, 'MU-0001');
     runPaymentUpdate = update;
     return { matchedCount: 1, modifiedCount: 1 };
   });
 
+  return {
+    get runFindCount() {
+      return runFindCount;
+    },
+    get payslipFindCount() {
+      return payslipFindCount;
+    },
+  };
+}
+
+async function requestPay(t, body) {
   const server = await startServer(t);
-  const result = await request(
-    server,
-    '/api/v1/payroll/runs/PR-202608-0001/pay',
-    {
-      method: 'POST',
-      token: 'token',
-      body: { paymentReference: ' bank-ref-001 ' },
-    }
-  );
+  return request(server, '/api/v1/payroll/runs/PR-202608-0001/pay', {
+    method: 'POST',
+    token: 'token',
+    body,
+  });
+}
+
+test('MASTER pays an issued approved payroll run with normalized backend payment metadata', async (t) => {
+  const stats = mockPayablePayrollRun(t, 'BANK-REF-001');
+
+  const result = await requestPay(t, { paymentReference: ' bank-ref-001 ' });
 
   assert.equal(
     result.status,
@@ -790,8 +816,30 @@ test('MASTER pays an issued approved payroll run with normalized backend payment
   assert.equal(result.body.data?.newlyPaidPayslipCount, 1);
   assert.equal(result.body.data?.paidBy, 'MU-0001');
   assert.equal(result.body.data?.paymentReference, 'BANK-REF-001');
-  assert.equal(runFindCount, 2);
-  assert.equal(payslipFindCount, 2);
+  assert.equal(stats.runFindCount, 2);
+  assert.equal(stats.payslipFindCount, 2);
+});
+
+test('Record Pay with an empty body synthesizes a backend payment reference', async (t) => {
+  const stats = mockPayablePayrollRun(t, /^PAY-PR-202608-0001-[0-9A-Z]+$/);
+
+  const result = await requestPay(t, {});
+
+  assert.equal(
+    result.status,
+    200,
+    `Expected 200, got ${result.status}: ${JSON.stringify(result.body)}`
+  );
+  assert.equal(result.body.success, true);
+  assert.equal(result.body.data?.status, 'PAID');
+  assert.equal(result.body.data?.newlyPaidPayslipCount, 1);
+  assert.equal(result.body.data?.paidBy, 'MU-0001');
+  assert.match(
+    result.body.data?.paymentReference,
+    /^PAY-PR-202608-0001-[0-9A-Z]+$/
+  );
+  assert.equal(stats.runFindCount, 2);
+  assert.equal(stats.payslipFindCount, 2);
 });
 
 test('MASTER voids a payroll run and all payslips with one backend void state', async (t) => {
@@ -995,6 +1043,11 @@ test('MASTER creates a draft payslip with backend identity and calculated totals
       body: {
         employeeUserId: 'MU-0001',
         jobTitle: ' Owner ',
+        attendanceSummary: {
+          presentDays: 25,
+          payableDays: 25,
+          overtimeMinutes: 600,
+        },
         earnings: {
           basicPayPaise: 100000,
           houseRentAllowancePaise: 20000,
@@ -1017,6 +1070,12 @@ test('MASTER creates a draft payslip with backend identity and calculated totals
   assert.equal(created.payslipId, 'PS-202608-0001');
   assert.equal(created.employeeName, 'Master User');
   assert.equal(created.jobTitle, 'Owner');
+  // Client-typed attendance is ignored: the snapshot is derived server-side
+  // from Attendance / Leave / Holiday records (none exist in this fixture).
+  assert.equal(created.attendanceSummary.presentDays, 0);
+  assert.equal(created.attendanceSummary.payableDays, 0);
+  assert.equal(created.attendanceSummary.overtimeMinutes, 0);
+  assert.equal(created.attendanceSummary.totalCalendarDays, 31);
   assert.equal(created.earnings.grossPayPaise, 125000);
   assert.equal(created.deductions.totalDeductionPaise, 12000);
   assert.equal(created.netPayPaise, 113000);
@@ -1035,6 +1094,7 @@ test('MASTER recalculates draft payslip totals on edit', async (t) => {
   t.mock.method(PayrollRun, 'findOne', async () => ({
     payrollRunId: 'PR-202608-0001',
     cafeId: 'ZC-0001',
+    periodKey: '2026-08',
     status: 'DRAFT',
   }));
 
@@ -1042,6 +1102,7 @@ test('MASTER recalculates draft payslip totals on edit', async (t) => {
   const payslip = {
     payslipId: 'PS-202608-0001',
     employeeUserId: 'ST-0001',
+    periodKey: '2026-08',
     status: 'DRAFT',
     attendanceSummary: { presentDays: 25 },
     earnings: {
@@ -1104,6 +1165,9 @@ test('MASTER recalculates draft payslip totals on edit', async (t) => {
   assert.equal(payslip.earnings.grossPayPaise, 170000);
   assert.equal(payslip.deductions.totalDeductionPaise, 12000);
   assert.equal(payslip.netPayPaise, 158000);
+  // attendanceSummary is re-derived on every draft edit, not taken from the client.
+  assert.equal(payslip.attendanceSummary.presentDays, 0);
+  assert.equal(payslip.attendanceSummary.totalCalendarDays, 31);
   assert.equal(payslip.notes, 'revised');
   assert.equal(payslip.updatedBy, 'MU-0001');
   assert.equal(saveCount, 1);
@@ -1176,6 +1240,69 @@ test('STAFF reads only an own issued payslip detail', async (t) => {
   assert.equal(result.body.data?.payslip?.payslipId, 'PS-202608-0001');
   assert.equal(result.body.data?.payslip?.employeeUserId, 'ST-0001');
   assert.equal(result.body.data?.payslip?.status, 'ISSUED');
+});
+
+test('STAFF downloads an own issued payslip as PDF (format=PDF)', async (t) => {
+  mockAuth(t, {
+    userId: 'ST-0001',
+    role: 'STAFF',
+    assignedCafeIds: ['ZC-0001'],
+  });
+
+  const payslip = {
+    payslipId: 'PS-202608-0001',
+    employeeUserId: 'ST-0001',
+    employeeName: 'Aarav Nair',
+    jobTitle: 'Senior Barista',
+    periodKey: '2026-08',
+    cafeId: 'ZC-0001',
+    status: 'ISSUED',
+    attendanceSummary: { totalCalendarDays: 31, payableDays: 28, presentDays: 24 },
+    earnings: {
+      basicPayPaise: 100000,
+      houseRentAllowancePaise: 20000,
+      otherAllowancePaise: 0,
+      overtimePayPaise: 5000,
+      incentivePaise: 2000,
+      otherEarningPaise: 0,
+      grossPayPaise: 127000,
+    },
+    deductions: {
+      providentFundPaise: 10000,
+      employeeStateInsurancePaise: 0,
+      professionalTaxPaise: 2000,
+      incomeTaxPaise: 0,
+      loanAdvanceDeductionPaise: 0,
+      unpaidLeaveDeductionPaise: 0,
+      otherDeductionPaise: 0,
+      totalDeductionPaise: 12000,
+    },
+    netPayPaise: 115000,
+  };
+
+  t.mock.method(Payslip, 'findOne', async () => payslip);
+
+  const server = await startServer(t);
+  const result = await request(
+    server,
+    '/api/v1/payroll/me/payslips/PS-202608-0001?format=PDF',
+    'token'
+  );
+
+  assert.equal(
+    result.status,
+    200,
+    `Expected 200, got ${result.status}: ${JSON.stringify(result.body)}`
+  );
+  assert.equal(typeof result.body, 'string');
+  assert.ok(result.body.startsWith('%PDF-1.4'), 'response must be a PDF document');
+  assert.ok(result.body.includes('Aarav Nair'));
+  // Backend-computed totals, not the legacy netPayPaisa/grossPayPaisa spellings.
+  assert.ok(result.body.includes('Gross Earnings: INR 1270.00'));
+  assert.ok(result.body.includes('Total Deductions: INR 120.00'));
+  assert.ok(result.body.includes('NET SALARY PAYABLE: INR 1150.00'));
+  // Real employee id, not the fabricated EMP-ZC-000001 default.
+  assert.ok(result.body.includes('ST-0001'));
 });
 
 test('STAFF cannot reveal another employee or draft payslip through self-service detail', async (t) => {

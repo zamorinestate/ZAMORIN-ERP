@@ -265,36 +265,16 @@ const getMyPayslip = asyncHandler(
     }
 
     if (request.query?.format === 'PDF' || request.headers?.accept === 'application/pdf') {
-      const { generatePdf } = require('../utils/exportGenerators');
-      const earnings = payslip.earnings || [];
-      const deductions = payslip.deductions || [];
-      const columns = [
-        { key: 'component', label: 'PAY COMPONENT' },
-        { key: 'type', label: 'TYPE' },
-        { key: 'amount', label: 'AMOUNT (₹)' },
-      ];
-      const rows = [
-        ...earnings.map((e) => ({ component: e.name || e.componentCode, type: 'EARNING', amount: `₹${((e.amountPaisa || 0) / 100).toFixed(2)}` })),
-        ...deductions.map((d) => ({ component: d.name || d.componentCode, type: 'DEDUCTION', amount: `₹${((d.amountPaisa || 0) / 100).toFixed(2)}` })),
-        { component: 'NET SALARY DISBURSED', type: 'TOTAL', amount: `₹${((payslip.netPayPaisa || 0) / 100).toFixed(2)}` }
-      ];
-      const pdf = generatePdf({
-        reportTitle: `MONTHLY SALARY PAYSLIP — ${payslip.periodKey}`,
-        reportCode: `PS-${payslip.periodKey}`,
-        scope: `Employee: ${payslip.employeeName || request.auth.name || 'Staff Member'} (${request.auth.userId})`,
-        period: payslip.periodKey,
-        columns,
-        rows,
-        kpiCards: [
-          { label: 'Gross Pay', value: `₹${((payslip.grossPayPaisa || 0) / 100).toFixed(2)}` },
-          { label: 'Total Deductions', value: `₹${((payslip.totalDeductionsPaisa || 0) / 100).toFixed(2)}` },
-          { label: 'Net Pay', value: `₹${((payslip.netPayPaisa || 0) / 100).toFixed(2)}` },
-          { label: 'Pay Status', value: payslip.status || 'ISSUED' },
-        ]
+      const pdfResult = await payrollStatutoryService.renderZamorinCorporatePayslipPdf(payslip, {
+        tradeName: 'Zamorin Café',
       });
-      response.setHeader('Content-Type', 'application/pdf');
-      response.setHeader('Content-Disposition', `attachment; filename="payslip_${payslip.payslipId}.pdf"`);
-      return response.status(200).send(pdf.buffer);
+
+      response.setHeader('Content-Type', pdfResult.mimeType);
+      response.setHeader('Content-Disposition', `attachment; filename="${pdfResult.filename}"`);
+      response.setHeader('X-Content-Type-Options', 'nosniff');
+      response.setHeader('Content-Length', pdfResult.buffer.length);
+
+      return response.status(200).send(pdfResult.buffer);
     }
 
     return response.status(200).json({

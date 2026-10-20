@@ -179,7 +179,38 @@ async function generateAttendanceSummary({ organisationId, cafeId, userId, perio
   };
 }
 
+/**
+ * Build the exact Payslip.attendanceSummary snapshot (the 8 schema fields)
+ * for an employee + period, derived from real Attendance / Leave / Holiday data.
+ * Used by payroll create/edit so attendance is server-derived, never client-typed.
+ */
+async function buildPayslipAttendanceSnapshot({
+  organisationId,
+  cafeId,
+  userId,
+  periodKey,
+}) {
+  const snapshot = await generateAttendanceSummary({
+    organisationId,
+    cafeId,
+    userId,
+    periodKey,
+  });
+
+  return {
+    totalCalendarDays: snapshot.totalCalendarDays,
+    presentDays: snapshot.presentDays,
+    paidLeaveDays: snapshot.paidLeaveDays,
+    unpaidLeaveDays: snapshot.unpaidLeaveDays,
+    weeklyOffDays: snapshot.weeklyOffDays,
+    holidayDays: snapshot.holidayDays,
+    payableDays: snapshot.payableDays,
+    overtimeMinutes: snapshot.overtimeMinutes,
+  };
+}
+
 module.exports = {
   generateAttendanceSummary,
+  buildPayslipAttendanceSnapshot,
   getDatesForPeriod,
 };
