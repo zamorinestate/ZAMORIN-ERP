@@ -245,11 +245,16 @@ test('SCR-017 Payroll Control Centre — Statutory compliance overview', async (
   const res = await request(server, '/api/v1/payroll/compliance/overview', { token: 'valid-token' });
   assert.equal(res.status, 200);
   assert.equal(res.body.success, true);
-  assert.equal(res.body.data.epf.status, 'COMPLIANT');
-  assert.equal(res.body.data.esi.status, 'COMPLIANT');
+  // Without a live DB there is no payslip data, so each scheme must report the
+  // honest NO_DATA state (rate/ceiling config is still returned).
+  assert.equal(res.body.data.dataAvailability, 'UNAVAILABLE');
+  assert.equal(res.body.data.epf.status, 'NO_DATA');
+  assert.equal(res.body.data.esi.status, 'NO_DATA');
+  assert.equal(res.body.data.epf.employeeRatePct, 12);
+  assert.equal(res.body.data.esi.employeeRatePct, 0.75);
 });
 
-test('SCR-017 Payroll Control Centre — 20-point payroll invariant integrity check', async (t) => {
+test('SCR-017 Payroll Control Centre — payroll invariant integrity check is honest', async (t) => {
   const server = await startServer(t);
   mockAuth(t, { role: 'MASTER', isPrimaryMaster: true });
   mockAudit(t);
@@ -257,6 +262,17 @@ test('SCR-017 Payroll Control Centre — 20-point payroll invariant integrity ch
   const res = await request(server, '/api/v1/payroll/integrity', { token: 'valid-token' });
   assert.equal(res.status, 200);
   assert.equal(res.body.success, true);
-  assert.equal(res.body.data.status, 'CERTIFIED_INTEGRITY');
-  assert.equal(res.body.data.passedChecks, res.body.data.totalChecks);
+  // Data-dependent checks cannot be evaluated without a DB; they must be reported
+  // UNAVAILABLE (not falsely CERTIFIED). RBAC/authority checks remain enforced.
+  const d = res.body.data;
+  assert.equal(d.totalChecks, 10);
+  assert.equal(d.checks.length, 10);
+  assert.equal(d.status, 'PARTIAL_INTEGRITY');
+  // Only the 3 code-enforced checks (CHK-04/05/06) can pass with no data.
+  assert.equal(d.passedChecks, 3);
+  assert.ok(d.unavailableChecks >= 4);
+  // The three RBAC/authority locks are always enforced.
+  const enforced = d.checks.filter((c) => c.status === 'ENFORCED');
+  assert.equal(enforced.length, 3);
+  assert.ok(enforced.every((c) => c.passed === true));
 });

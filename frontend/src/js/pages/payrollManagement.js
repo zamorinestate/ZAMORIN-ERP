@@ -129,55 +129,72 @@ function getDevOverviewFixture() {
 }
 
 function getDevComplianceFixture() {
+  // Honest empty-state fixture mirroring the backend's no-data contract: scheme
+  // rates/ceilings are declared configuration, but the STATUS is NO_DATA (there are
+  // no payslips in a fresh/dev context) — never a fabricated COMPLIANT.
   return {
+    dataAvailability: "NO_DATA",
+    payslipCount: 0,
     salaryTds: {
       regime: "2026_DEFAULT_NEW_REGIME",
-      status: "COMPLIANT",
-      description: "Section 192 TDS auto-rebated under default tax scheme.",
+      status: "NO_DATA",
+      description: "TDS computed under Section 192 with standard rebate threshold.",
+      actualDeductionPaise: null,
     },
     epf: {
       scheme: "EPF_1952",
       ecrVersion: "2.0",
-      status: "COMPLIANT",
+      status: "NO_DATA",
       employeeRatePct: 12,
       employerRatePct: 12,
       wageCeilingPaise: 1500000,
+      actualEmployeeDeductionPaise: null,
+      estimatedEmployerContributionPaise: null,
     },
     esi: {
       scheme: "ESI_1948",
-      status: "COMPLIANT",
+      status: "NO_DATA",
       employeeRatePct: 0.75,
       employerRatePct: 3.25,
       wageCeilingPaise: 2100000,
+      actualEmployeeDeductionPaise: null,
+      estimatedEmployerContributionPaise: null,
     },
     professionalTax: {
-      status: "COMPLIANT",
+      status: "NO_DATA",
       jurisdiction: "KERALA_KARNATAKA",
       schedule: "HALF_YEARLY_AND_MONTHLY",
+      actualDeductionPaise: null,
     },
     minimumWage: {
-      status: "COMPLIANT",
-      description: "All cafe wages exceed Kerala Shops & Establishments baselines.",
+      status: "NOT_EVALUATED",
+      description: "Minimum-wage floor compliance is not evaluated by this endpoint.",
     },
   };
 }
 
 function getDevIntegrityFixture() {
+  // Honest empty-state fixture: with no payroll data only the code-enforced checks
+  // can pass; data-dependent checks are UNAVAILABLE, not CERTIFIED.
   return {
-    status: "CERTIFIED_INTEGRITY",
+    status: "PARTIAL_INTEGRITY",
     totalChecks: 10,
-    passedChecks: 10,
+    evaluatedChecks: 3,
+    passedChecks: 3,
+    failedChecks: 0,
+    unavailableChecks: 7,
+    integrityScore: 100,
     checks: [
-      { id: "CHK-01", name: "Integer Paise Invariant", passed: true, detail: "All values stored as safe non-negative integer paise." },
-      { id: "CHK-02", name: "Gross - Deductions = Net Invariant", passed: true, detail: "100% mathematical consistency across all runs and payslips." },
-      { id: "CHK-03", name: "Duplicate Run Protection", passed: true, detail: "Unique compound index on organisationId + cafeId + periodKey." },
-      { id: "CHK-04", name: "Frozen 4-Role RBAC", passed: true, detail: "Strict MASTER/OWNER control centre; CAFE_ADMIN/STAFF 403 denied." },
-      { id: "CHK-05", name: "OWNER Mutation Lock", passed: true, detail: "OWNER restricted to governance read-only." },
-      { id: "CHK-06", name: "Primary Master Authority Lock", passed: true, detail: "Only Primary Master may execute payroll financial mutations." },
-      { id: "CHK-07", name: "Payable Days Within Calendar Days", passed: true, detail: "Payable days never exceed monthly calendar days." },
-      { id: "CHK-08", name: "Payment Batch Total Match", passed: true, detail: "Disbursement batch sum strictly equals run Net Pay." },
-      { id: "CHK-09", name: "EPF / ESI Statutory Caps", passed: true, detail: "Wages capped at statutory limits for PF and ESI contributions." },
-      { id: "CHK-10", name: "Audit Trail Completeness", passed: true, detail: "Every lifecycle action records immutable AuditEvent entries." },
+      { id: "CHK-01", name: "Integer Paise Invariant", status: "UNAVAILABLE", passed: false, evaluated: false, detail: "No payroll data loaded; invariant not evaluated." },
+      { id: "CHK-02", name: "Gross - Deductions = Net Invariant", status: "UNAVAILABLE", passed: false, evaluated: false, detail: "No payroll data loaded; invariant not evaluated." },
+      { id: "CHK-03", name: "Duplicate Run Protection", status: "UNAVAILABLE", passed: false, evaluated: false, detail: "No database connection; index not verified." },
+      { id: "CHK-04", name: "Frozen 4-Role RBAC", status: "ENFORCED", passed: true, evaluated: true, detail: "Enforced by requirePayrollManagementAccess." },
+      { id: "CHK-05", name: "OWNER Mutation Lock", status: "ENFORCED", passed: true, evaluated: true, detail: "Owner is governance read-only." },
+      { id: "CHK-06", name: "Primary Master Authority Lock", status: "ENFORCED", passed: true, evaluated: true, detail: "Non-primary MASTER rejected by authority guard." },
+      { id: "CHK-07", name: "Payable Days Within Calendar Days", status: "UNAVAILABLE", passed: false, evaluated: false, detail: "No payroll data loaded; invariant not evaluated." },
+      { id: "CHK-08", name: "Payment Batch Total Match", status: "UNAVAILABLE", passed: false, evaluated: false, detail: "No disbursement batch ledger linked in this build." },
+      { id: "CHK-09", name: "EPF / ESI Statutory Caps", status: "UNAVAILABLE", passed: false, evaluated: false, detail: "No payroll data loaded; cap compliance not evaluated." },
+      { id: "CHK-10", name: "Audit Trail Completeness", status: "UNAVAILABLE", passed: false, evaluated: false, detail: "No database connection; audit trail not verified." },
     ],
   };
 }
@@ -753,13 +770,35 @@ function renderReconciliationTab(overview) {
     `;
   }
 
-  // Derive statutory breakdown from kpis fields or estimate from statutory rates
-  const epfPaise     = kpis.epfEmployeePaise     || Math.round(grossPaise * 0.12);
-  const esiPaise     = kpis.esiEmployeePaise     || Math.round(grossPaise * 0.0075);
-  const ptPaise      = kpis.professionalTaxPaise  || 0;
-  const tdsPaise     = kpis.tdsPaise             || 0;
-  const loanEmiPaise = kpis.loanDeductionPaise   || 0;
+  // Real statutory breakdown from the backend KPIs. No percentage estimates are
+  // invented here — a deduction line renders only when the server supplied a real
+  // value; otherwise the tab shows the honest "Unavailable" state.
+  const statutoryAvailable = kpis.statutoryAvailability === "AVAILABLE";
+  const epfPaise     = kpis.epfEmployeePaise;
+  const esiPaise     = kpis.esiEmployeePaise;
+  const ptPaise      = kpis.professionalTaxPaise;
+  const tdsPaise     = kpis.tdsPaise;
+  const loanEmiPaise = kpis.loanDeductionPaise;
   const invariantOk  = (grossPaise - deductionPaise) === netPayPaise;
+
+  const deductionRow = (label, value) =>
+    value !== null && value !== undefined && value > 0
+      ? `<div style="display: flex; justify-content: space-between;"><span style="color: var(--muted);">${label}</span><span style="color: var(--ink); font-weight: 600;">${formatMoney(value)}</span></div>`
+      : "";
+
+  const deductionRowsHtml = [
+    deductionRow("Provident Fund (EPF)", epfPaise),
+    deductionRow("Employee State Insurance (ESI)", esiPaise),
+    deductionRow("Professional Tax (PT)", ptPaise),
+    deductionRow("Income Tax (TDS Section 192)", tdsPaise),
+    deductionRow("Loan / Advance EMIs", loanEmiPaise),
+  ].join("");
+
+  const statutoryNoticeHtml = statutoryAvailable
+    ? ""
+    : `<div style="padding: 8px 12px; background: rgba(217, 119, 6, 0.08); border: 1px solid var(--amber, #d97706); border-radius: 6px; font-size: 12px; color: var(--amber, #d97706); font-weight: 600;">
+         ⚠️ Statutory split unavailable — no issued payslips for this period. Deduction lines are omitted rather than estimated.
+       </div>`;
 
   return `
     <div style="display: flex; flex-direction: column; gap: 20px; width: 100%; min-width: 0;">
@@ -769,6 +808,8 @@ function renderReconciliationTab(overview) {
           Strict mathematical verification ensuring Total Gross - Total Deductions === Net Pay across all active runs.
         </p>
       </div>
+
+      ${statutoryNoticeHtml}
 
       <div class="grid grid-2" style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 16px;">
         <!-- EARNINGS SUMMARY -->
@@ -786,25 +827,21 @@ function renderReconciliationTab(overview) {
         <div class="card card-pad">
           <div style="font-size: 14px; font-weight: 700; color: var(--danger); margin-bottom: 14px;">(-) Total Statutory &amp; Policy Deductions</div>
           <div style="display: flex; flex-direction: column; gap: 8px;">
-            ${epfPaise     ? `<div style="display: flex; justify-content: space-between;"><span style="color: var(--muted);">Provident Fund (EPF 12%)</span><span style="color: var(--ink); font-weight: 600;">${formatMoney(epfPaise)}</span></div>` : ''}
-            ${esiPaise     ? `<div style="display: flex; justify-content: space-between;"><span style="color: var(--muted);">Employee State Insurance (ESI 0.75%)</span><span style="color: var(--ink); font-weight: 600;">${formatMoney(esiPaise)}</span></div>` : ''}
-            ${ptPaise      ? `<div style="display: flex; justify-content: space-between;"><span style="color: var(--muted);">Professional Tax (PT)</span><span style="color: var(--ink); font-weight: 600;">${formatMoney(ptPaise)}</span></div>` : ''}
-            ${tdsPaise     ? `<div style="display: flex; justify-content: space-between;"><span style="color: var(--muted);">Income Tax (TDS Section 192)</span><span style="color: var(--ink); font-weight: 600;">${formatMoney(tdsPaise)}</span></div>` : ''}
-            ${loanEmiPaise ? `<div style="display: flex; justify-content: space-between;"><span style="color: var(--muted);">Loan / Advance EMIs</span><span style="color: var(--ink); font-weight: 600;">${formatMoney(loanEmiPaise)}</span></div>` : ''}
+            ${deductionRowsHtml || '<div style="color: var(--muted); font-size: 12px;">No itemised statutory deductions recorded for this period.</div>'}
             <div style="border-top: 1px solid var(--line); margin: 8px 0;"></div>
             <div style="display: flex; justify-content: space-between; font-size: 15px; font-weight: 700;"><span style="color: var(--danger);">Total Deductions</span><span style="color: var(--danger);">${formatMoney(deductionPaise)}</span></div>
           </div>
         </div>
       </div>
 
-      <!-- INVARIANT BANNER -->
-      <div class="card card-pad" style="border-left: 4px solid var(--success); background: var(--surface-sunken);">
+      <!-- INVARIANT BANNER — real computed values, honest status -->
+      <div class="card card-pad" style="border-left: 4px solid ${invariantOk ? "var(--success)" : "var(--danger)"}; background: var(--surface-sunken);">
         <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
           <div>
-            <div style="font-size: 14px; font-weight: 700; color: var(--success);">Mathematical Balance: Gross (₹9,65,000) - Deductions (₹1,15,800) === Net Disbursement (₹8,49,200)</div>
-            <div style="font-size: 12px; color: var(--muted); margin-top: 2px;">Zero rounding error detected. Integer paise representation certified.</div>
+            <div style="font-size: 14px; font-weight: 700; color: ${invariantOk ? "var(--success)" : "var(--danger)"};">Mathematical Balance: Gross (${formatMoney(grossPaise)}) - Deductions (${formatMoney(deductionPaise)}) ${invariantOk ? "===" : "≠"} Net Disbursement (${formatMoney(netPayPaise)})</div>
+            <div style="font-size: 12px; color: var(--muted); margin-top: 2px;">${invariantOk ? "Zero rounding error detected. Integer paise representation verified." : "Gross-to-net invariant violated — investigate before disbursement."}</div>
           </div>
-          <span class="pill pill-mint" style="font-size: 12px; font-weight: 700;">100% BALANCED</span>
+          <span class="pill ${invariantOk ? "pill-mint" : "pill-coral"}" style="font-size: 12px; font-weight: 700;">${invariantOk ? "BALANCED" : "VARIANCE DETECTED"}</span>
         </div>
       </div>
     </div>
@@ -872,6 +909,26 @@ function renderPaymentsTab(userRole) {
 // ─── TAB: COMPLIANCE & TAX ───────────────────────────────────────────────────
 function renderComplianceTab(compliance) {
   const c = compliance || getDevComplianceFixture();
+
+  // Status pill derived from the backend's honest scheme status. Anything other than
+  // a confirmed APPLIED shows as an "awaiting data" amber pill rather than COMPLIANT.
+  const statusPill = (status) => {
+    if (status === "APPLIED") return `<span class="pill pill-mint">APPLIED</span>`;
+    if (status === "NOT_APPLICABLE") return `<span class="pill pill-mint">NIL RETURN</span>`;
+    if (status === "COMPLIANT") return `<span class="pill pill-mint">COMPLIANT</span>`;
+    return `<span class="pill pill-amber">${escapeHtml(status || "NO_DATA")}</span>`;
+  };
+  const dataNote = c.dataAvailability && c.dataAvailability !== "AVAILABLE"
+    ? `<div style="padding: 8px 12px; background: rgba(217, 119, 6, 0.08); border: 1px solid var(--amber, #d97706); border-radius: 6px; font-size: 12px; color: var(--amber, #d97706); font-weight: 600; margin-bottom: 14px;">
+         ⚠️ No issued payslips for this period — statutory status is ${escapeHtml(c.dataAvailability || "NO_DATA")}. Declared rates/ceilings shown; contributions are not asserted.
+       </div>`
+    : "";
+
+  const amountLine = (label, paise) =>
+    paise !== null && paise !== undefined
+      ? `<div style="font-size: 11.5px; color: var(--muted);">Actual employee deduction: <strong style="color: var(--ink);">${formatMoney(paise)}</strong></div>`
+      : "";
+
   return `
     <div style="display: flex; flex-direction: column; gap: 16px; width: 100%; min-width: 0;">
       <div style="margin-bottom: 6px;">
@@ -881,41 +938,43 @@ function renderComplianceTab(compliance) {
         </p>
       </div>
 
+      ${dataNote}
+
       <div class="grid grid-2" style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 14px;">
         <div class="card card-pad">
           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; gap: 8px; flex-wrap: wrap;">
             <span style="font-weight: 700; font-size: 14px; color: var(--ink);">EPF / ECR Schema 2.0</span>
-            <span class="pill pill-mint">COMPLIANT</span>
+            ${statusPill(c.epf?.status)}
           </div>
-          <div style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">12% Employee + 12% Employer Match (Ceiling: ₹15,000/mo)</div>
-          <div style="font-size: 11.5px; color: var(--success); font-weight: 600;">✓ ECR generation validated</div>
+          <div style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">${c.epf?.employeeRatePct ?? 12}% Employee + ${c.epf?.employerRatePct ?? 12}% Employer Match (Ceiling: ${formatMoney(c.epf?.wageCeilingPaise ?? 1500000)}/mo)</div>
+          ${amountLine("EPF", c.epf?.actualEmployeeDeductionPaise)}
         </div>
 
         <div class="card card-pad">
           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; gap: 8px; flex-wrap: wrap;">
             <span style="font-weight: 700; font-size: 14px; color: var(--ink);">ESI (Employee State Insurance)</span>
-            <span class="pill pill-mint">COMPLIANT</span>
+            ${statusPill(c.esi?.status)}
           </div>
-          <div style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">0.75% Employee + 3.25% Employer (Threshold: ₹21,000/mo)</div>
-          <div style="font-size: 11.5px; color: var(--success); font-weight: 600;">✓ Monthly contribution return ready</div>
+          <div style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">${c.esi?.employeeRatePct ?? 0.75}% Employee + ${c.esi?.employerRatePct ?? 3.25}% Employer (Threshold: ${formatMoney(c.esi?.wageCeilingPaise ?? 2100000)}/mo)</div>
+          ${amountLine("ESI", c.esi?.actualEmployeeDeductionPaise)}
         </div>
 
         <div class="card card-pad">
           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; gap: 8px; flex-wrap: wrap;">
             <span style="font-weight: 700; font-size: 14px; color: var(--ink);">Salary TDS (Section 192)</span>
-            <span class="pill pill-mint">COMPLIANT</span>
+            ${statusPill(c.salaryTds?.status)}
           </div>
-          <div style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">2026 Default New Tax Regime active with standard rebate</div>
-          <div style="font-size: 11.5px; color: var(--success); font-weight: 600;">✓ Form 138 (Salary TDS, formerly Form 24Q) quarterly alignment ready</div>
+          <div style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">${escapeHtml(c.salaryTds?.regime || "2026_DEFAULT_NEW_REGIME")} active with standard rebate</div>
+          ${amountLine("TDS", c.salaryTds?.actualDeductionPaise)}
         </div>
 
         <div class="card card-pad">
           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; gap: 8px; flex-wrap: wrap;">
-            <span style="font-weight: 700; font-size: 14px; color: var(--ink);">Professional Tax & Minimum Wages</span>
-            <span class="pill pill-mint">COMPLIANT</span>
+            <span style="font-weight: 700; font-size: 14px; color: var(--ink);">Professional Tax</span>
+            ${statusPill(c.professionalTax?.status)}
           </div>
-          <div style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">Kerala & Karnataka commercial establishment wage compliance</div>
-          <div style="font-size: 11.5px; color: var(--success); font-weight: 600;">✓ 100% staff above minimum statutory floor</div>
+          <div style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">${escapeHtml(c.professionalTax?.jurisdiction || "KERALA_KARNATAKA")} · ${escapeHtml(c.professionalTax?.schedule || "HALF_YEARLY_AND_MONTHLY")}</div>
+          ${amountLine("PT", c.professionalTax?.actualDeductionPaise)}
         </div>
       </div>
     </div>
@@ -1235,10 +1294,21 @@ function wireEvents(root) {
     showToast("NEFT payment batch register downloaded.", "mint");
   });
 
-  // Integrity certificate button
+  // Integrity certificate button — reflects the real cached integrity result rather
+  // than a hardcoded "10/10 verified".
   root.querySelectorAll("[data-payroll-integrity-btn]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      showToast("10/10 Invariant Checks Verified: 100% Mathematical Consistency.", "mint");
+      const d = cachedIntegrity;
+      if (!d) {
+        showToast("Integrity result unavailable — no payroll integrity data loaded.", "amber");
+        return;
+      }
+      const evaluated = d.evaluatedChecks ?? d.checks?.filter((c) => c.evaluated || c.passed).length ?? 0;
+      const passed = d.passedChecks ?? d.checks?.filter((c) => c.passed).length ?? 0;
+      const unavailable = d.unavailableChecks ?? 0;
+      const status = d.status || "UNKNOWN";
+      const msg = `${status}: ${passed}/${evaluated} evaluated checks passed${unavailable ? `, ${unavailable} unavailable` : ""}.`;
+      showToast(msg, passed === evaluated && evaluated > 0 ? "mint" : "amber");
     });
   });
 
@@ -1260,24 +1330,51 @@ function wireEvents(root) {
   root.querySelector("#btn-child-sync-prep")?.addEventListener("click", () => {
     showToast("Attendance pipelines synchronized for active period.", "mint");
   });
-  root.querySelector("#btn-child-export-staff")?.addEventListener("click", () => {
-    const staffRows = (cachedOverview?.staff || []).map((s) => [
-      s.employeeId || s.userId || "",
-      s.name || "",
-      s.designation || "",
-      (s.baseSalary || 0).toFixed(2),
-      (s.grossSalary || 0).toFixed(2),
+  root.querySelector("#btn-child-export-staff")?.addEventListener("click", async () => {
+    // Compensation master is built from the same real per-employee payslip rows.
+    const rows = await buildEmployeePayslipRows();
+    if (rows.length === 0) {
+      showToast("No payslip rows available to build the compensation master.", "amber");
+      return;
+    }
+    const staffRows = rows.map((s) => [
+      s.employeeId,
+      s.name,
+      "", // Designation is not carried on the payslip feed; left blank rather than fabricated.
+      "", // Base salary is not on the payslip aggregate; blank rather than invented.
+      s.ytdGross,
     ]);
     exportPayrollCsv("staff_compensation_master.csv", ["Employee ID", "Name", "Designation", "Base Salary", "Gross Rate"], staffRows);
   });
   root.querySelector("#btn-child-run-gates")?.addEventListener("click", () => {
-    showToast("10/10 automated quality gates passed with zero anomalies.", "mint");
+    const d = cachedIntegrity;
+    if (!d) {
+      showToast("Quality gates unavailable — no integrity data loaded.", "amber");
+      return;
+    }
+    const evaluated = d.evaluatedChecks ?? d.checks?.filter((c) => c.evaluated || c.passed).length ?? 0;
+    const passed = d.passedChecks ?? d.checks?.filter((c) => c.passed).length ?? 0;
+    showToast(`${passed}/${evaluated} evaluated quality gates passed.`, passed === evaluated && evaluated > 0 ? "mint" : "amber");
   });
   root.querySelector("#btn-child-add-adj")?.addEventListener("click", () => {
     showToast("Opening Adjustment / Variable Pay entry form.", "mint");
   });
   root.querySelector("#btn-child-verify-inv")?.addEventListener("click", () => {
-    showToast("Mathematical invariant verified: Gross - Deductions = Net (0.00 variance).", "mint");
+    const kpis = cachedOverview?.kpis || {};
+    const g = kpis.grossPaise || 0;
+    const d = kpis.deductionPaise || 0;
+    const n = kpis.netPayPaise || 0;
+    if (!g && !d && !n) {
+      showToast("No payroll data loaded to verify the gross-to-net invariant.", "amber");
+      return;
+    }
+    const ok = (g - d) === n;
+    showToast(
+      ok
+        ? `Invariant verified: Gross - Deductions = Net (${formatMoney(n)}).`
+        : `Invariant violated: Gross (${formatMoney(g)}) - Deductions (${formatMoney(d)}) ≠ Net (${formatMoney(n)}).`,
+      ok ? "mint" : "amber"
+    );
   });
   root.querySelector("#btn-child-gen-batch")?.addEventListener("click", () => {
     showToast("Disbursement batch generated and queued for NEFT release.", "mint");
@@ -1288,8 +1385,19 @@ function wireEvents(root) {
   root.querySelector("#btn-child-gen-challans")?.addEventListener("click", () => {
     showToast("EPF ECR & ESI monthly challans generated.", "mint");
   });
-  root.querySelector("#btn-child-export-ytd")?.addEventListener("click", () => {
-    exportPayrollCsv("ytd_tax_accumulators.csv", ["Employee ID", "Name", "YTD Gross", "YTD TDS", "YTD EPF", "YTD ESI"], []);
+  root.querySelector("#btn-child-export-ytd")?.addEventListener("click", async () => {
+    // YTD accumulators are aggregated from real payslip rows across the loaded runs.
+    // Without a per-employee payslip feed there is nothing truthful to export.
+    const rows = await buildEmployeePayslipRows();
+    if (rows.length === 0) {
+      showToast("No payslip rows available to build the YTD summary.", "amber");
+      return;
+    }
+    exportPayrollCsv(
+      "ytd_tax_accumulators.csv",
+      ["Employee ID", "Name", "YTD Gross", "YTD TDS", "YTD EPF", "YTD ESI"],
+      rows.map((r) => [r.employeeId, r.name, r.ytdGross, r.ytdTds, r.ytdEpf, r.ytdEsi])
+    );
   });
   root.querySelector("#btn-child-export-reports")?.addEventListener("click", () => {
     exportPayrollCsv("payroll_finance_jv.csv", ["Account Code", "Account Name", "Debit", "Credit"], []);
@@ -1297,6 +1405,55 @@ function wireEvents(root) {
   root.querySelector("#btn-child-download-audit")?.addEventListener("click", () => {
     exportPayrollCsv("payroll_audit_trail.csv", ["Timestamp", "Run ID", "Event", "Actor", "Status"], []);
   });
+}
+
+// Aggregate per-employee YTD payroll accumulators by fetching the real payslip rows
+// for every loaded payroll run. Returns [] (and surfaces a toast) when no payslips
+// are available, so exports never fabricate figures.
+async function buildEmployeePayslipRows() {
+  const runIds = (loadedPayrollRuns || [])
+    .map((r) => r && r.payrollRunId)
+    .filter(Boolean);
+  if (runIds.length === 0) return [];
+
+  const perEmployee = new Map();
+  await Promise.all(runIds.map(async (runId) => {
+    try {
+      const res = await apiGet(`/payroll/runs/${encodeURIComponent(runId)}/payslips?limit=100`);
+      const payslips = res?.data?.payslips || [];
+      for (const p of payslips) {
+        const empId = p.employeeUserId || p.employeeId || "";
+        if (!empId) continue;
+        const cur = perEmployee.get(empId) || {
+          employeeId: empId,
+          name: p.employeeName || "",
+          ytdGross: 0,
+          ytdTds: 0,
+          ytdEpf: 0,
+          ytdEsi: 0,
+        };
+        if (!cur.name && p.employeeName) cur.name = p.employeeName;
+        cur.ytdGross += Number(p.grossPayPaise || p.earnings?.grossPayPaise || 0);
+        cur.ytdTds += Number(p.deductions?.incomeTaxPaise || 0);
+        cur.ytdEpf += Number(p.deductions?.providentFundPaise || 0);
+        cur.ytdEsi += Number(p.deductions?.employeeStateInsurancePaise || 0);
+        perEmployee.set(empId, cur);
+      }
+    } catch (_) {
+      // Run has no accessible payslips; skip rather than fabricate.
+    }
+  }));
+
+  const rows = [...perEmployee.values()];
+  const paisaToRupees = (paisa) => (paisa / 100).toFixed(2);
+  return rows.map((r) => ({
+    employeeId: r.employeeId,
+    name: r.name,
+    ytdGross: paisaToRupees(r.ytdGross),
+    ytdTds: paisaToRupees(r.ytdTds),
+    ytdEpf: paisaToRupees(r.ytdEpf),
+    ytdEsi: paisaToRupees(r.ytdEsi),
+  }));
 }
 
 function exportPayrollCsv(filename, headers, rows) {

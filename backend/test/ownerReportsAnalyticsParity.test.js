@@ -334,16 +334,21 @@ test('OWN-SCR-007 / Master Parity: Reports & Governed Analytics Parity & Securit
   });
 
   // ── 18. Analytics Integrity & Governance ────────────────────────────────────
-  await t.test('18. Analytics integrity returns 100% check pass rate and audit timestamp', async () => {
+  await t.test('18. Analytics integrity reports honest per-check results and audit timestamp', async () => {
     const { req, res, getResult } = buildMockReqRes('OWNER');
     await reportController.getAnalyticsIntegrity(req, res, () => {});
     const result = getResult();
 
     assert.equal(result.statusCode, 200);
-    assert.equal(result.data.data.integrityScore, 100);
-    assert.equal(result.data.data.allPassed, true);
     assert.ok(Array.isArray(result.data.data.checks));
     assert.equal(result.data.data.checks.length, 16);
+    // Unevaluable controls must be honestly marked UNAVAILABLE, not fabricated PASS.
+    assert.ok(result.data.data.unavailableChecks >= 3);
+    assert.equal(result.data.data.failedChecks, 0);
+    assert.equal(result.data.data.allPassed, true);
+    assert.ok(result.data.data.integrityScore >= 0 && result.data.data.integrityScore <= 100);
+    const validResults = new Set(['PASS', 'FAIL', 'UNAVAILABLE', 'ENFORCED']);
+    assert.ok(result.data.data.checks.every((c) => validResults.has(c.result)));
   });
 
   // ── 19. Multi-Café Scoping & Cross-Café Rejection ───────────────────────────

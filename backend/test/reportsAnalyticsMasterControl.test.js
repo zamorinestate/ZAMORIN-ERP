@@ -580,8 +580,16 @@ test('SCR-022: Reports & Analytics Master Control & ZURF Integration Suite', asy
 
     assert.equal(res.status, 200);
     assert.equal(res.data.success, true);
-    assert.equal(res.data.data.integrityScore, 100);
     assert.equal(res.data.data.totalChecks, 16);
+    assert.equal(res.data.data.checks.length, 16);
+    // Honest contract: unevaluable controls (POS↔GL, GRN↔stock, AP↔bank, cohort) must be
+    // reported UNAVAILABLE, never a fabricated PASS. Score covers evaluated checks only.
+    assert.ok(res.data.data.unavailableChecks >= 3);
+    assert.equal(res.data.data.failedChecks, 0);
     assert.equal(res.data.data.allPassed, true);
+    assert.ok(res.data.data.integrityScore >= 0 && res.data.data.integrityScore <= 100);
+    // Every check must carry an explicit result class — no blank/fabricated entries.
+    const validResults = new Set(['PASS', 'FAIL', 'UNAVAILABLE', 'ENFORCED']);
+    assert.ok(res.data.data.checks.every((c) => validResults.has(c.result)));
   });
 });

@@ -695,4 +695,5 @@ module.exports = {
   ZurfService,
   COMPANY_CONFIG,
   getCompanyConfig,
+  sanitizeCsvCell,
 };

@@ -19,7 +19,7 @@ const { PayrollRun } = require('../models/PayrollRun');
 const { Payslip } = require('../models/Payslip');
 const { RegisterSession } = require('../models/RegisterSession');
 const { MetricsService, METRICS_DICTIONARY } = require('../services/metricsService');
-const { ZurfService, COMPANY_CONFIG, getCompanyConfig } = require('../services/zurfService');
+const { ZurfService, COMPANY_CONFIG, getCompanyConfig, sanitizeCsvCell } = require('../services/zurfService');
 const { asyncHandler } = require('../utils/asyncHandler');
 const { ApiError } = require('../utils/ApiError');
 const { resolveEffectiveCafeScope, assertResourceCafeOwnership } = require('../utils/cafeScope');
@@ -3764,33 +3764,171 @@ const downloadExportArtifact = asyncHandler(async (request, response) => {
 // ─── 20. GET /api/v1/reports/integrity ────────────────────────────────────────
 
 const getAnalyticsIntegrity = asyncHandler(async (request, response) => {
-  buildBaseFilter(request, validateAndParseDateFilters(request));
+  const baseFilter = buildBaseFilter(request, validateAndParseDateFilters(request));
+  const organisationId = baseFilter.organisationId;
+  const dbConnected = mongoose.connection?.readyState === 1;
 
-  const checks = [
-    { checkId: 'CHK-01', name: 'Governed Metric Formulas Consistency', result: 'PASS' },
-    { checkId: 'CHK-02', name: 'ZURF Multi-Page Watermark Engine Compliance', result: 'PASS' },
-    { checkId: 'CHK-03', name: 'Top-Centred Logo, Legal Name & GSTIN Invariant', result: 'PASS' },
-    { checkId: 'CHK-04', name: 'Run ID & Classification Immutability', result: 'PASS' },
-    { checkId: 'CHK-05', name: 'Cross-Café Scoping & Privacy Firewalls', result: 'PASS' },
-    { checkId: 'CHK-06', name: 'POS Sales vs Finance GL Posting Reconciliation', result: 'PASS' },
-    { checkId: 'CHK-07', name: 'Inbound GRN vs Inventory Movement Match', result: 'PASS' },
-    { checkId: 'CHK-08', name: 'Supplier Invoice vs AP Payable Match', result: 'PASS' },
-    { checkId: 'CHK-09', name: 'Payroll Run vs Payslips Mathematical Match', result: 'PASS' },
-    { checkId: 'CHK-10', name: 'Like-for-Like Mature Café Cohort Integrity', result: 'PASS' },
-    { checkId: 'CHK-11', name: 'OpenXML Excel & PDF Packaging Semantics', result: 'PASS' },
-    { checkId: 'CHK-12', name: 'STAFF 403 Forbidden Access Enforcement', result: 'PASS' },
-    { checkId: 'CHK-13', name: 'Timezone Asia/Kolkata Business Date Alignment', result: 'PASS' },
-    { checkId: 'CHK-14', name: 'Integer Paise Currency Accuracy & Subtotals', result: 'PASS' },
-    { checkId: 'CHK-15', name: 'Spreadsheet Formula Injection Sanitization', result: 'PASS' },
-    { checkId: 'CHK-16', name: 'Zero Transactional Truth Replacement', result: 'PASS' },
-  ];
+  // Load the payroll/inventory source rows once. Any query failure or an offline DB
+  // downgrades the dependent checks to UNAVAILABLE rather than asserting a PASS.
+  let payslips = [];
+  let payrollRuns = [];
+  let sourceDataAvailable = false;
+  if (dbConnected) {
+    try {
+      [payslips, payrollRuns] = await Promise.all([
+        Payslip.find({ organisationId, status: { $in: ['ISSUED', 'PAID'] } }).lean(),
+        PayrollRun.find({ organisationId }).lean(),
+      ]);
+      sourceDataAvailable = true;
+    } catch (_) {
+      sourceDataAvailable = false;
+      payslips = [];
+      payrollRuns = [];
+    }
+  }
+  payslips = Array.isArray(payslips) ? payslips : [];
+  payrollRuns = Array.isArray(payrollRuns) ? payrollRuns : [];
+
+  const intPaise = (v) => Number.isSafeInteger(v) && v >= 0;
+  const checks = [];
+
+  // CHK-01 Governed Metric Formulas Consistency — every registered metric must carry
+  // a non-empty governed derivation (`source`) and a calculationType. Verified against
+  // the live MetricRegistry.
+  const allMetrics = MetricRegistry.getAllMetrics();
+  const metricsIncomplete = allMetrics.filter((m) => !m
+    || !(m.source && String(m.source).trim())
+    || !(m.calculationType && String(m.calculationType).trim()));
+  checks.push({
+    checkId: 'CHK-01',
+    name: 'Governed Metric Formulas Consistency',
+    result: metricsIncomplete.length === 0 && allMetrics.length > 0 ? 'PASS' : (allMetrics.length === 0 ? 'UNAVAILABLE' : 'FAIL'),
+    detail: allMetrics.length === 0
+      ? 'No canonical metrics registered; consistency not evaluated.'
+      : (metricsIncomplete.length === 0
+        ? `All ${allMetrics.length} governed metric(s) declare a source derivation and calculation type.`
+        : `${metricsIncomplete.length} metric(s) missing a governed source derivation or calculation type.`),
+  });
+
+  // CHK-02 / CHK-11 ZURF watermark + OpenXML/PDF packaging — code-level invariants
+  // enforced by the export service (COMPANY_CONFIG-driven). Not data-audited here.
+  checks.push({ checkId: 'CHK-02', name: 'ZURF Multi-Page Watermark Engine Compliance', result: 'ENFORCED', detail: 'Enforced by ZurfService packaging; watermark is code-rendered, not data-derived.' });
+  checks.push({ checkId: 'CHK-11', name: 'OpenXML Excel & PDF Packaging Semantics', result: 'ENFORCED', detail: 'Enforced by ZurfService export serializers (CSV/PDF); not independently data-audited.' });
+
+  // CHK-03 Logo / Legal Name / GSTIN invariant — driven by COMPANY_CONFIG.
+  const hasCompanyIdentity = Boolean(COMPANY_CONFIG && (COMPANY_CONFIG.legalName || COMPANY_CONFIG.name) && (COMPANY_CONFIG.gstin || COMPANY_CONFIG.gstinNumber));
+  checks.push({ checkId: 'CHK-03', name: 'Top-Centred Logo, Legal Name & GSTIN Invariant', result: hasCompanyIdentity ? 'ENFORCED' : 'UNAVAILABLE', detail: hasCompanyIdentity ? 'Legal name & GSTIN sourced from COMPANY_CONFIG; rendered by ZURF header.' : 'COMPANY_CONFIG lacks legal name or GSTIN.' });
+
+  // CHK-04 Run ID & Classification Immutability — enforced by schema (immutable fields).
+  checks.push({ checkId: 'CHK-04', name: 'Run ID & Classification Immutability', result: 'ENFORCED', detail: 'Enforced by Mongoose immutable schema fields on PayrollRun/Payslip identifiers.' });
+
+  // CHK-05 Cross-Café Scoping & Privacy Firewalls — this handler resolved an
+  // organisation-scoped filter; enforcement is by the authorize middleware + cafeScope.
+  checks.push({ checkId: 'CHK-05', name: 'Cross-Café Scoping & Privacy Firewalls', result: 'ENFORCED', detail: 'Enforced by authorize() role guard and organisation/cafe scoping on every report query.' });
+
+  // CHK-06 POS Sales vs Finance GL — no automated GL posting pipeline exists.
+  checks.push({ checkId: 'CHK-06', name: 'POS Sales vs Finance GL Posting Reconciliation', result: 'UNAVAILABLE', detail: 'Automated POS-to-GL posting pipeline not integrated; General Ledger revenue accounts unavailable.' });
+
+  // CHK-07 Inbound GRN vs Stock Movement — StockMovement tracks quantity, not money.
+  checks.push({ checkId: 'CHK-07', name: 'Inbound GRN vs Inventory Movement Match', result: 'UNAVAILABLE', detail: 'No standalone GRN monetary model; StockMovement records base quantities without inboundValuePaise.' });
+
+  // CHK-08 Supplier Invoice vs AP Payable / Bank — no AP-to-bank linkage.
+  checks.push({ checkId: 'CHK-08', name: 'Supplier Invoice vs AP Payable Match', result: 'UNAVAILABLE', detail: 'No AP-invoice-to-bank-disbursement transaction linkage exists in this build.' });
+
+  // CHK-09 Payroll Run vs Payslips Mathematical Match — REAL aggregation when data exists.
+  if (!sourceDataAvailable) {
+    checks.push({ checkId: 'CHK-09', name: 'Payroll Run vs Payslips Mathematical Match', result: 'UNAVAILABLE', detail: 'No payroll source data loaded; run-vs-payslip match not evaluated.' });
+  } else {
+    const runGross = payrollRuns.reduce((s, r) => s + (intPaise(r.totalGrossPaise) ? r.totalGrossPaise : 0), 0);
+    const payslipGross = payslips.reduce((s, p) => s + (intPaise(p.earnings?.grossPayPaise) ? p.earnings.grossPayPaise : 0), 0);
+    const comparable = payrollRuns.length > 0 && payslips.length > 0;
+    checks.push({
+      checkId: 'CHK-09',
+      name: 'Payroll Run vs Payslips Mathematical Match',
+      result: !comparable ? 'UNAVAILABLE' : (runGross === payslipGross ? 'PASS' : 'FAIL'),
+      detail: !comparable
+        ? 'No comparable payroll runs and payslips for this organisation.'
+        : (runGross === payslipGross
+          ? `Run gross equals payslip gross across ${payrollRuns.length} run(s) / ${payslips.length} payslip(s).`
+          : `Variance: run gross ${runGross} paise vs payslip gross ${payslipGross} paise.`),
+    });
+  }
+
+  // CHK-10 Like-for-Like Mature Café Cohort — cohort derivation needs cafe maturity data.
+  checks.push({ checkId: 'CHK-10', name: 'Like-for-Like Mature Café Cohort Integrity', result: 'UNAVAILABLE', detail: 'Café maturity/cohort classification not modelled; like-for-like cohort cannot be derived.' });
+
+  // CHK-12 STAFF 403 Access Enforcement — enforced by authorize() allowedRoles.
+  checks.push({ checkId: 'CHK-12', name: 'STAFF 403 Forbidden Access Enforcement', result: 'ENFORCED', detail: 'Enforced by authorize(REPORTS_READ, allowedRoles: MASTER/OWNER); STAFF/CAFE_ADMIN denied at this route.' });
+
+  // CHK-13 Timezone Asia/Kolkata Business Date Alignment — real behavioural probe of
+  // the canonical IST business-date helper.
+  let istAligned = false;
+  try {
+    const istToday = getIstBusinessDate();
+    const istParts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+    istAligned = /^\d{4}-\d{2}-\d{2}$/.test(istToday) && istToday === istParts;
+  } catch (_) {
+    istAligned = false;
+  }
+  checks.push({ checkId: 'CHK-13', name: 'Timezone Asia/Kolkata Business Date Alignment', result: istAligned ? 'PASS' : 'FAIL', detail: istAligned ? 'IST business date matches Asia/Kolkata en-CA rendering.' : 'IST business-date helper does not match Asia/Kolkata date.' });
+
+  // CHK-14 Integer Paise Currency Accuracy — REAL scan over payroll monetary fields.
+  if (!sourceDataAvailable) {
+    checks.push({ checkId: 'CHK-14', name: 'Integer Paise Currency Accuracy & Subtotals', result: 'UNAVAILABLE', detail: 'No payroll source data loaded; paise-integer invariant not evaluated.' });
+  } else {
+    let nonInteger = 0;
+    for (const p of payslips) {
+      if (!intPaise(p.earnings?.grossPayPaise) || !intPaise(p.netPayPaise)) nonInteger++;
+    }
+    checks.push({
+      checkId: 'CHK-14',
+      name: 'Integer Paise Currency Accuracy & Subtotals',
+      result: payslips.length === 0 ? 'UNAVAILABLE' : (nonInteger === 0 ? 'PASS' : 'FAIL'),
+      detail: payslips.length === 0
+        ? 'No payslips to scan for integer-paise accuracy.'
+        : (nonInteger === 0 ? `All ${payslips.length} payslip(s) use non-negative integer paise.` : `${nonInteger} payslip(s) contain non-integer/negative paise values.`),
+    });
+  }
+
+  // CHK-15 Spreadsheet Formula Injection Sanitization — REAL behavioural probe of the
+  // exported sanitizeCsvCell helper against classic injection payloads.
+  let sanitizeOk = false;
+  try {
+    const payloads = ['=1+1', '+1', '-1', '@SUM(A1)', '\tTAB', '\rCR'];
+    sanitizeOk = payloads.every((p) => {
+      const out = String(sanitizeCsvCell(p));
+      return !/^[=+\-@\t\r]/.test(out);
+    });
+  } catch (_) {
+    sanitizeOk = false;
+  }
+  checks.push({ checkId: 'CHK-15', name: 'Spreadsheet Formula Injection Sanitization', result: sanitizeOk ? 'PASS' : 'FAIL', detail: sanitizeOk ? 'sanitizeCsvCell neutralises =,+,-,@,TAB,CR leading characters.' : 'sanitizeCsvCell failed to neutralise a formula-injection payload.' });
+
+  // CHK-16 Zero Transactional Truth Replacement — this remediation's invariant: report
+  // values are derived from real collections or explicitly UNAVAILABLE. Code-enforced.
+  checks.push({ checkId: 'CHK-16', name: 'Zero Transactional Truth Replacement', result: 'ENFORCED', detail: 'Report values derive from real collections or return explicit UNAVAILABLE; no fabricated figures (Phase 6 remediation invariant).' });
+
+  // Aggregate honestly across all three outcome classes.
+  const toPct = (num, den) => (den > 0 ? Math.round((num / den) * 100) : 0);
+  const passCount = checks.filter((c) => c.result === 'PASS').length;
+  const enforcedCount = checks.filter((c) => c.result === 'ENFORCED').length;
+  const unavailableCount = checks.filter((c) => c.result === 'UNAVAILABLE').length;
+  const failCount = checks.filter((c) => c.result === 'FAIL').length;
+  const evaluatedCount = checks.length - unavailableCount;
+
+  const integrityScore = toPct(passCount + enforcedCount, evaluatedCount);
+  const allPassed = failCount === 0 && evaluatedCount > 0;
 
   return response.status(200).json({
     success: true,
     data: {
-      integrityScore: 100,
-      totalChecks: 16,
-      allPassed: true,
+      integrityScore,
+      totalChecks: checks.length,
+      evaluatedChecks: evaluatedCount,
+      passedChecks: passCount + enforcedCount,
+      failedChecks: failCount,
+      unavailableChecks: unavailableCount,
+      allPassed,
       checks,
       auditedAt: new Date().toISOString(),
     },
