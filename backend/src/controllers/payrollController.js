@@ -325,10 +325,7 @@ const downloadEmployeeMonthlyPayslip = asyncHandler(
     }
 
     // Role privacy gate: Non-Primary-Master roles cannot access colleague payslips by default (F01)
-    const isPrimaryMaster = Boolean(
-      role === 'MASTER' &&
-      (request.auth.isPrimaryMaster === true || (request.auth.isPrimaryMaster !== false && userId === 'MU-0001'))
-    );
+    const isPrimaryMaster = role === 'MASTER' && request.auth.isPrimaryMaster === true;
     const selfIdentifiers = [
       userId,
       request.auth.employeeId,

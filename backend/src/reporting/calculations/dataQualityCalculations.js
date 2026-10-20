@@ -495,7 +495,7 @@ async function loadDurableAcknowledgements(organisationId) {
  * @param {string} options.note
  * @returns {Object} Acknowledgement record
  */
-function recordIssueAcknowledgement({ issueId, actor, role = 'MASTER', organisationId = 'ORG-ZAMORIN', cafeId = null, note = '' } = {}) {
+function recordIssueAcknowledgement({ issueId, actor, role = 'MASTER', organisationId, cafeId = null, note = '' } = {}) {
   if (!issueId) {
     throw new Error('issueId is required for acknowledgement');
   }

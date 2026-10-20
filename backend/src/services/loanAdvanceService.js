@@ -18,6 +18,17 @@ const { LoanTransaction } = require('../models/LoanTransaction');
 const { LoanRepaymentSchedule } = require('../models/LoanRepaymentSchedule');
 const { LoanPolicy } = require('../models/LoanPolicy');
 
+// Fail closed: queries must never run without an explicit organisation scope.
+function assertOrganisationId(organisationId) {
+  if (!organisationId) {
+    const error = new Error('Organisation context is required.');
+    error.statusCode = 400;
+    error.code = 'ORGANISATION_CONTEXT_REQUIRED';
+    throw error;
+  }
+  return organisationId;
+}
+
 function assertSafeNonNegativePaise(value, fieldName) {
   if (!Number.isSafeInteger(value) || value < 0) {
     const error = new TypeError(
@@ -298,7 +309,7 @@ class LoanAdvanceService {
    * Processes a payroll recovery posting on a specific loan.
    */
   static async processPayrollLoanRecovery({
-    organisationId = 'ZAMORIN',
+    organisationId,
     payrollRunId,
     payrollPeriod,
     employeeUserId,
@@ -307,6 +318,7 @@ class LoanAdvanceService {
     availableCapacityPaise,
     performerUserId = 'SYSTEM',
   }) {
+    assertOrganisationId(organisationId);
     const rawLoan = await StaffLoanAdvance.findOne({ organisationId, loanAdvanceId, employeeUserId });
     const loan = rawLoan;
     if (!loan) throw new Error(`Loan ${loanAdvanceId} not found for employee ${employeeUserId}.`);
@@ -376,11 +388,12 @@ class LoanAdvanceService {
    * Reverses a payroll loan recovery when a payroll run is voided or reversed.
    */
   static async reversePayrollLoanRecovery({
-    organisationId = 'ZAMORIN',
+    organisationId,
     payrollRunId,
     loanAdvanceId,
     performerUserId = 'SYSTEM',
   }) {
+    assertOrganisationId(organisationId);
     const originalTxn = await LoanTransaction.findOne({
       organisationId,
       payrollRunId,
@@ -427,7 +440,8 @@ class LoanAdvanceService {
   /**
    * Generates a controlled indicative settlement quote.
    */
-  static async generateSettlementQuote({ organisationId = 'ZAMORIN', loanAdvanceId }) {
+  static async generateSettlementQuote({ organisationId, loanAdvanceId }) {
+    assertOrganisationId(organisationId);
     const rawLoan = await StaffLoanAdvance.findOne({ organisationId, loanAdvanceId });
     const loan = rawLoan?.toObject ? rawLoan.toObject() : rawLoan;
     if (!loan) throw new Error(`Loan ${loanAdvanceId} not found.`);
@@ -457,7 +471,8 @@ class LoanAdvanceService {
   /**
    * 24-Point Loan & Advance Integrity Engine.
    */
-  static async runLoanIntegrityAudit(organisationId = 'ZAMORIN') {
+  static async runLoanIntegrityAudit(organisationId) {
+    assertOrganisationId(organisationId);
     const rawLoans = await StaffLoanAdvance.find({ organisationId });
     const loans = Array.isArray(rawLoans) ? rawLoans : [];
 

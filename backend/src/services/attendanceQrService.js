@@ -57,7 +57,7 @@ class AttendanceQrService {
    * Authoritatively issues or retrieves the currently active rotating challenge for an authorised display.
    */
   async getActiveOrNewChallenge({
-    organisationId = 'ZAMORIN',
+    organisationId,
     cafeId,
     deviceId = 'OPS_CONSOLE',
     requestedByUserId = 'SYSTEM',
@@ -65,6 +65,9 @@ class AttendanceQrService {
     assignedCafeIds = [],
     rotationIntervalSeconds = 45,
   }) {
+    if (!organisationId) {
+      throw new ApiError(400, 'ORGANISATION_CONTEXT_REQUIRED', 'Organisation context is required.');
+    }
     if (!cafeId) {
       throw new ApiError(400, 'CAFE_ID_REQUIRED', 'A cafeId must be provided to display the attendance QR.');
     }

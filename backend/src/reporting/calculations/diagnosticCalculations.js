@@ -542,9 +542,15 @@ async function calculateDiagnosticDecomposition({
   const aggregationType = metricConfig.aggregationType || (isAdditive ? DIAGNOSTIC_AGGREGATION_TYPES.ADDITIVE : DIAGNOSTIC_AGGREGATION_TYPES.RATIO_RECOMPUTE);
 
   // 2. Scope & Tenant Derivation (Blocker J-R1-001, Sections 3, 5, 6, 7)
-  const orgId = auth.organisationId || 'ORG-ZAMORIN-01';
+  const orgId = auth.organisationId;
+  if (!orgId) {
+    const orgErr = new Error('Organisation context is required.');
+    orgErr.statusCode = 400;
+    orgErr.code = 'ORGANISATION_CONTEXT_REQUIRED';
+    throw orgErr;
+  }
   const role = String(auth.role || '').toUpperCase();
-  const isPrimaryMaster = Boolean(auth.isPrimaryMaster || (role === 'MASTER' && auth.userId === 'MU-0001'));
+  const isPrimaryMaster = auth.isPrimaryMaster === true;
 
   // Staff role denied
   if (role === 'STAFF') {
@@ -861,9 +867,15 @@ function calculateVarianceWaterfall({
   missingComponent = null,
 } = {}) {
   // Scoping check (Blocker J-R1-001)
-  const orgId = auth.organisationId || 'ORG-ZAMORIN-01';
+  const orgId = auth.organisationId;
+  if (!orgId) {
+    const orgErr = new Error('Organisation context is required.');
+    orgErr.statusCode = 400;
+    orgErr.code = 'ORGANISATION_CONTEXT_REQUIRED';
+    throw orgErr;
+  }
   const role = String(auth.role || '').toUpperCase();
-  const isPrimaryMaster = Boolean(auth.isPrimaryMaster || (role === 'MASTER' && auth.userId === 'MU-0001'));
+  const isPrimaryMaster = auth.isPrimaryMaster === true;
 
   const rawCafes = [
     ...(Array.isArray(auth.assignedCafeIds) ? auth.assignedCafeIds : (auth.assignedCafeIds ? [auth.assignedCafeIds] : [])),
@@ -1550,9 +1562,15 @@ function calculateSmallMultiples(groups = [], options = {}) {
  */
 async function calculateDiagnosticExceptions({ preloadedExceptions = null, auth = {} } = {}) {
   // Scoping check (Blocker J-R1-001)
-  const orgId = auth.organisationId || 'ORG-ZAMORIN-01';
+  const orgId = auth.organisationId;
+  if (!orgId) {
+    const orgErr = new Error('Organisation context is required.');
+    orgErr.statusCode = 400;
+    orgErr.code = 'ORGANISATION_CONTEXT_REQUIRED';
+    throw orgErr;
+  }
   const role = String(auth.role || '').toUpperCase();
-  const isPrimaryMaster = Boolean(auth.isPrimaryMaster || (role === 'MASTER' && auth.userId === 'MU-0001'));
+  const isPrimaryMaster = auth.isPrimaryMaster === true;
 
   if (role === 'STAFF') {
     const err = new Error('Staff role denied access to enterprise diagnostic exceptions.');

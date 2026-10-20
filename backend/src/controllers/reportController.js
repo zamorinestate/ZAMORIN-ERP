@@ -240,7 +240,11 @@ function buildBaseFilter(request, dateFilters) {
     throw new ApiError(403, 'CROSS_CAFE_RESOURCE_DENIED', `${role === 'OWNER' ? 'Owner' : 'Café Administrator'} has no authorized café assignments.`);
   }
 
-  const filter = { organisationId: organisationId || 'ORG-ZAMORIN-01' };
+  if (!organisationId) {
+    throw new ApiError(400, 'ORGANISATION_CONTEXT_REQUIRED', 'Organisation context is required for reporting.');
+  }
+
+  const filter = { organisationId };
 
   if (role === 'MASTER') {
     if (dateFilters.cafeId) {
@@ -367,7 +371,7 @@ const getReportCatalogue = asyncHandler(async (request, response) => {
   buildBaseFilter(request, validateAndParseDateFilters(request));
 
   const userRole = String(request.auth?.role || '').toUpperCase();
-  const isPrimaryMaster = Boolean(request.auth?.isPrimaryMaster || (userRole === 'MASTER' && request.auth?.userId === 'MU-0001'));
+  const isPrimaryMaster = request.auth?.isPrimaryMaster === true;
 
   let catalogue = [];
   let categoryList = [];

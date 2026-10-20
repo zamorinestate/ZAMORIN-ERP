@@ -993,7 +993,7 @@ class ReportRegistry {
     }
 
     const role = String(auth.role || '').toUpperCase();
-    const isPrimaryMaster = Boolean(auth.isPrimaryMaster || (role === 'MASTER' && auth.userId === 'MU-0001'));
+    const isPrimaryMaster = auth.isPrimaryMaster === true;
 
     // Check classification: HIGHLY_CONFIDENTIAL requires PRIMARY_MASTER
     if (report.classification === 'HIGHLY_CONFIDENTIAL' && !isPrimaryMaster) {

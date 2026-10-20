@@ -379,8 +379,8 @@ const onboardEmployee = asyncHandler(async (req, res) => {
     designation = 'Junior Barista',
     employmentType = 'Full Time',
     workerType = 'PERMANENT',
-    primaryCafeId = 'ZC-0001',
-    assignedCafeIds = ['ZC-0001'],
+    primaryCafeId = null,
+    assignedCafeIds = null,
     positionId = null,
     managerUserId = null,
     joiningDate = new Date().toISOString().split('T')[0],
@@ -390,6 +390,15 @@ const onboardEmployee = asyncHandler(async (req, res) => {
   if (!name || !email) {
     throw new ApiError(400, 'INVALID_PAYLOAD', 'Employee name and email are required for onboarding.');
   }
+
+  // Café identity: payload café → requester's café context. Fail closed, never a hardcoded default.
+  const resolvedPrimaryCafeId = primaryCafeId || req.auth.primaryCafeId || (req.auth.assignedCafeIds || [])[0];
+  if (!resolvedPrimaryCafeId) {
+    throw new ApiError(400, 'CAFE_ID_REQUIRED', 'A café is required to onboard an employee.');
+  }
+  const resolvedAssignedCafeIds = Array.isArray(assignedCafeIds) && assignedCafeIds.length
+    ? assignedCafeIds
+    : [resolvedPrimaryCafeId];
 
   // Duplicate check
   const existingUser = await User.findOne({
@@ -425,8 +434,8 @@ const onboardEmployee = asyncHandler(async (req, res) => {
     workerType,
     employmentStatus,
     probationStatus: 'PENDING',
-    primaryCafeId,
-    assignedCafeIds,
+    primaryCafeId: resolvedPrimaryCafeId,
+    assignedCafeIds: resolvedAssignedCafeIds,
     positionId,
     managerUserId,
     joiningDate: new Date(joiningDate),
@@ -461,7 +470,7 @@ const onboardEmployee = asyncHandler(async (req, res) => {
       action: 'ONBOARD_EMPLOYEE',
       entityType: 'EMPLOYEE',
       entityId: newUserId,
-      metadata: { name, email, role, primaryCafeId, employmentStatus },
+      metadata: { name, email, role, primaryCafeId: resolvedPrimaryCafeId, employmentStatus },
     });
   } catch (e) {
     // Non-blocking audit

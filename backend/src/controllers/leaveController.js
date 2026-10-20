@@ -401,7 +401,10 @@ const applyLeave = asyncHandler(async (request, response) => {
     attachmentName = null,
   } = request.body || {};
 
-  const cafeId = normalizeIdentifier(rawCafe) || (assignedCafeIds && assignedCafeIds[0]) || 'ZC-0001';
+  const cafeId = normalizeIdentifier(rawCafe) || (assignedCafeIds && assignedCafeIds[0]) || request.auth.primaryCafeId;
+  if (!cafeId) {
+    throw new ApiError(400, 'CAFE_ID_REQUIRED', 'A café assignment is required to apply for leave.');
+  }
 
   if (!startDate || !endDate) {
     throw new ApiError(400, 'DATES_REQUIRED', 'startDate and endDate are required.');

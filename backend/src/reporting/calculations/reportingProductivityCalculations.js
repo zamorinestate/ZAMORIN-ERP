@@ -439,9 +439,7 @@ function canEditSavedItem(doc, auth) {
   if (!auth || String(auth.role || '').toUpperCase() === 'STAFF') {
     return false; // STAFF cannot edit any enterprise saved view
   }
-  const isPrimaryMaster =
-    Boolean(auth.isPrimaryMaster) ||
-    (String(auth.role || '').toUpperCase() === 'MASTER' && auth.userId === 'MU-0001');
+  const isPrimaryMaster = auth.isPrimaryMaster === true;
 
   // Owner of the document may always edit
   if (String(doc.ownerUserId).toUpperCase() === String(auth.userId).toUpperCase()) {

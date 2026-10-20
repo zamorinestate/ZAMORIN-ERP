@@ -51,7 +51,10 @@ class OnboardingMigrationController {
   async getOnboardingSummary(req, res, next) {
     try {
       assertAuthorizedPersona(req);
-      const organisationId = req.auth?.organisationId || 'ORG-ZAMORIN';
+      const organisationId = req.auth?.organisationId;
+      if (!organisationId) {
+        throw new ApiError(400, 'ORGANISATION_CONTEXT_REQUIRED', 'Organisation context is required.');
+      }
       const cafeId = req.params.cafeId || req.query.cafeId;
       if (cafeId) assertCafeScope(req, cafeId);
 
@@ -73,7 +76,10 @@ class OnboardingMigrationController {
   async previewOutletCopySettings(req, res, next) {
     try {
       assertAuthorizedPersona(req);
-      const organisationId = req.auth?.organisationId || 'ORG-ZAMORIN';
+      const organisationId = req.auth?.organisationId;
+      if (!organisationId) {
+        throw new ApiError(400, 'ORGANISATION_CONTEXT_REQUIRED', 'Organisation context is required.');
+      }
       const { sourceCafeId, destinationCafeId, sections } = req.body;
 
       assertCafeScope(req, destinationCafeId);
@@ -98,7 +104,10 @@ class OnboardingMigrationController {
   async executeOutletCopySettings(req, res, next) {
     try {
       assertWritePermission(req);
-      const organisationId = req.auth?.organisationId || 'ORG-ZAMORIN';
+      const organisationId = req.auth?.organisationId;
+      if (!organisationId) {
+        throw new ApiError(400, 'ORGANISATION_CONTEXT_REQUIRED', 'Organisation context is required.');
+      }
       const { sourceCafeId, destinationCafeId, sections, reason } = req.body;
 
       assertCafeScope(req, destinationCafeId);
@@ -126,7 +135,10 @@ class OnboardingMigrationController {
   async getCopyLogs(req, res, next) {
     try {
       assertAuthorizedPersona(req);
-      const organisationId = req.auth?.organisationId || 'ORG-ZAMORIN';
+      const organisationId = req.auth?.organisationId;
+      if (!organisationId) {
+        throw new ApiError(400, 'ORGANISATION_CONTEXT_REQUIRED', 'Organisation context is required.');
+      }
       const cafeId = req.query.cafeId;
       if (cafeId) assertCafeScope(req, cafeId);
 
@@ -148,7 +160,10 @@ class OnboardingMigrationController {
   async previewMigration(req, res, next) {
     try {
       assertWritePermission(req);
-      const organisationId = req.auth?.organisationId || 'ORG-ZAMORIN';
+      const organisationId = req.auth?.organisationId;
+      if (!organisationId) {
+        throw new ApiError(400, 'ORGANISATION_CONTEXT_REQUIRED', 'Organisation context is required.');
+      }
       const { domain, sourceFileName, sourceFormat, records, cafeId, idempotencyKey } = req.body;
       if (cafeId) assertCafeScope(req, cafeId);
 
@@ -176,7 +191,10 @@ class OnboardingMigrationController {
   async confirmMigration(req, res, next) {
     try {
       assertWritePermission(req);
-      const organisationId = req.auth?.organisationId || 'ORG-ZAMORIN';
+      const organisationId = req.auth?.organisationId;
+      if (!organisationId) {
+        throw new ApiError(400, 'ORGANISATION_CONTEXT_REQUIRED', 'Organisation context is required.');
+      }
       const { migrationRunId } = req.params;
       const { allowPartialCommit } = req.body || {};
 
@@ -201,7 +219,10 @@ class OnboardingMigrationController {
   async exportDomainCsv(req, res, next) {
     try {
       assertAuthorizedPersona(req);
-      const organisationId = req.auth?.organisationId || 'ORG-ZAMORIN';
+      const organisationId = req.auth?.organisationId;
+      if (!organisationId) {
+        throw new ApiError(400, 'ORGANISATION_CONTEXT_REQUIRED', 'Organisation context is required.');
+      }
       const { domain } = req.params;
       const cafeId = req.query.cafeId;
       if (cafeId) assertCafeScope(req, cafeId);

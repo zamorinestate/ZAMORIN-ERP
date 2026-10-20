@@ -150,7 +150,7 @@ async function registerEmployee(payload = {}, actor = {}) {
   try {
     const qrRecord = await UniversalQrService.createQrRecord({
       organisationId: organisationId.trim().toUpperCase(),
-      cafeId: primaryCafeId || (assignedCafeIds[0] || 'ZC-0001'),
+      cafeId: primaryCafeId || assignedCafeIds?.[0],
       qrType: 'EMPLOYEE_BADGE',
       targetEntityId: newUserId,
       targetEntityType: 'USER',
@@ -376,7 +376,7 @@ async function generateEmployeeBadgeQr(userId, actor = {}) {
       // Fallback create
       qrRecord = await UniversalQrService.createQrRecord({
         organisationId: organisationId.trim().toUpperCase(),
-        cafeId: employee.primaryCafeId || 'ZC-0001',
+        cafeId: employee.primaryCafeId,
         qrType: 'EMPLOYEE_BADGE',
         targetEntityId: employee.userId,
         targetEntityType: 'USER',
@@ -387,7 +387,7 @@ async function generateEmployeeBadgeQr(userId, actor = {}) {
   } else {
     qrRecord = await UniversalQrService.createQrRecord({
       organisationId: organisationId.trim().toUpperCase(),
-      cafeId: employee.primaryCafeId || 'ZC-0001',
+      cafeId: employee.primaryCafeId,
       qrType: 'EMPLOYEE_BADGE',
       targetEntityId: employee.userId,
       targetEntityType: 'USER',

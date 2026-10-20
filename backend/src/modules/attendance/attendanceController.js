@@ -494,11 +494,14 @@ const getRoster = asyncHandler(async (request, response) => {
   const { weekStartDate, cafeId: rawCafe } = request.query;
   ensureCafeOperationsAllowed(request);
 
-  let cafeId = rawCafe ? normalizeIdentifier(rawCafe) : (request.auth.assignedCafeIds?.[0] || 'ZC-0001');
+  let cafeId = rawCafe ? normalizeIdentifier(rawCafe) : (request.auth.assignedCafeIds?.[0] || request.auth.primaryCafeId);
   if (rawCafe) {
     ensureCafeAccess(request, cafeId);
   } else if (!['MASTER', 'OWNER'].includes(request.auth.role)) {
-    cafeId = request.auth.assignedCafeIds?.[0] || 'ZC-0001';
+    cafeId = request.auth.assignedCafeIds?.[0] || request.auth.primaryCafeId;
+  }
+  if (!cafeId) {
+    throw new ApiError(400, 'CAFE_ID_REQUIRED', 'A café must be specified to load or save a roster.');
   }
 
   const effectiveWeekStart = weekStartDate || getWeekStartDate(getIstBusinessDate());
@@ -520,11 +523,14 @@ const saveRoster = asyncHandler(async (request, response) => {
   const { cafeId: rawCafe, weekStartDate, assignments = [] } = request.body || {};
   ensureCafeOperationsAllowed(request);
 
-  let cafeId = rawCafe ? normalizeIdentifier(rawCafe) : (request.auth.assignedCafeIds?.[0] || 'ZC-0001');
+  let cafeId = rawCafe ? normalizeIdentifier(rawCafe) : (request.auth.assignedCafeIds?.[0] || request.auth.primaryCafeId);
   if (rawCafe) {
     ensureCafeAccess(request, cafeId);
   } else if (!['MASTER', 'OWNER'].includes(request.auth.role)) {
-    cafeId = request.auth.assignedCafeIds?.[0] || 'ZC-0001';
+    cafeId = request.auth.assignedCafeIds?.[0] || request.auth.primaryCafeId;
+  }
+  if (!cafeId) {
+    throw new ApiError(400, 'CAFE_ID_REQUIRED', 'A café must be specified to load or save a roster.');
   }
 
   let roster = await ShiftRoster.findOne({
@@ -922,7 +928,10 @@ const getServerTime = asyncHandler(async (request, response) => {
 
 // 10. GET /api/v1/attendance/policy
 const getStaffPolicy = asyncHandler(async (request, response) => {
-  const cafeId = normalizeIdentifier(request.query.cafeId) || (request.auth.assignedCafeIds && request.auth.assignedCafeIds[0]) || 'ZC-0001';
+  const cafeId = normalizeIdentifier(request.query.cafeId) || (request.auth.assignedCafeIds && request.auth.assignedCafeIds[0]) || request.auth.primaryCafeId;
+  if (!cafeId) {
+    throw new ApiError(400, 'CAFE_ID_REQUIRED', 'A café assignment is required to load the attendance policy.');
+  }
 
   return response.status(200).json({
     success: true,
@@ -978,7 +987,7 @@ const getStaffToday = asyncHandler(async (request, response) => {
     }
   } catch (e) {}
 
-  const cafeIdForShift = attendance?.cafeId || request.auth.primaryCafeId || (request.auth.assignedCafeIds && request.auth.assignedCafeIds[0]) || 'ZC-0001';
+  const cafeIdForShift = attendance?.cafeId || request.auth.primaryCafeId || (request.auth.assignedCafeIds && request.auth.assignedCafeIds[0]);
   let resolvedShift = null;
   try {
     resolvedShift = await resolveEmployeeShiftForDate({
@@ -1093,7 +1102,7 @@ const staffCheckIn = asyncHandler(async (request, response) => {
 
   // Authoritative café: derived strictly from validated QR challenge
   const resolvedCafeId = qrValidation.resolvedCafeId || normalizeIdentifier(rawCafeId);
-  const cafeId = resolvedCafeId || request.auth.primaryCafeId || (request.auth.assignedCafeIds && request.auth.assignedCafeIds[0]) || 'ZC-0001';
+  const cafeId = resolvedCafeId || request.auth.primaryCafeId || (request.auth.assignedCafeIds && request.auth.assignedCafeIds[0]);
   if (!cafeId) {
     throw new ApiError(400, 'CAFE_ID_REQUIRED', 'A cafeId must be provided.');
   }
@@ -1881,7 +1890,10 @@ const requestStaffCorrection = asyncHandler(async (request, response) => {
   }
 
   const businessDate = attendance ? attendance.businessDate : (rawDate || getIstBusinessDate());
-  const cafeId = attendance ? attendance.cafeId : (request.auth.primaryCafeId || request.auth.assignedCafeIds?.[0] || 'ZC-0001');
+  const cafeId = attendance ? attendance.cafeId : (request.auth.primaryCafeId || request.auth.assignedCafeIds?.[0]);
+  if (!cafeId) {
+    throw new ApiError(400, 'CAFE_ID_REQUIRED', 'A café assignment is required to request an attendance correction.');
+  }
 
   const requestId = await SequenceCounter.generateId({
     organisationId,

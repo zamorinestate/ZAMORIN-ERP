@@ -96,7 +96,7 @@ function resolveReportScope(req, queryParamsOrReportDef = {}, maybeReportDefinit
   }
 
   const role = String(auth.role || '').toUpperCase();
-  const isPrimaryMaster = Boolean(auth.isPrimaryMaster || (role === 'MASTER' && auth.userId === 'MU-0001'));
+  const isPrimaryMaster = auth.isPrimaryMaster === true;
   
   if (role === 'MASTER' && !isPrimaryMaster) {
     const err = new Error('The Normal Master persona has been permanently retired.');

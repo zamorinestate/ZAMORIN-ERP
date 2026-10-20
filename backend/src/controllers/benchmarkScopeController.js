@@ -25,7 +25,10 @@ const listDecisions = asyncHandler(async (req, res) => {
     skip,
   } = req.query;
 
-  const organisationId = req.auth?.organisationId || req.user?.organisationId || 'ORG-ZAMORIN';
+  const organisationId = req.auth?.organisationId || req.user?.organisationId;
+  if (!organisationId) {
+    throw new ApiError(400, 'ORGANISATION_CONTEXT_REQUIRED', 'Organisation context is required.');
+  }
   const cafeId = req.auth?.cafeId || req.auth?.primaryCafeId || null;
 
   const records = await benchmarkScopeDecisionService.listScopeDecisions({
@@ -53,7 +56,10 @@ const listDecisions = asyncHandler(async (req, res) => {
  */
 const getDecisionById = asyncHandler(async (req, res) => {
   const { recordId } = req.params;
-  const organisationId = req.auth?.organisationId || req.user?.organisationId || 'ORG-ZAMORIN';
+  const organisationId = req.auth?.organisationId || req.user?.organisationId;
+  if (!organisationId) {
+    throw new ApiError(400, 'ORGANISATION_CONTEXT_REQUIRED', 'Organisation context is required.');
+  }
 
   const record = await benchmarkScopeDecisionService.getScopeDecision(recordId, {
     organisationId,
@@ -90,7 +96,10 @@ const updateDecision = asyncHandler(async (req, res) => {
  * Computes coverage statistics across all 485 benchmark records.
  */
 const getStatistics = asyncHandler(async (req, res) => {
-  const organisationId = req.auth?.organisationId || req.user?.organisationId || 'ORG-ZAMORIN';
+  const organisationId = req.auth?.organisationId || req.user?.organisationId;
+  if (!organisationId) {
+    throw new ApiError(400, 'ORGANISATION_CONTEXT_REQUIRED', 'Organisation context is required.');
+  }
 
   const stats = await benchmarkScopeDecisionService.getScopeStatistics(organisationId);
 

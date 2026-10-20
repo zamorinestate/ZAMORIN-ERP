@@ -34,7 +34,7 @@ class SupplierPriceVarianceService {
    * @returns {Promise<Object>} Summary and item-level price variance report
    */
   static async analyzePriceVariances({
-    organisationId = 'ZAMORIN',
+    organisationId,
     cafeId = null,
     days = 60,
     vendorId = null,
@@ -210,11 +210,14 @@ class SupplierPriceVarianceService {
   static async checkLineItemPriceVariance({
     itemId,
     proposedUnitPricePaisa,
-    organisationId = 'ZAMORIN',
+    organisationId,
     vendorId = null,
   }) {
     const cleanItem = String(itemId || '').trim().toUpperCase();
-    const cleanOrg = String(organisationId || 'ZAMORIN').trim().toUpperCase();
+    if (!organisationId) {
+      throw new ApiError(400, 'VALIDATION_FAILED', 'organisationId is required.');
+    }
+    const cleanOrg = String(organisationId).trim().toUpperCase();
     const cleanVendor = vendorId ? String(vendorId).trim().toUpperCase() : null;
     const proposedRate = Math.max(0, Number(proposedUnitPricePaisa || 0));
 

@@ -19,6 +19,20 @@ const SalesForecastingService = require('../services/salesForecastingService');
 const StockoutRiskService = require('../services/stockoutRiskService');
 const SupplierPriceVarianceService = require('../services/supplierPriceVarianceService');
 const BusinessExplanationService = require('../services/businessExplanationService');
+const { ApiError } = require('../utils/ApiError');
+
+/**
+ * Resolve the organisation scope for a forecast handler.
+ * Identity comes only from the authenticated user — never from request
+ * parameters or a hardcoded fallback (fail closed when absent).
+ */
+function resolveOrganisationId(user) {
+  const organisationId = user?.organisationId;
+  if (!organisationId) {
+    throw new ApiError(400, 'ORGANISATION_CONTEXT_REQUIRED', 'Organisation context is required.');
+  }
+  return organisationId;
+}
 
 function resolveCafeScope(request, requestedCafeId) {
   const user = request.auth || request.user;
@@ -77,7 +91,7 @@ class ForecastController {
         });
       }
 
-      const organisationId = user?.organisationId || body.organisationId || 'ZAMORIN';
+      const organisationId = resolveOrganisationId(user);
       const horizonDays = body.horizonDays ? Number(body.horizonDays) : 7;
       const method = body.method || 'DAY_OF_WEEK_SEASONAL';
       const observationWindowDays = body.observationWindowDays ? Number(body.observationWindowDays) : 28;
@@ -118,7 +132,7 @@ class ForecastController {
         });
       }
 
-      const organisationId = user?.organisationId || request.query.organisationId || 'ZAMORIN';
+      const organisationId = resolveOrganisationId(user);
       const latest = await SalesForecastingService.getLatestForecast({
         organisationId,
         cafeId,
@@ -151,7 +165,7 @@ class ForecastController {
         });
       }
 
-      const organisationId = user?.organisationId || request.query.organisationId || 'ZAMORIN';
+      const organisationId = resolveOrganisationId(user);
       const limit = Number(request.query.limit) || 20;
 
       const history = await SalesForecastingService.listForecastHistory({
@@ -196,7 +210,7 @@ class ForecastController {
         });
       }
 
-      const organisationId = user?.organisationId || body.organisationId || 'ZAMORIN';
+      const organisationId = resolveOrganisationId(user);
       const holdoutDays = body.holdoutDays ? Number(body.holdoutDays) : 7;
       const observationWindowDays = body.observationWindowDays ? Number(body.observationWindowDays) : 28;
 
@@ -235,7 +249,7 @@ class ForecastController {
         });
       }
 
-      const organisationId = user?.organisationId || request.query.organisationId || 'ZAMORIN';
+      const organisationId = resolveOrganisationId(user);
       const limit = Number(request.query.limit) || 20;
 
       const history = await SalesForecastingService.listEvaluationHistory({
@@ -271,7 +285,7 @@ class ForecastController {
         });
       }
 
-      const organisationId = user?.organisationId || request.query.organisationId || 'ZAMORIN';
+      const organisationId = resolveOrganisationId(user);
       const horizonDays = Number(request.query.horizonDays) || 14;
       const category = request.query.category || null;
 
@@ -309,7 +323,7 @@ class ForecastController {
         });
       }
 
-      const organisationId = user?.organisationId || request.query.organisationId || 'ZAMORIN';
+      const organisationId = resolveOrganisationId(user);
       const days = Number(request.query.days) || 60;
       const vendorId = request.query.vendorId || null;
       const itemId = request.query.itemId || null;
@@ -362,7 +376,7 @@ class ForecastController {
         });
       }
 
-      const organisationId = user?.organisationId || body.organisationId || 'ZAMORIN';
+      const organisationId = resolveOrganisationId(user);
       const questionKey = body.questionKey;
 
       const answer = await BusinessExplanationService.queryBusinessAnalysis({

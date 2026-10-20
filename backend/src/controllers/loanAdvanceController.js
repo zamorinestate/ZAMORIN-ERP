@@ -157,7 +157,10 @@ const requestLoan = asyncHandler(async (request, response) => {
 
   const count = await StaffLoanAdvance.countDocuments({ organisationId });
   const loanAdvanceId = `LN-2026-${String(count + 1).padStart(4, '0')}`;
-  const cafeId = assignedCafeIds?.[0] || 'ZC-0001';
+  const cafeId = assignedCafeIds?.[0] || request.auth.primaryCafeId;
+  if (!cafeId) {
+    throw new ApiError(400, 'CAFE_ID_REQUIRED', 'A café assignment is required for a loan or advance request.');
+  }
 
   const monthlyInstalmentPaise = Math.floor(amountPaise / Math.max(1, parseInt(tenureMonths, 10)));
 
@@ -201,7 +204,10 @@ const requestSalaryAdvance = asyncHandler(async (request, response) => {
 
   const count = await StaffLoanAdvance.countDocuments({ organisationId });
   const loanAdvanceId = `ADV-2026-${String(count + 1).padStart(4, '0')}`;
-  const cafeId = assignedCafeIds?.[0] || 'ZC-0001';
+  const cafeId = assignedCafeIds?.[0] || request.auth.primaryCafeId;
+  if (!cafeId) {
+    throw new ApiError(400, 'CAFE_ID_REQUIRED', 'A café assignment is required for a loan or advance request.');
+  }
 
   const advance = await StaffLoanAdvance.create({
     loanAdvanceId,

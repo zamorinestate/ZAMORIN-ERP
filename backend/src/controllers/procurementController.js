@@ -2464,7 +2464,10 @@ const createPurchaseRequisition = asyncHandler(async (request, response) => {
   }
 
   const effectiveCafe = resolveEffectiveCafeScope(request);
-  const cafeId = effectiveCafe || normalizeId(rawCafeId) || 'ZC-0001';
+  const cafeId = effectiveCafe || normalizeId(rawCafeId);
+  if (!cafeId) {
+    throw new ApiError(400, 'CAFE_ID_REQUIRED', 'A café must be specified for the requisition.');
+  }
   assertCafeAccess(request, cafeId);
 
   const datePart = getIstBusinessDate().replace(/-/g, '');
