@@ -1,5 +1,5 @@
-version: '3.8'
-
+# NOTE: no top-level `version:` key — it is obsolete in Compose v2 and emits a
+# warning ("the attribute `version` is obsolete").
 services:
   mongodb:
     image: mongo:7.0
@@ -18,6 +18,19 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    container_name: zamorin-redis
+    restart: always
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: .
@@ -31,6 +44,10 @@ services:
       PORT: 4000
       TZ: Asia/Kolkata
       MONGODB_URI: mongodb://mongodb:27017/zamorin_cafe_erp?replicaSet=rs0
+      # NODE_ENV=production enables cluster mode, which hard-requires a real
+      # Redis (redisClientFactory.validateClusterRequirements throws
+      # CLUSTER_REDIS_CONFIG_MISSING otherwise). In-memory fallback is forbidden.
+      REDIS_URL: redis://redis:6379
       ALLOWED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,${PRODUCTION_FRONTEND_URL:-http://localhost:3000}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-zamorin_production_access_secret_32_chars_min}
       MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
@@ -42,6 +59,8 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+      redis:
+        condition: service_healthy
 
   frontend:
     image: caddy:2-alpine
@@ -50,8 +69,9 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - ./Frontend:/usr/share/caddy
+      - ./frontend:/usr/share/caddy:ro
     command: caddy file-server --listen :3000
 
 volumes:
   mongo_data:
+  redis_data:

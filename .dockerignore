@@ -1,0 +1,48 @@
+# Build context exclusions — Zamorin Cafe ERP
+#
+# Most important entry: backend/node_modules. Without it, `COPY backend ./backend`
+# overwrites the image's own node_modules with the host's build, which is
+# frequently a different platform/ABI and breaks native modules (bcrypt).
+
+**/node_modules
+**/.git
+
+# Secrets must never enter the build context.
+backend/.env
+backend/.env.*
+!backend/.env.example
+!backend/.env.production.example
+
+# Test and QA output — not needed at runtime.
+backend/test
+backend/tests
+backend/test-results
+backend/test_files_audit.json
+backend/test_summary.json
+**/*.test.js
+**/__tests__
+
+# Native clients are built by separate CI jobs, not this image.
+Platform
+
+# Repo noise.
+docs
+artifacts
+scripts
+*.md
+*.xlsx
+*.json
+!backend/package.json
+!backend/package-lock.json
+
+# The full frontend is served by the caddy container in docker-compose.yml,
+# not by this image. Only the logo SVG referenced by companyIdentityService.js
+# is pulled in explicitly via COPY, so everything else under frontend/ is
+# dropped (~26MB). Docker cannot re-include a path beneath a directory that is
+# excluded outright, hence the layer-by-layer negation below.
+frontend/*
+!frontend/src
+frontend/src/*
+!frontend/src/assets
+frontend/src/assets/*
+!frontend/src/assets/zamorin-logo-horizontal.svg
