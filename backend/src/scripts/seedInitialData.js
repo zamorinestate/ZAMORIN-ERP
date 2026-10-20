@@ -4,6 +4,8 @@ require('dotenv').config({
   quiet: true,
 });
 
+const crypto = require('crypto');
+
 const {
   connectDatabase,
   disconnectDatabase,
@@ -790,122 +792,6 @@ async function seedPermissionRules({
   }
 }
 
-async function runSeed() {
-  try {
-    const environment =
-      loadEnvironment();
-
-    const organisationId =
-      normalizeIdentifier(
-        requireEnvironmentValue(
-          'INITIAL_ORGANISATION_ID'
-        )
-      );
-
-    const masterName =
-      requireEnvironmentValue(
-        'INITIAL_MASTER_NAME'
-      );
-
-    const masterEmail =
-      normalizeEmail(
-        requireEnvironmentValue(
-          'INITIAL_MASTER_EMAIL'
-        )
-      );
-
-    const masterPassword =
-      requireEnvironmentValue(
-        'INITIAL_MASTER_PASSWORD'
-      );
-
-    await connectDatabase({
-      uri: environment.mongodbUri,
-      serverSelectionTimeoutMs:
-        environment
-          .mongodbServerSelectionTimeoutMs,
-      maxPoolSize:
-        environment.mongodbMaxPoolSize,
-      minPoolSize:
-        environment.mongodbMinPoolSize,
-    });
-
-    const masterUser =
-      await seedMasterUser({
-        organisationId,
-        masterName,
-        masterEmail,
-        masterPassword,
-      });
-
-    await seedPermissionRules({
-      organisationId,
-      masterUserId:
-        masterUser.userId,
-    });
-
-    await seedSystemCommunicationSettings({
-      organisationId,
-      masterEmail,
-    });
-
-    const isMinimalSeed = process.env.SEED_MINIMAL === 'true' || process.env.SEED_DEMO_DATA === 'false';
-
-    if (!isMinimalSeed) {
-      await seedDepartmentOrdersData({
-        organisationId,
-        masterUserId: masterUser.userId,
-      });
-
-      await seedWorkforceData({
-        organisationId,
-        masterUserId: masterUser.userId,
-      });
-
-      await seedExpensePolicyData({
-        organisationId,
-        masterUserId: masterUser.userId,
-      });
-
-      await seedFinanceData({
-        organisationId,
-        masterUserId: masterUser.userId,
-      });
-
-      await seedInventoryData({
-        organisationId,
-        masterUserId: masterUser.userId,
-      });
-
-      await seedCafeOperationsData({
-        organisationId,
-        masterUserId: masterUser.userId,
-      });
-    } else {
-      await seedExpensePolicyData({
-        organisationId,
-        masterUserId: masterUser.userId,
-      });
-      await seedCafeOperationsData({
-        organisationId,
-        masterUserId: masterUser.userId,
-      });
-    }
-
-    console.log(
-      'Initial backend data seeded successfully.'
-    );
-  } catch (error) {
-    console.error(
-      `Initial data seed failed: ${error.message}`
-    );
-
-    process.exitCode = 1;
-  } finally {
-    await disconnectDatabase();
-  }
-}
-
 async function seedSystemCommunicationSettings({ organisationId, masterEmail }) {
   const { SystemCommunicationSettings } = require('../models/SystemCommunicationSettings');
   let settings = await SystemCommunicationSettings.findOne({ organisationId });
@@ -1453,7 +1339,6 @@ async function seedCafeOperationsData(orgOrObj, mUserId) {
   const bcrypt = require('bcrypt');
 
   // 0. Seed Active Cafes with 6-digit Operations PIN
-  const crypto = require('crypto');
   const defaultCafePin = process.env.INITIAL_CAFE_PIN || crypto.randomInt(100000, 999999).toString();
   const defaultCafePinHash = await bcrypt.hash(defaultCafePin, 10);
 
