@@ -140,6 +140,10 @@ Because the engine queries in reverse chronological order with catalogue fallbac
   - `dateFrom`: ISO Date `YYYY-MM-DD`
   - `dateTo`: ISO Date `YYYY-MM-DD`
   - `cafeId`: Specific café identifier (or omitted for all authorized cafés)
+- **Period scoping**: `dateFrom`/`dateTo` filter on `Bill.businessDate` (the IST calendar day the
+  sale belongs to), **not** `createdAt` — a bill rung up at 23:59 IST still belongs to that
+  business day. This matches how the rest of the reporting engine scopes periods. Purchase-order
+  *rate* precedence remains ordered by PO `createdAt` (latest PO wins).
 - **Response Structure**:
 ```json
 {
@@ -157,6 +161,8 @@ Because the engine queries in reverse chronological order with catalogue fallbac
     "costPerUnitPaisa": 6250,
     "costPerUnit": 62.50,
     "totalUnitsSold": 2000,
+    "pricedUnitsSold": 1950,
+    "costCoveragePct": 97.5,
     "grossSalesPaisa": 45000000,
     "grossSales": 450000.00,
     "netSalesPaisa": 45000000,
@@ -180,8 +186,26 @@ Because the engine queries in reverse chronological order with catalogue fallbac
   }
 }
 ```
+- **Cost coverage**: `costCoveragePct` is the share of sold units whose recipe/SKU could be priced
+  from a real cost source. Below `100` means the COGS figure is *understated* (unpriced lines
+  contribute ₹0 cost) — read it alongside `cogs` before trusting a margin percentage.
 
-### 2. Universal Corporate Export (ZURF v1) P&L Statement Integration
+### 2. Finance Analytics P&L & Waterfall (`GET /api/v1/reports/finance`)
+`plStatement` and the `waterfall` array consume the same engine (via the honest gate
+`deriveFinanceCogsBlock`):
+- **With real sales AND a real cost basis**: `plStatement.cogs` is populated,
+  `cogsStatus: "AVAILABLE (Basis: LAST_PO_PRICE, ESTIMATED)"`, `cogsAvailability: "ESTIMATED"`,
+  `grossProfit = Net Sales − COGS`, `grossMarginPct` derived, `primeCost = COGS + Gross Payroll`
+  (`PARTIAL_SOURCE`, because labour excludes employer statutory overheads), and the waterfall's
+  *Cost of Goods (COGS)* row is a real negative deduction with the estimate basis disclosed.
+- **Without a cost basis** (no PO rate, no catalogue cost, no recipe): everything stays
+  `null` / `UNAVAILABLE` and the waterfall row stays `null` — never a fabricated `₹0`, which would
+  silently report a 100 % gross margin. The reason is exposed
+  (`NO_SALES_IN_PERIOD` / `NO_COST_BASIS` / `SOURCE_ERROR`).
+- The data-quality warnings shift from `COGS_UNAVAILABLE_*` to
+  `COGS_ESTIMATED_LAST_PO_PRICE_NOT_A_POSTED_LEDGER` when the estimate is in use.
+
+### 3. Universal Corporate Export (ZURF v1) P&L Statement Integration
 In `POST /api/v1/reports/export` with `reportId: "pl-statement"`:
 - **Cost of Goods Sold (COGS)**: Populated with `-₹XX,XXX.XX`, `actuality: "ESTIMATED"`, `status: "AVAILABLE (Basis: LAST_PO_PRICE)"`.
 - **Gross Profit**: Populated with `Net Sales - COGS`, `actuality: "ESTIMATED"`, `status: "AVAILABLE (Basis: LAST_PO_PRICE)"`.
@@ -193,7 +217,7 @@ In `POST /api/v1/reports/export` with `reportId: "pl-statement"`:
 
 The implementation is verified by an automated integration test suite:
 - **Test File**: `backend/test/cogsReportIntegration.test.js`
-- **Results**: 8/8 test cases passing (0 failures):
+- **Results**: 10/10 test cases passing (0 failures):
   1. Latest PO unit price precedence over catalogue baseline (`LAST_PO_PRICE`).
   2. Un-ordered catalogue standard fallback (`CATALOGUE_STANDARD`).
   3. Recipe BOM explosion with sub-recipe recursion and yield loss factor.
@@ -201,4 +225,6 @@ The implementation is verified by an automated integration test suite:
   5. Controller endpoint `GET /api/v1/reports/cogs` returns 200 with structured data.
   6. Role authorization: `MASTER`, `OWNER`, `CAFE_ADMIN` allowed; `STAFF` rejected.
   7. ZURF P&L Statement export reflects estimated COGS, Gross Profit, and EBITDA.
-  8. Full regression verification against `npm run test:backend` (551/551 tests pass).
+  8. `/reports/finance` P&L + waterfall derive COGS/gross profit from real cost data.
+  8b. `/reports/finance` stays honestly `UNAVAILABLE` when the sale cannot be priced.
+  9. Full regression verification against `npm --prefix backend test` (canonical 551/551).

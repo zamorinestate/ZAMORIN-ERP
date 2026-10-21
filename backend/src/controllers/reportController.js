@@ -20,7 +20,7 @@ const { Payslip } = require('../models/Payslip');
 const { RegisterSession } = require('../models/RegisterSession');
 const { MetricsService, METRICS_DICTIONARY } = require('../services/metricsService');
 const { ZurfService, COMPANY_CONFIG, getCompanyConfig, sanitizeCsvCell } = require('../services/zurfService');
-const { calculateCogs } = require('../services/cogsService');
+const { calculateCogs, deriveFinanceCogsBlock } = require('../services/cogsService');
 const { asyncHandler } = require('../utils/asyncHandler');
 const { ApiError } = require('../utils/ApiError');
 const { resolveEffectiveCafeScope, assertResourceCafeOwnership } = require('../utils/cafeScope');
@@ -679,6 +679,15 @@ const getFinanceAnalytics = asyncHandler(async (request, response) => {
     const ebitda = Number((netRevenue - totalOpex).toFixed(2));
     const ebitdaMarginPct = netRevenue > 0 ? Number(((ebitda / netRevenue) * 100).toFixed(1)) : 0;
 
+    // SCR-022 / Issue #2: honest COGS — null/UNAVAILABLE unless real sales + cost basis exist.
+    const cogsBlock = await deriveFinanceCogsBlock({
+      organisationId: baseFilter.organisationId,
+      cafeScope: baseFilter.cafeId || null,
+      dateFrom: dateFilters.dateFrom,
+      dateTo: dateFilters.dateTo,
+    });
+    const hasCogs = cogsBlock.available === true;
+
     return response.status(200).json({
       success: true,
       data: {
@@ -687,10 +696,12 @@ const getFinanceAnalytics = asyncHandler(async (request, response) => {
           discounts,
           refunds,
           netRevenue,
-          cogs: null,
-          cogsStatus: 'UNAVAILABLE',
-          grossProfit: null,
-          grossMarginPct: null,
+          cogs: hasCogs ? cogsBlock.cogs : null,
+          cogsStatus: hasCogs ? 'AVAILABLE (Basis: LAST_PO_PRICE, ESTIMATED)' : 'UNAVAILABLE',
+          grossProfit: hasCogs ? Number((netRevenue - cogsBlock.cogs).toFixed(2)) : null,
+          grossMarginPct: hasCogs && netRevenue > 0
+            ? Number((((netRevenue - cogsBlock.cogs) / netRevenue) * 100).toFixed(2))
+            : null,
           operatingExpenses: { labour, rent, utilities, maintenance: 0, packagingAndConsumables: 0, other: 0, totalOpex },
           ebitda,
           ebitdaMarginPct,
@@ -699,7 +710,12 @@ const getFinanceAnalytics = asyncHandler(async (request, response) => {
           { label: 'Gross Revenue', value: grossRevenue, isTotal: true },
           { label: 'Discounts & Refunds', value: -Number((discounts + refunds).toFixed(2)), isTotal: false },
           { label: 'Net Revenue', value: netRevenue, isTotal: true },
-          { label: 'Cost of Goods (COGS)', value: 0, note: 'UNAVAILABLE — Canonical cost-posting source not implemented', isTotal: false },
+          { label: 'Cost of Goods (COGS)',
+            value: hasCogs ? -Number(cogsBlock.cogs.toFixed(2)) : 0,
+            note: hasCogs
+              ? `Estimated on ${cogsBlock.cogsBasis} basis (not a posted cost ledger)`
+              : `UNAVAILABLE — ${cogsBlock.reason}`,
+            isTotal: false },
           { label: 'Labour & Payroll', value: -labour, isTotal: false },
           { label: 'Rent & Utilities', value: -Number((rent + utilities).toFixed(2)), isTotal: false },
           { label: 'Store Operating Profit (EBITDA)', value: ebitda, isTotal: true },

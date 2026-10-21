@@ -15,6 +15,8 @@
  *  5. Role-based authorization: MASTER, OWNER, CAFE_ADMIN authorized; STAFF denied.
  *  6. ZURF P&L Statement export: Reflects estimated COGS and Gross Profit instead of UNAVAILABLE.
  *  7. Historical / Pre-cutover fallback: Items without PO history safely use catalogue standard.
+ *  8. /reports/finance P&L + waterfall consume the COGS engine (ESTIMATED, basis disclosed),
+ *     and stay honestly UNAVAILABLE when the sale cannot be priced from any cost source.
  */
 
 const test = require('node:test');
@@ -463,5 +465,139 @@ test('COGS Engine & Product Margin Integration Suite (SCR-022 / Issue #2)', asyn
     assert.equal(result.statusCode, 200, 'P&L Statement export must generate successfully');
     assert.equal(result.data.success, true);
     assert.ok(result.data.data.runId);
+  });
+
+  // ── 8. /reports/finance P&L + WATERFALL CONSUME REAL COGS ────────────────
+  await suite.test('8. GET /reports/finance derives COGS, gross profit & waterfall from real cost data', async () => {
+    // beforeEach wiped the fixture tables — re-seed a minimal cost basis + sale
+    await GlobalInventoryItem.create({
+      organisationId: orgId,
+      itemId: 'INV-COFFEE-POWDER',
+      sku: 'SKU-COFFEE-POWDER',
+      name: 'Signature Roast Coffee Powder',
+      category: 'COFFEE_BEANS',
+      baseUnit: 'kg',
+      unitCostPaisa: 2000,
+      createdByUserId: 'MU-0001',
+      status: 'ACTIVE',
+    });
+
+    await Recipe.create({
+      organisationId: orgId,
+      recipeId: 'RCP-0020',
+      name: 'House Brew Coffee',
+      version: 1,
+      batchYield: 1,
+      createdByUserId: 'MU-0001',
+      ingredients: [{
+        inventoryItemId: 'INV-COFFEE-POWDER',
+        ingredientName: 'Signature Roast Coffee Powder',
+        quantity: 1,
+        uom: 'PORTION',
+        lossFactorPercent: 0,
+      }],
+    });
+
+    await MenuItem.create({
+      organisationId: orgId,
+      menuItemId: 'MENU-02',
+      name: 'House Brew Coffee',
+      nameLower: 'house brew coffee',
+      category: 'COFFEE',
+      currentPricePaisa: 15000,
+      primaryRecipeId: 'RCP-0020',
+      createdByUserId: 'MU-0001',
+    });
+
+    await Bill.create({
+      organisationId: orgId,
+      cafeId,
+      billId: 'BILL-20261015-0101',
+      businessDate: '2026-10-15',
+      cashierUserId: 'CA-0001',
+      status: 'COMPLETED',
+      subtotalPaisa: 30000,
+      grandTotalPaisa: 30000,
+      totalPaisa: 30000,
+      lineItems: [{
+        menuItemId: 'MENU-02',
+        itemNameSnapshot: 'House Brew Coffee',
+        quantity: 2,
+        unitPricePaisa: 15000,
+        lineSubtotalPaisa: 30000,
+        totalLinePaisa: 30000,
+      }],
+    });
+
+    const { req, res, getResult } = buildMockReqRes('MASTER', {}, { cafeId });
+    await reportController.getFinanceAnalytics(req, res);
+    const result = getResult();
+
+    assert.equal(result.statusCode, 200);
+    const pnl = result.data.data.plStatement;
+
+    assert.equal(pnl.cogsStatus, 'AVAILABLE (Basis: LAST_PO_PRICE, ESTIMATED)');
+    assert.equal(pnl.cogsAvailability, 'ESTIMATED');
+    assert.equal(pnl.cogsBasis, 'LAST_PO_PRICE');
+    assert.equal(pnl.cogs, 40, 'COGS 2 units × ₹20.00 = ₹40.00');
+    assert.equal(pnl.costCoveragePct, 100, 'Every sold unit was priced from a real cost source');
+    assert.notEqual(pnl.grossProfit, null, 'Gross profit must be derived once COGS is available');
+    assert.equal(
+      Number((pnl.grossProfit + pnl.cogs).toFixed(2)),
+      pnl.netRevenue,
+      'Gross profit + COGS must reconcile to net revenue',
+    );
+
+    const cogsRow = result.data.data.waterfall.find((w) => w.label === 'Cost of Goods (COGS)');
+    assert.ok(cogsRow, 'Waterfall must contain the COGS row');
+    assert.equal(cogsRow.value, -pnl.cogs, 'Waterfall COGS row is a real (negative) deduction');
+    assert.match(cogsRow.note, /LAST_PO_PRICE/, 'Waterfall row must disclose the estimate basis');
+
+    const warnings = result.data.dataQuality?.warnings || [];
+    assert.ok(
+      warnings.includes('COGS_ESTIMATED_LAST_PO_PRICE_NOT_A_POSTED_LEDGER'),
+      'Data quality must flag the estimated basis',
+    );
+    assert.ok(!warnings.includes('COGS_UNAVAILABLE_LEDGER_UNPOSTED'));
+  });
+
+  await suite.test('8b. GET /reports/finance stays honestly UNAVAILABLE without a cost basis', async () => {
+    // A sale exists, but nothing can price it (no PO rate, no catalogue cost, no recipe)
+    await Bill.create({
+      organisationId: orgId,
+      cafeId,
+      billId: 'BILL-20261016-0102',
+      businessDate: '2026-10-16',
+      cashierUserId: 'CA-0001',
+      status: 'COMPLETED',
+      subtotalPaisa: 10000,
+      grandTotalPaisa: 10000,
+      totalPaisa: 10000,
+      lineItems: [{
+        menuItemId: 'MENU-UNPRICED',
+        itemNameSnapshot: 'Unpriced Item',
+        quantity: 1,
+        unitPricePaisa: 10000,
+        lineSubtotalPaisa: 10000,
+        totalLinePaisa: 10000,
+      }],
+    });
+
+    const { req, res, getResult } = buildMockReqRes('MASTER', {}, { cafeId });
+    await reportController.getFinanceAnalytics(req, res);
+    const result = getResult();
+
+    assert.equal(result.statusCode, 200);
+    const pnl = result.data.data.plStatement;
+
+    assert.equal(pnl.cogs, null, 'Unpriceable sales must never yield a fabricated COGS figure');
+    assert.equal(pnl.cogsStatus, 'UNAVAILABLE');
+    assert.equal(pnl.grossProfit, null);
+    assert.equal(pnl.grossMarginPct, null);
+    assert.equal(pnl.primeCost, null);
+
+    const cogsRow = result.data.data.waterfall.find((w) => w.label === 'Cost of Goods (COGS)');
+    assert.equal(cogsRow.value, null, 'Waterfall COGS row stays null (not a fake 0)');
+    assert.match(cogsRow.note, /UNAVAILABLE/);
   });
 });

@@ -28,8 +28,9 @@
  * Preserved from PM-02F:
  *   - calculateSalesMetrics reuse (PM-02A/B/D canonical)
  *   - calculateProcurementMetrics reuse (PM-02E canonical)
- *   - ACTUAL_COGS = null / UNAVAILABLE
- *   - GROSS_PROFIT = null / UNAVAILABLE
+ *   - ACTUAL_COGS: null / UNAVAILABLE unless cogsService can price real sales
+ *     (SCR-022 / Issue #2 — ESTIMATED on LAST_PO_PRICE basis, never fabricated)
+ *   - GROSS_PROFIT: follows COGS availability (net sales − estimated COGS)
  *   - EBITDA = null / UNAVAILABLE
  *   - LABOUR_COST = PARTIAL_SOURCE (employer statutory overheads absent)
  *   - BANK_BALANCE = UNAVAILABLE
@@ -49,6 +50,7 @@ const { MarketplaceSettlement } = require('../../models/MarketplaceSettlement');
 const { DashboardTarget } = require('../../models/DashboardTarget');
 const { calculateSalesMetrics } = require('./salesCalculations');
 const { calculateProcurementMetrics } = require('./procurementCalculations');
+const { deriveFinanceCogsBlock } = require('../../services/cogsService');
 
 // ── Canonical Expense Category Exclusions ────────────────────────────────────
 // These categories are excluded from Operating Expenses to prevent double-counting
@@ -842,22 +844,55 @@ async function calculateFinanceMetrics({ organisationId, cafeScope, dateFrom, da
   };
 
   // ── §8  Partial P&L — Qualified Title (§27) ───────────────────────────────────
+  // SCR-022 / Issue #2: derive estimated COGS from real cost data (cogsService).
+  // Unavailable unless real sales lines AND a real cost basis exist — a fabricated
+  // ₹0 COGS would silently report a 100 % gross margin, which is worse than null.
+  const cogsBlock = await deriveFinanceCogsBlock({ organisationId, cafeScope, dateFrom, dateTo });
+  const hasCogs = cogsBlock.available === true;
+  const cogsPaisa = hasCogs ? cogsBlock.cogsPaisa : null;
+  const cogs = hasCogs ? cogsBlock.cogs : null;
+  const cogsBasisNote = hasCogs
+    ? `Estimated on ${cogsBlock.cogsBasis} basis (not a posted cost ledger)`
+    : `UNAVAILABLE — ${cogsBlock.reason}`;
+  // Gross profit uses THIS module's revenue base (net sales, after discounts & refunds).
+  const grossProfitPaisa = hasCogs ? (netSalesPaisa - cogsPaisa) : null;
+  const grossProfit = hasCogs ? Number((netRevenue - cogs).toFixed(2)) : null;
+  const grossProfitStatus = hasCogs ? 'ESTIMATED (Basis: LAST_PO_PRICE)' : AVAIL_UNAVAILABLE;
+  const grossMarginPct = hasCogs
+    ? (netSalesPaisa > 0 ? Number(((grossProfitPaisa / netSalesPaisa) * 100).toFixed(2)) : 0)
+    : null;
+  // Prime cost = COGS + gross payroll; labour is PARTIAL_SOURCE, so prime cost inherits it.
+  const primeCost = (hasCogs && labourInr !== null) ? Number((cogs + labourInr).toFixed(2)) : null;
+  const primeCostStatus = primeCost !== null
+    ? 'PARTIAL_SOURCE (Labour Excludes Employer Statutory Overheads)'
+    : AVAIL_UNAVAILABLE;
+
   const plStatement = {
     statementTitle:    'Profit & Loss — Partial Operational View',
-    statementSubtitle: 'Actual COGS, Gross Profit, Gross Margin, and EBITDA are UNAVAILABLE. ' +
-                       'Full labour cost is PARTIAL_SOURCE (employer statutory overheads absent).',
+    statementSubtitle: hasCogs
+      ? 'COGS is an ESTIMATE (LAST_PO_PRICE basis, not a posted cost ledger); Gross Profit and Prime Cost inherit that estimate. ' +
+        'Actual COGS, Gross Profit, Gross Margin and EBITDA from a posted cost ledger remain UNAVAILABLE. ' +
+        'Full labour cost is PARTIAL_SOURCE (employer statutory overheads absent).'
+      : 'Actual COGS, Gross Profit, Gross Margin, and EBITDA are UNAVAILABLE. ' +
+        'Full labour cost is PARTIAL_SOURCE (employer statutory overheads absent).',
     grossRevenue,
     discounts,
     refunds,
     netRevenue,
-    cogs:              null,
-    cogsStatus:        AVAIL_UNAVAILABLE,
-    cogsAvailability:  AVAIL_UNAVAILABLE,
-    grossProfit:       null,
-    grossProfitStatus: AVAIL_UNAVAILABLE,
-    grossMarginPct:    null,
-    primeCost:         null,
-    primeCostStatus:   AVAIL_UNAVAILABLE,
+    cogs,
+    cogsPaisa,
+    cogsStatus:        hasCogs ? 'AVAILABLE (Basis: LAST_PO_PRICE, ESTIMATED)' : AVAIL_UNAVAILABLE,
+    cogsAvailability:  hasCogs ? 'ESTIMATED' : AVAIL_UNAVAILABLE,
+    cogsBasis:         hasCogs ? cogsBlock.cogsBasis : null,
+    cogsBasisNote,
+    cogsIsApproximate: hasCogs ? cogsBlock.summary.isApproximate === true : false,
+    costCoveragePct:   hasCogs ? cogsBlock.costCoveragePct : null,
+    grossProfit,
+    grossProfitPaisa,
+    grossProfitStatus,
+    grossMarginPct,
+    primeCost,
+    primeCostStatus,
     operatingExpenses: {
       labour:                labourInr,
       labourLabel:           'Gross Employee Payroll (PARTIAL_SOURCE)',
@@ -877,18 +912,23 @@ async function calculateFinanceMetrics({ organisationId, cafeScope, dateFrom, da
   // knownOperatingResultInr: Net Revenue minus all known operating cost components.
   // When labourInr is null (payroll source error), we still report known components only,
   // excluding payroll from the deduction so the value remains a finite number.
+  // When COGS is available it is included in the deduction (labelled as an estimate).
   const knownLabourDeduction = labourInr !== null ? labourInr : 0;
-  const knownOperatingResultInr = Number((netRevenue - totalOpex - knownLabourDeduction).toFixed(2));
-  const knownOperatingResultNote = labourInr !== null
-    ? 'Net Revenue minus operating expenses & gross payroll (EBITDA is UNAVAILABLE)'
-    : 'Net Revenue minus operating expenses only (Gross Payroll is UNAVAILABLE — excluded from total; EBITDA is UNAVAILABLE)';
+  const knownCogsDeduction = hasCogs ? cogs : 0;
+  const knownOperatingResultInr = Number((netRevenue - totalOpex - knownLabourDeduction - knownCogsDeduction).toFixed(2));
+  const knownOperatingResultNote = [
+    'Net Revenue minus operating expenses & gross payroll',
+    hasCogs ? 'estimated COGS' : null,
+    labourInr === null ? '(Gross Payroll is UNAVAILABLE — excluded from total)' : null,
+    '(EBITDA is UNAVAILABLE)',
+  ].filter(Boolean).join(' ');
 
   const waterfall = [
     { label: 'Gross Revenue', value: grossRevenue, isTotal: true },
     { label: 'Discounts & Refunds', value: -Number((discounts + refunds).toFixed(2)), isTotal: false },
     { label: 'Net Revenue', value: netRevenue, isTotal: true },
-    { label: 'Cost of Goods (COGS)', value: null,
-      note: 'UNAVAILABLE — Canonical cost-posting source not implemented', isTotal: false },
+    { label: 'Cost of Goods (COGS)', value: hasCogs ? -cogs : null,
+      note: cogsBasisNote, isTotal: false },
     { label: 'Gross Payroll',
       value: labourInr !== null ? -labourInr : null,
       note: 'Gross employee earnings; employer statutory overheads not included',
@@ -917,9 +957,13 @@ async function calculateFinanceMetrics({ organisationId, cafeScope, dateFrom, da
   // ── §10  Data Quality & Provenance ──────────────────────────────────────────
   const dqWarnings = [
     ...(salesResult.dataQuality?.warnings || []),
-    'COGS_UNAVAILABLE_LEDGER_UNPOSTED',
+    hasCogs
+      ? 'COGS_ESTIMATED_LAST_PO_PRICE_NOT_A_POSTED_LEDGER'
+      : `COGS_UNAVAILABLE_${cogsBlock.reason}`,
     'LABOUR_COST_PARTIAL_SOURCE_EXCLUDES_EMPLOYER_CONTRIBUTIONS',
-    'EBITDA_UNAVAILABLE_DUE_TO_MISSING_COGS',
+    hasCogs
+      ? 'EBITDA_UNAVAILABLE_REQUIRES_DEPRECIATION_AND_INTEREST_LEDGERS'
+      : 'EBITDA_UNAVAILABLE_DUE_TO_MISSING_COGS',
     'BANK_BALANCE_UNAVAILABLE_MISSING_FEED',
     'DIRECT_GATEWAY_SETTLEMENTS_UNAVAILABLE',
   ];
@@ -992,6 +1036,7 @@ async function calculateFinanceMetrics({ organisationId, cafeScope, dateFrom, da
         'Bill', 'Expense', 'PayrollRun', 'Payslip',
         'RegisterSession', 'CashTransaction', 'MarketplaceSettlement',
         'APInvoice', 'DashboardTarget',
+        ...(hasCogs ? ['PurchaseOrder', 'GlobalInventoryItem', 'Recipe', 'MenuItem'] : []),
       ],
       cashSourceMatrix: {
         openingFloat:   'RegisterSession.openingFloatPaisa',

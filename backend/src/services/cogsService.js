@@ -23,6 +23,28 @@ const { PurchaseOrder } = require('../models/PurchaseOrder');
 const { GlobalInventoryItem } = require('../models/GlobalInventoryItem');
 
 /**
+ * Normalise a period boundary to the `YYYY-MM-DD` IST business-date format used by
+ * `Bill.businessDate`. Accepts `YYYY-MM-DD` (kept as-is) or anything Date-parseable
+ * (ISO timestamps etc. are truncated to their calendar day).
+ *
+ * @param {string|Date} value
+ * @returns {string|null}
+ */
+function toBusinessDateStr(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+    const parsed = new Date(trimmed);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
+  }
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString().slice(0, 10);
+  }
+  return null;
+}
+
+/**
  * Build a lookup map of the latest per-unit cost for each inventory item.
  * Preference order:
  *   1. Most recent PurchaseOrder line item unitPricePaisa (approved/received/active)
@@ -150,8 +172,8 @@ function resolveRecipeUnitCostPaisa(recipe, recipeMap, costMap, depth = 0) {
  * @param {Object} options
  * @param {string} options.organisationId
  * @param {string|string[]} [options.cafeScope]
- * @param {string} [options.dateFrom]
- * @param {string} [options.dateTo]
+ * @param {string} [options.dateFrom]  IST business date (YYYY-MM-DD) — Bill.businessDate, not createdAt
+ * @param {string} [options.dateTo]    IST business date (YYYY-MM-DD)
  * @returns {Promise<Object>}
  */
 async function calculateCogs({ organisationId, cafeScope, dateFrom, dateTo }) {
@@ -204,9 +226,15 @@ async function calculateCogs({ organisationId, cafeScope, dateFrom, dateTo }) {
     billMatch.cafeId = Array.isArray(cafeScope) ? { $in: cafeScope } : cafeScope;
   }
   if (dateFrom || dateTo) {
-    billMatch.createdAt = {};
-    if (dateFrom) billMatch.createdAt.$gte = new Date(dateFrom);
-    if (dateTo) billMatch.createdAt.$lte = new Date(dateTo);
+    // Business date (IST calendar day), not createdAt: a bill rung up at 23:59 IST still
+    // belongs to that business day, and the rest of the reporting engine scopes periods
+    // on businessDate. Matching on createdAt silently drops end-of-period sales.
+    const fromStr = toBusinessDateStr(dateFrom);
+    const toStr = toBusinessDateStr(dateTo);
+    billMatch.businessDate = {};
+    if (fromStr) billMatch.businessDate.$gte = fromStr;
+    if (toStr) billMatch.businessDate.$lte = toStr;
+    if (!fromStr && !toStr) delete billMatch.businessDate;
   }
 
   let bills = [];
@@ -220,6 +248,7 @@ async function calculateCogs({ organisationId, cafeScope, dateFrom, dateTo }) {
 
   let totalCogsPaisa = 0;
   let totalUnitsSold = 0;
+  let pricedUnitsSold = 0;
   let totalGrossSalesPaisa = 0;
   const itemAggregate = {};
 
@@ -239,6 +268,7 @@ async function calculateCogs({ organisationId, cafeScope, dateFrom, dateTo }) {
         const lineCogsPaisa = qty * unitCostPaisa;
 
         totalUnitsSold += qty;
+        if (unitCostPaisa > 0) pricedUnitsSold += qty;
         totalGrossSalesPaisa += lineRevenuePaisa;
         totalCogsPaisa += lineCogsPaisa;
 
@@ -284,6 +314,12 @@ async function calculateCogs({ organisationId, cafeScope, dateFrom, dateTo }) {
 
   const costPerUnitPaisa = totalUnitsSold > 0 ? Math.round(totalCogsPaisa / totalUnitsSold) : 0;
 
+  // Share of sold units whose recipe/SKU could be priced from a real cost source.
+  // Below 100 % means the COGS figure is understated (unpriced lines contribute ₹0 cost).
+  const costCoveragePct = totalUnitsSold > 0
+    ? Number(((pricedUnitsSold / totalUnitsSold) * 100).toFixed(2))
+    : 0;
+
   return {
     organisationId,
     cafeScope: cafeScope || 'ALL',
@@ -300,6 +336,8 @@ async function calculateCogs({ organisationId, cafeScope, dateFrom, dateTo }) {
     costPerUnitPaisa,
     costPerUnit: Number((costPerUnitPaisa / 100).toFixed(2)),
     totalUnitsSold,
+    pricedUnitsSold,
+    costCoveragePct,
     grossSalesPaisa: totalGrossSalesPaisa,
     grossSales: Number((totalGrossSalesPaisa / 100).toFixed(2)),
     netSalesPaisa: totalGrossSalesPaisa,
@@ -314,8 +352,69 @@ async function calculateCogs({ organisationId, cafeScope, dateFrom, dateTo }) {
   };
 }
 
+/**
+ * Honest COGS gate for finance views (/reports/finance P&L + waterfall).
+ *
+ * Returns `null` values (never a fabricated zero) unless the engine had BOTH
+ * real sales lines and a real cost basis for at least part of them — a ₹0 COGS
+ * against real sales would silently report a 100 % gross margin.
+ *
+ * @param {Object} options
+ * @param {string} options.organisationId
+ * @param {string|string[]} [options.cafeScope]
+ * @param {string} [options.dateFrom]
+ * @param {string} [options.dateTo]
+ * @returns {Promise<Object>} { available, reason, cogs, cogsPaisa, cogsStatus,
+ *   cogsBasis, cogsBasisNote, costCoveragePct, partialCoverage, grossMarginPct, summary }
+ */
+async function deriveFinanceCogsBlock({ organisationId, cafeScope, dateFrom, dateTo }) {
+  const unavailable = (reason) => ({
+    available: false,
+    reason,
+    cogs: null,
+    cogsPaisa: null,
+    cogsStatus: 'UNAVAILABLE',
+    cogsBasis: null,
+    cogsBasisNote: null,
+    costCoveragePct: null,
+    partialCoverage: false,
+    grossMarginPct: null,
+    summary: null,
+  });
+
+  if (!organisationId) return unavailable('ORGANISATION_CONTEXT_REQUIRED');
+
+  let summary;
+  try {
+    summary = await calculateCogs({ organisationId, cafeScope, dateFrom, dateTo });
+  } catch (_) {
+    return unavailable('SOURCE_ERROR');
+  }
+
+  if (!summary || summary.billCount <= 0) return unavailable('NO_SALES_IN_PERIOD');
+  // No priced cost for any sold unit → any number we print would be invented.
+  if (!(summary.cogsPaisa > 0) || !(summary.pricedUnitsSold > 0)) {
+    return unavailable('NO_COST_BASIS');
+  }
+
+  return {
+    available: true,
+    reason: null,
+    cogs: summary.cogs,
+    cogsPaisa: summary.cogsPaisa,
+    cogsStatus: 'AVAILABLE',
+    cogsBasis: summary.basis,
+    cogsBasisNote: summary.basisNote,
+    costCoveragePct: summary.costCoveragePct,
+    partialCoverage: summary.costCoveragePct < 100,
+    grossMarginPct: summary.grossMarginPct,
+    summary,
+  };
+}
+
 module.exports = {
   getLatestItemCostMap,
   resolveRecipeUnitCostPaisa,
   calculateCogs,
+  deriveFinanceCogsBlock,
 };
