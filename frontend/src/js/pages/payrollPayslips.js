@@ -110,7 +110,10 @@ function employeeOptions(users, selectedUserId = "") {
   `;
 }
 
-function integerInputs(fields, section, values = {}) {
+// Attendance is derived server-side from real Attendance / LeaveRequest /
+// HolidayCalendar records (create AND every draft patch overwrite whatever the
+// client sends), so it renders as read-only display and is never submitted.
+function derivedIntegerDisplay(fields, values = {}) {
   return fields
     .map(
       ([name, label]) => `
@@ -126,9 +129,11 @@ function integerInputs(fields, section, values = {}) {
             type="number"
             min="0"
             step="1"
-            name="${escapeHtml(section)}.${escapeHtml(name)}"
+            data-derived-attendance="${escapeHtml(name)}"
+            aria-readonly="true"
+            readonly
+            tabindex="-1"
             value="${escapeHtml(values?.[name] ?? 0)}"
-            required
             style="width:100%;"
           />
         </label>
@@ -348,10 +353,13 @@ function renderPayslipForm({
         <div style="color:var(--ink); font-weight:700; margin-bottom:10px;">
           Attendance
         </div>
+        <div style="color:var(--muted); font-size:11px; margin-bottom:10px;">
+          Derived by the backend from real attendance, leave and holiday
+          records — display only, and never submitted.
+        </div>
         <div class="flex gap-md" style="flex-wrap:wrap;">
-          ${integerInputs(
+          ${derivedIntegerDisplay(
             ATTENDANCE_FIELDS,
-            "attendanceSummary",
             attendance
           )}
         </div>
@@ -407,22 +415,6 @@ function eligibleEmployees(users, cafeId) {
   });
 }
 
-function parseWholeNumber(formData, fieldName, label) {
-  const raw = String(formData.get(fieldName) ?? "").trim();
-
-  if (!/^\d+$/.test(raw)) {
-    throw new Error(`${label} must be a whole number.`);
-  }
-
-  const value = Number(raw);
-
-  if (!Number.isSafeInteger(value) || value < 0) {
-    throw new Error(`${label} is outside the supported range.`);
-  }
-
-  return value;
-}
-
 function parseRupeesToPaise(formData, fieldName, label) {
   const raw = String(formData.get(fieldName) ?? "").trim();
 
@@ -445,19 +437,6 @@ function parseRupeesToPaise(formData, fieldName, label) {
   return rupees * 100 + paise;
 }
 
-function buildIntegerSection(formData, fields, section) {
-  return Object.fromEntries(
-    fields.map(([name, label]) => [
-      name,
-      parseWholeNumber(
-        formData,
-        `${section}.${name}`,
-        label
-      ),
-    ])
-  );
-}
-
 function buildMoneySection(formData, fields, section) {
   return Object.fromEntries(
     fields.map(([name, label]) => [
@@ -477,12 +456,9 @@ function buildPayslipBody(form, editing) {
     formData.get("notes") || ""
   ).trim();
 
+  // attendanceSummary is intentionally absent: the backend derives it from real
+  // attendance/leave/holiday records on create and re-derives it on every patch.
   const body = {
-    attendanceSummary: buildIntegerSection(
-      formData,
-      ATTENDANCE_FIELDS,
-      "attendanceSummary"
-    ),
     earnings: buildMoneySection(
       formData,
       EARNING_FIELDS,
@@ -503,7 +479,14 @@ function buildPayslipBody(form, editing) {
       .trim()
       .toUpperCase();
 
-    if (!/^(MU|OW|AD|ST)-\d{4,}$/.test(employeeUserId)) {
+    // Mirrors backend `EMPLOYEE_USER_ID_PATTERN` (Payslip.js / User.js): staff
+    // onboarded through employeeService get EMP-ZC-* ids and vendor portal users
+    // get VU-* ids — rejecting them here made those employees unpayable.
+    if (
+      !/^((MU|OW|AD|ST|VU)-\d{4,}|EMP-ZC-\d{4,})$/.test(
+        employeeUserId
+      )
+    ) {
       throw new Error("Select a valid employee.");
     }
 
