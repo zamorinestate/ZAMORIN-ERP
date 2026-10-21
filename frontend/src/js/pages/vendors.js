@@ -1925,8 +1925,9 @@ export function wireVendors(container, subroute) {
           const res = await apiPatch(`/api/v1/vendors/${vendorId}`, payload);
           if (res?.success) {
             showToast(`Supplier ${vendorId} updated successfully.`, "success");
-            Object.assign(vendor, payload);
-            updateContainer();
+            // Repaint from the server document instead of echoing our own payload
+            // (the backend may normalise/trim values we just sent).
+            await refreshFinancialViews();
           } else {
             showToast(res?.message || "Failed to update supplier.", "error");
           }
@@ -1956,9 +1957,9 @@ export function wireVendors(container, subroute) {
           try {
             const res = await apiPost(`/api/v1/vendors/${vendorId}/status`, { status: nextStatus });
             if (res?.success) {
-              vendor.status = nextStatus;
               showToast(`Supplier ${vendorId} status changed to ${nextStatus}.`, "success");
-              updateContainer();
+              // Server confirmed → reload the directory rather than trusting a local echo.
+              await refreshFinancialViews();
             } else {
               showToast(res?.message || "Failed to update status.", "error");
             }
