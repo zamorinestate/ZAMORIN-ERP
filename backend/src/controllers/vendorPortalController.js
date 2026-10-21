@@ -13,6 +13,7 @@
 const { Vendor } = require('../models/Vendor');
 const { PurchaseOrder } = require('../models/PurchaseOrder');
 const { VendorLedgerEntry } = require('../models/VendorLedgerEntry');
+const { CompanyIdentityService } = require('../services/companyIdentityService');
 const ApiError = require('../utils/ApiError');
 
 const ISSUED_PO_STATUSES = [
@@ -28,12 +29,60 @@ const ISSUED_PO_STATUSES = [
   'CLOSED',
 ];
 
-function maskSensitiveText(text, visibleEndChars = 4) {
-  if (!text || typeof text !== 'string') return '';
-  const trimmed = text.trim();
-  if (trimmed.length <= visibleEndChars) return trimmed;
-  const maskedLength = trimmed.length - visibleEndChars;
-  return '*'.repeat(maskedLength) + trimmed.slice(-visibleEndChars);
+/**
+ * PAN masking — keeps the first 5 characters and the final character,
+ * e.g. AAECM1234F → AAECM••••F (matches the canonical portal fixture format).
+ */
+function maskPanValue(pan) {
+  const value = String(pan || '').trim().toUpperCase();
+  if (!value) return '';
+  if (value.length <= 6) return '•'.repeat(value.length);
+  return value.slice(0, 5) + '•'.repeat(value.length - 6) + value.slice(-1);
+}
+
+/**
+ * Bank account masking — bullet groups + last 4 digits,
+ * e.g. 123456789012 → •••• •••• •••• 9012.
+ */
+function maskAccountValue(accountNumber) {
+  const value = String(accountNumber || '').trim().replace(/\s+/g, '');
+  if (!value) return '';
+  if (value.length <= 4) return '•'.repeat(value.length);
+  const hiddenGroups = (value.slice(0, -4).match(/.{1,4}/g) || []).map(() => '••••');
+  return [...hiddenGroups, value.slice(-4)].join(' ');
+}
+
+/** Flatten an address sub-document into a single display line. */
+function formatAddress(address) {
+  if (!address || typeof address !== 'object') return null;
+  const line = [address.line1, address.line2, address.city, address.state, address.pincode, address.country]
+    .map((part) => (part ? String(part).trim() : ''))
+    .filter(Boolean)
+    .join(', ');
+  return line || null;
+}
+
+/** Resolve the registered office address from supplier sites, falling back to the master address. */
+function resolveRegisteredOfficeAddress(vendor) {
+  const site = (vendor.sites || []).find(
+    (s) => s.siteType === 'REGISTERED_OFFICE' || s.siteType === 'PRIMARY'
+  );
+  return formatAddress(site?.address) || formatAddress(vendor.address) || null;
+}
+
+/** Resolve the primary contact person from the vendor's contact directory. */
+function resolvePrimaryContact(vendor) {
+  const contacts = (vendor.contactPersons || []).filter((c) => c && c.isActive !== false);
+  const primary = contacts.find((c) => c.isPrimary) || contacts[0];
+  if (!primary) return null;
+  return {
+    name: primary.name || '',
+    phone: primary.phone || vendor.phone || '',
+    email: primary.email || vendor.primaryContactEmail || vendor.email || '',
+    role: primary.role || '',
+    designation: primary.role || primary.department || '',
+    department: primary.department || '',
+  };
 }
 
 function assertVendorIdentity(req) {
@@ -58,30 +107,40 @@ async function getVendorProfile(req, res, next) {
       throw new ApiError(404, 'VENDOR_NOT_FOUND', 'Vendor business profile could not be found.');
     }
 
+    // Company Identity is the authoritative source for enterprise support channels.
+    let companyIdentity = null;
+    try {
+      companyIdentity = await CompanyIdentityService.getCurrentIdentity(req.auth.organisationId);
+    } catch (err) {
+      companyIdentity = null;
+    }
+    const support = companyIdentity?.contact || {};
+
     const sanitized = {
       vendorId: vendor.vendorId,
-      legalBusinessName: vendor.legalBusinessName || vendor.name,
-      tradeName: vendor.tradeName || vendor.legalBusinessName,
-      vendorCategory: vendor.vendorCategory,
+      legalBusinessName: vendor.name || '',
+      tradeName: vendor.tradeName || vendor.name || '',
+      vendorCategory: vendor.category || '',
       supplierType: vendor.supplierType,
       status: vendor.status,
-      gstin: vendor.gstin || '',
-      panMasked: maskSensitiveText(vendor.pan, 4),
-      fssaiLicenseNumber: vendor.fssaiLicenseNumber || '',
+      gstin: vendor.gstNumber || '',
+      panMasked: maskPanValue(vendor.panNumber),
+      fssaiLicenseNumber: vendor.fssaiLicense || vendor.fssaiDetails?.licenseNumber || '',
       paymentTerms: vendor.paymentTerms,
-      registeredOfficeAddress: vendor.registeredOfficeAddress || null,
-      primaryContact: vendor.primaryContact || null,
+      registeredOfficeAddress: resolveRegisteredOfficeAddress(vendor),
+      primaryContact: resolvePrimaryContact(vendor),
       bankDetails: {
         bankName: vendor.bankDetails?.bankName || '',
         accountHolderName: vendor.bankDetails?.accountHolderName || '',
-        accountNumberMasked: vendor.bankDetails?.accountNumberMasked || maskSensitiveText(vendor.bankDetails?.accountNumber, 4),
+        accountNumberMasked:
+          vendor.bankDetails?.accountNumberMasked || maskAccountValue(vendor.bankDetails?.accountNumber),
         ifscCode: vendor.bankDetails?.ifscCode || '',
         branchName: vendor.bankDetails?.branchName || '',
       },
       supportContact: {
         role: 'Café Operations Support',
-        phone: '+91 94470 12345',
-        email: 'procurement@zamorin.test',
+        phone: support.supportPhone || support.phone || '',
+        email: support.supportEmail || support.email || '',
         helpNotice: 'To update banking, contact, or company details, please contact Café Operations via authenticated email.',
       },
     };
@@ -172,7 +231,10 @@ async function getIssuedOrders(req, res, next) {
     }
 
     if (search) {
-      query.purchaseOrderId = { $regex: String(search).trim(), $options: 'i' };
+      // Vendors search by PO number or outlet name/code (matches the portal's
+      // "Search PO or outlet" placeholder).
+      const searchPattern = { $regex: String(search).trim(), $options: 'i' };
+      query.$or = [{ purchaseOrderId: searchPattern }, { cafeId: searchPattern }];
     }
 
     const skip = (Math.max(1, Number(page)) - 1) * Math.min(100, Math.max(1, Number(limit)));
@@ -354,9 +416,9 @@ async function downloadOrderPdf(req, res, next) {
   <div class="grid">
     <div class="box">
       <h4>Vendor / Supplier</h4>
-      <strong>${vendor?.legalBusinessName || vendor?.name || order.vendorId}</strong><br>
+      <strong>${vendor?.name || order.vendorId}</strong><br>
       Vendor Code: ${order.vendorId}<br>
-      GSTIN: ${vendor?.gstin || 'Not registered'}
+      GSTIN: ${vendor?.gstNumber || 'Not registered'}
     </div>
     <div class="box">
       <h4>Delivery Destination</h4>
@@ -479,16 +541,34 @@ async function getVendorStatements(req, res, next) {
       .lean();
 
     return res.status(200).json({
-      data: entries.map((e) => ({
-        entryId: e.ledgerEntryId || e.entryId,
-        entryDate: e.entryDate || (e.entryTimestamp ? new Date(e.entryTimestamp).toISOString().slice(0, 10) : null),
-        entryType: e.entryType || e.transactionType,
-        documentReference: e.referenceId || e.purchaseOrderId || e.documentReference,
-        creditPaisa: e.creditPaisa || 0,
-        debitPaisa: e.debitPaisa || 0,
-        runningBalancePaisa: e.runningBalancePaisa,
-        status: e.status || (e.isReversed ? 'REVERSED' : 'SETTLED'),
-      })),
+      data: entries.map((e) => {
+        const credit = Number(e.creditPaisa || 0);
+        const debit = Number(e.debitPaisa || 0);
+        // Honest per-entry status: reversed first, then settled only for money
+        // movements that actually reduced the payable (debits). Bills stay POSTED.
+        const status = e.isReversed
+          ? 'REVERSED'
+          : debit > 0
+            ? 'SETTLED'
+            : 'POSTED';
+        return {
+          entryId: e.ledgerEntryId || e.entryId,
+          entryDate: e.entryDate || (e.entryTimestamp ? new Date(e.entryTimestamp).toISOString().slice(0, 10) : null),
+          entryType: e.entryType || e.transactionType,
+          documentReference:
+            e.referenceNumber ||
+            e.supplierInvoiceNumber ||
+            e.referenceId ||
+            e.purchaseOrderId ||
+            e.documentReference,
+          amountPaisa: credit > 0 ? credit : debit,
+          direction: debit > 0 ? 'DEBIT' : 'CREDIT',
+          creditPaisa: credit,
+          debitPaisa: debit,
+          runningBalancePaisa: e.runningBalancePaisa,
+          status: e.status || status,
+        };
+      }),
       readOnlyNotice: 'Financial ledger records are maintained by Enterprise Accounts Payable.',
     });
   } catch (err) {

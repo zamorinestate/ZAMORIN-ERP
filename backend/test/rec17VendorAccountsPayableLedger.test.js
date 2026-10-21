@@ -687,6 +687,72 @@ describe('REC-17 ADD-ON — Vendor Accounts Payable Ledger & Lifecycle Suite', (
     assert.equal(released.ledgerEntry.entryType, 'HOLD_RELEASE');
   });
 
+  // 21b Place Payment Hold (AP queue "Place Hold" action)
+  it('21b. Placing a payment hold freezes the bill, posts a PAYMENT_HOLD audit entry, and stays releasable', async () => {
+    await createTestVendor('VEN-0001');
+    const po = await createTestPo('PO-HOLD-PLACE', [{ itemId: 'A', orderedQty: 10, unitPricePaisa: 1000, acceptedQty: 10 }]);
+
+    const bill = await vendorLedgerService.postVendorBillFromReceipt({
+      organisationId: orgId,
+      purchaseOrderId: po.purchaseOrderId,
+      supplierInvoiceNumber: 'INV-HOLD-PLACE',
+      claimedAmountPaisa: 10000,
+      auth: masterAuth,
+    });
+
+    assert.equal(bill.apInvoice.paymentStatus, 'DUE', 'Full-quantity receipt starts unpaid and unheld');
+
+    await assert.rejects(
+      async () => vendorLedgerService.placePaymentHold({
+        organisationId: orgId,
+        invoiceId: bill.apInvoice.invoiceId,
+        reason: '   ',
+        auth: masterAuth,
+      }),
+      /A reason is required to place a payment hold/
+    );
+
+    const placed = await vendorLedgerService.placePaymentHold({
+      organisationId: orgId,
+      invoiceId: bill.apInvoice.invoiceId,
+      holdCode: 'FINANCE_REVIEW',
+      reason: 'Awaiting supplier credit note for damaged crates',
+      auth: masterAuth,
+    });
+
+    assert.equal(placed.invoice.paymentStatus, 'ON_HOLD');
+    assert.equal(placed.invoice.holds.length, 1);
+    assert.equal(placed.invoice.holds[0].holdCode, 'FINANCE_REVIEW');
+    assert.equal(placed.invoice.holds[0].placedBy, masterAuth.userId);
+    assert.equal(placed.invoice.outstandingPayableAmountPaisa, 10000, 'A hold freezes payment without changing the balance');
+    assert.equal(placed.ledgerEntry.entryType, 'PAYMENT_HOLD');
+    assert.equal(placed.ledgerEntry.debitPaisa, 0, 'Hold audit entry moves no money');
+    assert.equal(placed.ledgerEntry.creditPaisa, 0, 'Hold audit entry moves no money');
+
+    await assert.rejects(
+      async () => vendorLedgerService.placePaymentHold({
+        organisationId: orgId,
+        invoiceId: bill.apInvoice.invoiceId,
+        holdCode: 'FINANCE_REVIEW',
+        reason: 'Second attempt on the same code',
+        auth: masterAuth,
+      }),
+      /already active/
+    );
+
+    const released = await vendorLedgerService.releasePaymentHold({
+      organisationId: orgId,
+      invoiceId: bill.apInvoice.invoiceId,
+      holdCode: 'FINANCE_REVIEW',
+      releaseReason: 'Credit note received from supplier',
+      auth: masterAuth,
+    });
+
+    assert.equal(released.invoice.paymentStatus, 'DUE');
+    assert.equal(released.invoice.holds.length, 0);
+    assert.equal(released.ledgerEntry.entryType, 'HOLD_RELEASE');
+  });
+
   // 22 Vendor Statement Extraction (Section 54, 55)
   it('22. Vendor statement extracts period billing, payments, credits, and closing balance', async () => {
     await createTestVendor('VEN-0001');

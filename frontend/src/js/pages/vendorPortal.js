@@ -24,10 +24,22 @@ function formatRupees(paisa) {
 
 function formatDate(val) {
   if (!val) return "—";
+  const raw = String(val);
+  // Date-only values (YYYY-MM-DD) must not go through new Date(): that parses
+  // them as UTC midnight and can shift the displayed day by one in local
+  // timezones west of UTC. Render the stored calendar date verbatim instead.
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim());
+  if (dateOnly) {
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const month = months[Number(dateOnly[2]) - 1] || dateOnly[2];
+    return `${dateOnly[3]} ${month} ${dateOnly[1]}`;
+  }
   try {
-    return new Date(val).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+    const parsed = new Date(val);
+    if (Number.isNaN(parsed.getTime())) return raw;
+    return parsed.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
   } catch {
-    return String(val);
+    return raw;
   }
 }
 
@@ -45,6 +57,7 @@ function statusBadge(status) {
     CLOSED: ["#475569", "Closed"],
     SETTLED: ["#059669", "Settled"],
     POSTED: ["#2563eb", "Posted"],
+    REVERSED: ["#dc2626", "Reversed"],
     VERIFIED_PHYSICAL_RECEIPT: ["#059669", "Verified Receipt"],
   };
   const [color, label] = map[status] || ["#64748b", status || "Standard"];
@@ -79,6 +92,7 @@ const CANONICAL_FIXTURES = {
     panMasked: "AAECM••••F",
     fssaiLicenseNumber: "10020042001984",
     paymentTerms: "NET_30",
+    registeredOfficeAddress: "7th Mile Road, Vengara P.O., Malappuram, Kerala 676301",
     bankDetails: {
       bankName: "HDFC Bank",
       accountHolderName: "Malabar Roasters & Plantation Supplies Pvt Ltd",
@@ -1251,7 +1265,7 @@ async function _loadStatements(container) {
         <td>${formatDate(e.postingDate || e.entryDate)}</td>
         <td><strong>${e.transactionType || e.entryType}</strong></td>
         <td>${e.documentReference || "—"}</td>
-        <td class="vp-amount">${formatRupees(e.amountPaisa || (e.creditPaisa || e.debitPaisa))}</td>
+        <td class="vp-amount">${formatRupees(typeof e.amountPaisa === "number" ? e.amountPaisa : (e.creditPaisa || e.debitPaisa))}</td>
         <td class="vp-amount" style="font-weight:700; color:var(--ink);">${formatRupees(e.runningBalancePaisa)}</td>
         <td>${statusBadge(e.status || "SETTLED")}</td>
       </tr>`).join("")}
@@ -1300,6 +1314,7 @@ async function _loadProfile(container) {
       ["PAN (Masked)", p.panMasked || "—"],
       ["FSSAI Licence No.", p.fssaiLicenseNumber || "—"],
       ["Payment Terms", p.paymentTerms],
+      ["Registered Office", p.registeredOfficeAddress || "—"],
     ].map(([k, v]) => `<div class="vp-profile-row"><span class="vp-profile-key">${k}</span><span class="vp-profile-val">${v || "—"}</span></div>`).join("")}
   </div>
 

@@ -22,6 +22,19 @@ function normalizeId(value) {
   return typeof value === 'string' ? value.trim().toUpperCase() : '';
 }
 
+/**
+ * Request-body alias resolver.
+ * The frontend sends both canonical `*Paisa` and legacy `*Paise` spellings plus
+ * `referenceNumber` / `creditNoteReference` / `reason` aliases — accept all of them
+ * so a display-side key choice can never fail a financial mutation outright.
+ */
+function pickAlias(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && value !== '') return value;
+  }
+  return undefined;
+}
+
 function assertFinanceRoleAccess(request, requiredLevel = 'READ') {
   const role = request.auth?.role;
   if (!role) {
@@ -131,20 +144,27 @@ const getVendorStatement = asyncHandler(async (request, response) => {
 
   const vendor = await Vendor.findOne({ organisationId, vendorId }).lean();
   let totalBilled = 0;
+  let totalDebited = 0;
   let totalPaid = 0;
   let totalCredits = 0;
   let totalHolds = 0;
 
   for (const e of ledgerData.entries || []) {
     totalBilled += Number(e.creditPaisa || 0);
+    totalDebited += Number(e.debitPaisa || 0);
     totalPaid += Number(e.paidPaisa || 0);
     if (e.entryType === 'CREDIT_NOTE') totalCredits += Number(e.debitPaisa || 0);
     totalHolds += Number(e.heldPaisa || 0);
   }
 
+  const closingBalancePaisa = ledgerData.entries?.slice(-1)[0]?.runningBalancePaisa || 0;
+  // Running balance = opening + credits − debits, so invert it for the period start.
+  const openingBalancePaisa = closingBalancePaisa - totalBilled + totalDebited;
+
   const statement = {
     vendorId,
     vendorName: vendor ? vendor.name : vendorId,
+    gstNumber: vendor?.gstNumber || '',
     startDate: startDate || 'ALL',
     endDate: endDate || 'LATEST',
     currency: 'INR',
@@ -155,7 +175,8 @@ const getVendorStatement = asyncHandler(async (request, response) => {
     periodPaidPaisa: totalPaid,
     periodCreditsPaisa: totalCredits,
     periodHoldsPaisa: totalHolds,
-    closingBalancePaisa: ledgerData.entries?.slice(-1)[0]?.runningBalancePaisa || 0,
+    openingBalancePaisa,
+    closingBalancePaisa,
     transactions: ledgerData.entries,
   };
 
@@ -177,12 +198,12 @@ const setOpeningBalance = asyncHandler(async (request, response) => {
 
   const { organisationId } = request.auth;
   const vendorId = normalizeId(request.params.vendorId);
-  const { amountPaisa, isCredit = true, effectiveDate, reason } = request.body;
+  const { amountPaisa, amountPaise, isCredit = true, effectiveDate, reason } = request.body;
 
   const entry = await vendorLedgerService.setOpeningBalance({
     organisationId,
     vendorId,
-    amountPaisa,
+    amountPaisa: pickAlias(amountPaisa, amountPaise),
     isCredit,
     effectiveDate,
     reason,
@@ -287,9 +308,12 @@ const recordPayment = asyncHandler(async (request, response) => {
   const {
     vendorId,
     paymentAmountPaisa,
+    amountPaisa,
+    amountPaise,
     allocations,
     paymentMethod,
     reference,
+    referenceNumber,
     bankAccountId,
     notes,
     idempotencyKey: rawIdem,
@@ -300,10 +324,11 @@ const recordPayment = asyncHandler(async (request, response) => {
   const result = await vendorLedgerService.recordVendorPayment({
     organisationId,
     vendorId,
-    paymentAmountPaisa,
+    paymentAmountPaisa: pickAlias(paymentAmountPaisa, amountPaisa, amountPaise),
     allocations,
     paymentMethod,
-    reference,
+    reference: pickAlias(reference, referenceNumber) || '',
+    referenceNumber: pickAlias(referenceNumber, reference) || '',
     bankAccountId,
     notes,
     idempotencyKey,
@@ -346,15 +371,16 @@ const reversePayment = asyncHandler(async (request, response) => {
 const recordAdvance = asyncHandler(async (request, response) => {
   assertFinanceRoleAccess(request, 'PAYMENT');
   const { organisationId } = request.auth;
-  const { vendorId, amountPaisa, cafeId, paymentMethod, reference, notes, idempotencyKey } = request.body;
+  const { vendorId, amountPaisa, amountPaise, cafeId, paymentMethod, reference, referenceNumber, notes, idempotencyKey } = request.body;
 
   const result = await vendorLedgerService.recordVendorAdvance({
     organisationId,
     vendorId,
-    amountPaisa,
+    amountPaisa: pickAlias(amountPaisa, amountPaise),
     cafeId,
     paymentMethod,
-    reference,
+    reference: pickAlias(reference, referenceNumber) || '',
+    referenceNumber: pickAlias(referenceNumber, reference) || '',
     notes,
     idempotencyKey,
     auth: request.auth,
@@ -373,13 +399,13 @@ const recordAdvance = asyncHandler(async (request, response) => {
 const applyAdvance = asyncHandler(async (request, response) => {
   assertFinanceRoleAccess(request, 'PAYMENT');
   const { organisationId } = request.auth;
-  const { vendorId, invoiceId, amountToApplyPaisa, notes } = request.body;
+  const { vendorId, invoiceId, amountToApplyPaisa, amountPaisa, amountPaise, notes } = request.body;
 
   const result = await vendorLedgerService.applyVendorAdvance({
     organisationId,
     vendorId,
     invoiceId,
-    amountToApplyPaisa,
+    amountToApplyPaisa: pickAlias(amountToApplyPaisa, amountPaisa, amountPaise),
     notes,
     auth: request.auth,
   });
@@ -397,15 +423,39 @@ const applyAdvance = asyncHandler(async (request, response) => {
 const applyCreditNote = asyncHandler(async (request, response) => {
   assertFinanceRoleAccess(request, 'WRITE');
   const { organisationId } = request.auth;
-  const { vendorId, invoiceId, creditNoteId, amountPaisa, reason } = request.body;
+  const { vendorId, invoiceId, creditNoteId, creditNoteReference, amountPaisa, amountPaise, reason } = request.body;
 
   const result = await vendorLedgerService.applyVendorCreditNote({
     organisationId,
     vendorId,
     invoiceId,
-    creditNoteId,
-    amountPaisa,
+    creditNoteId: pickAlias(creditNoteId, creditNoteReference) || '',
+    amountPaisa: pickAlias(amountPaisa, amountPaise),
     reason,
+    auth: request.auth,
+  });
+
+  return response.status(200).json({
+    success: true,
+    data: result,
+    correlationId: request.correlationId || null,
+  });
+});
+
+/**
+ * POST /api/v1/finance/vendor-ledger/bills/:invoiceId/holds
+ */
+const placePaymentHold = asyncHandler(async (request, response) => {
+  assertFinanceRoleAccess(request, 'PAYMENT');
+  const { organisationId } = request.auth;
+  const invoiceId = normalizeId(request.params.invoiceId);
+  const { holdCode, reason, notes, description } = request.body;
+
+  const result = await vendorLedgerService.placePaymentHold({
+    organisationId,
+    invoiceId,
+    holdCode,
+    reason: pickAlias(reason, notes, description) || '',
     auth: request.auth,
   });
 
@@ -423,13 +473,13 @@ const releasePaymentHold = asyncHandler(async (request, response) => {
   assertFinanceRoleAccess(request, 'PAYMENT');
   const { organisationId } = request.auth;
   const invoiceId = normalizeId(request.params.invoiceId);
-  const { holdCode, releaseReason } = request.body;
+  const { holdCode, releaseReason, reason } = request.body;
 
   const result = await vendorLedgerService.releasePaymentHold({
     organisationId,
     invoiceId,
     holdCode,
-    releaseReason,
+    releaseReason: pickAlias(releaseReason, reason) || '',
     auth: request.auth,
   });
 
@@ -514,6 +564,7 @@ module.exports = {
   recordAdvance,
   applyAdvance,
   applyCreditNote,
+  placePaymentHold,
   releasePaymentHold,
   getApAgingReport,
   getGstMonitoringReport,

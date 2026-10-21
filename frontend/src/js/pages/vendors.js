@@ -22,6 +22,237 @@ let searchQuery = "";
 let selectedCategory = "ALL";
 let selectedStatus = "ALL";
 let selectedType = "ALL";
+let liveLedgerVendorId = null;
+
+// ── Live data loaders ───────────────────────────────────────────────────────
+// Every value rendered on this page is either read from these backend
+// payloads or rendered as an explicit NO_DATA / zero placeholder. There are
+// no fabricated sample figures anywhere in the tab renderers.
+const activeLoads = new Set();
+// Keys whose fetch has already been attempted this session. A failed fetch is
+// never retried in a render loop (that would repaint forever) — the explicit
+// ↻ Refresh buttons bypass this and always hit the backend again.
+const attemptedLoads = new Set();
+
+function isLoaded(value) {
+  return value !== null && value !== undefined;
+}
+
+function markAttempted(key) {
+  attemptedLoads.add(key);
+}
+
+function clearAttempted(prefix) {
+  for (const key of [...attemptedLoads]) {
+    if (key === prefix || key.startsWith(`${prefix}:`)) attemptedLoads.delete(key);
+  }
+}
+
+async function loadVendorsAndOrders() {
+  if (activeLoads.has("directory") || attemptedLoads.has("directory")) return false;
+  activeLoads.add("directory");
+  let changed = false;
+  try {
+    const [resVendors, resOrders] = await Promise.all([
+      apiGet("/api/v1/vendors?limit=100").catch(() => null),
+      apiGet("/api/v1/procurement/orders?limit=100").catch(() => null),
+    ]);
+    if (resVendors?.success && Array.isArray(resVendors.data?.vendors)) {
+      liveVendors = resVendors.data.vendors;
+      changed = true;
+    }
+    // /procurement/orders returns data.orders (there is no data.purchaseOrders).
+    if (resOrders?.success && Array.isArray(resOrders.data?.orders)) {
+      liveOrders = resOrders.data.orders;
+      changed = true;
+    }
+  } catch (err) {
+    // Leave state untouched: the page renders NO_DATA rather than guessing.
+  } finally {
+    markAttempted("directory");
+    activeLoads.delete("directory");
+  }
+  return changed;
+}
+
+// APInvoice document → AP queue row. Only real server fields are used; when a
+// value is genuinely unknown it stays 0 / empty instead of being invented.
+function normalizeApQueueRow(inv) {
+  const lineItems = Array.isArray(inv.lineItems) ? inv.lineItems : [];
+  const billedQty = lineItems.reduce((sum, li) => sum + (Number(li.invoiceQuantity) || 0), 0);
+  const acceptedQty = lineItems.reduce((sum, li) => sum + (Number(li.acceptedQuantity) || 0), 0);
+  const rejectedQty = lineItems.reduce((sum, li) => sum + (Number(li.rejectedQuantity) || 0), 0);
+  const activeHolds = (inv.holds || []).filter((h) => !h.releasedAt);
+  const totalPaisa = Number(inv.totalPaisa || 0);
+  const approvedPayablePaisa = Number(inv.approvedPayableAmountPaisa ?? totalPaisa);
+  const paidPaisa = Number(inv.paidPaisa ?? inv.amountPaidPaisa ?? 0);
+  const outstandingPaisa = Number(inv.outstandingPayableAmountPaisa ?? inv.outstandingPaisa ?? 0);
+  const paymentStatus = inv.paymentStatus || "UNPAID";
+  const onHold = activeHolds.length > 0 || paymentStatus === "ON_HOLD" || paymentStatus === "DISPUTED";
+
+  return {
+    invoiceId: inv.invoiceId,
+    purchaseOrderId: inv.poReferenceId || "—",
+    vendorId: inv.vendorId,
+    vendorName: inv.vendorName || inv.vendorId,
+    invoiceNumber: inv.supplierInvoiceNumber || inv.invoiceId,
+    invoiceDate: String(inv.invoiceDate || "").slice(0, 10),
+    dueDate: String(inv.dueDate || "").slice(0, 10),
+    orderedQty: billedQty,
+    acceptedQty,
+    rejectedQty,
+    totalPaisa,
+    approvedPayablePaisa,
+    paidPaisa,
+    outstandingPaisa,
+    paymentStatus,
+    status: paymentStatus === "PAID" ? "PAID" : (paymentStatus === "PARTIALLY_PAID" || paidPaisa > 0) ? "PARTIAL" : "UNPAID",
+    holdStatus: onHold ? "ON_HOLD" : "NONE",
+    holdReason: activeHolds[activeHolds.length - 1]?.reason || "",
+    matchStatus: inv.validationStatus === "VALIDATED" || !inv.validationStatus ? "MATCHED" : inv.validationStatus,
+    hasShortSupply: rejectedQty > 0 || acceptedQty < billedQty,
+  };
+}
+
+async function loadApQueue() {
+  if (activeLoads.has("ap") || attemptedLoads.has("ap")) return false;
+  activeLoads.add("ap");
+  let changed = false;
+  try {
+    const res = await apiGet("/api/v1/vendor-ledger/ap/queue");
+    if (res?.success && Array.isArray(res.data?.queue)) {
+      liveApInvoices = res.data.queue.map(normalizeApQueueRow);
+      changed = true;
+    }
+  } catch (err) {
+    // Queue unavailable for this role/session → rendered as NO_DATA.
+  } finally {
+    markAttempted("ap");
+    activeLoads.delete("ap");
+  }
+  return changed;
+}
+
+async function loadVendorLedger(vendorId) {
+  if (!vendorId) return false;
+  const key = `ledger:${vendorId}`;
+  if (activeLoads.has("ledger") || attemptedLoads.has(key)) return false;
+  activeLoads.add("ledger");
+  let changed = false;
+  try {
+    const res = await apiGet(`/api/v1/vendor-ledger/vendors/${encodeURIComponent(vendorId)}?limit=200`);
+    if (res?.success && res.data) {
+      liveLedgerData = res.data;
+      liveLedgerVendorId = vendorId;
+      changed = true;
+    }
+  } catch (err) {
+    // Ledger unavailable → the tab renders NO_DATA for this supplier.
+  } finally {
+    markAttempted(key);
+    activeLoads.delete("ledger");
+  }
+  return changed;
+}
+
+// GST 180-day monitoring rows → the fields the advisory table renders.
+// At-risk ITC is derived by the backend from the invoice's actual tax
+// component (taxPaisa) weighted by the unpaid proportion.
+function mapGstRiskItems(flagged) {
+  return (flagged || []).map((f) => ({
+    invoiceNumber: f.supplierInvoiceNumber || f.invoiceId,
+    vendorName: f.vendorName || f.vendorId,
+    invoiceDate: String(f.invoiceDate || "").slice(0, 10),
+    daysOutstanding: Number(f.daysSinceInvoice || 0),
+    outstandingPaise: Number(f.unpaidProportionPaisa || 0),
+    itcAmountPaise: Number(f.itcAtRiskPaisa || 0),
+    riskLevel: f.riskCategory,
+  }));
+}
+
+async function loadAgingAndGst() {
+  if (activeLoads.has("aging") || attemptedLoads.has("aging")) return false;
+  activeLoads.add("aging");
+  let changed = false;
+  try {
+    const [resAging, resGst] = await Promise.all([
+      apiGet("/api/v1/vendor-ledger/reports/aging").catch(() => null),
+      apiGet("/api/v1/vendor-ledger/reports/gst-180-days").catch(() => null),
+    ]);
+    if (resAging?.success || resGst?.success) {
+      liveAgingReport = {
+        asOfDate: resAging?.data?.asOfDate || resGst?.data?.asOfDate || null,
+        buckets: resAging?.success ? resAging.data?.buckets || null : null,
+        vendors: resAging?.success ? resAging.data?.vendors || [] : [],
+        // null = the GST report could not be fetched (distinct from "no risks").
+        gstRiskItems: resGst?.success ? mapGstRiskItems(resGst.data?.flaggedInvoices) : null,
+      };
+      changed = true;
+    }
+  } catch (err) {
+    // Aging monitor stays in NO_DATA state.
+  } finally {
+    markAttempted("aging");
+    activeLoads.delete("aging");
+  }
+  return changed;
+}
+
+// Pull whatever the visible tab needs, then re-render once with real data.
+async function ensureActiveTabData() {
+  const loaders = [];
+  if (!isLoaded(liveVendors) || !isLoaded(liveOrders)) loaders.push(loadVendorsAndOrders);
+  if (currentActiveTab === "AP_QUEUE" && !isLoaded(liveApInvoices)) loaders.push(loadApQueue);
+  if (currentActiveTab === "VENDOR_LEDGER") {
+    const vendorId = selectedLedgerVendorId || liveVendors?.[0]?.vendorId || null;
+    if (vendorId && (liveLedgerVendorId !== vendorId || !isLoaded(liveLedgerData))) {
+      loaders.push(() => loadVendorLedger(vendorId));
+    }
+  }
+  if (currentActiveTab === "AP_AGING" && !isLoaded(liveAgingReport)) loaders.push(loadAgingAndGst);
+
+  if (!loaders.length) return;
+  let changed = false;
+  for (const loader of loaders) {
+    changed = (await loader()) || changed;
+  }
+  if (changed) updateContainer();
+}
+
+// Drop every cache this page's financial tabs derive from. Called after any
+// mutation (payment, hold, advance, credit, reversal, rebuild) so the next
+// render always repaints from fresh server payloads instead of stale rows.
+// liveVendors is included because the ledger KPI cards read the server-maintained
+// financialSummary embedded on each vendor document.
+function invalidateFinancialCaches() {
+  liveApInvoices = null;
+  liveLedgerData = null;
+  liveLedgerVendorId = null;
+  liveAgingReport = null;
+  liveVendors = null;
+  clearAttempted("ap");
+  clearAttempted("aging");
+  clearAttempted("ledger");
+  clearAttempted("directory");
+}
+
+// Refetch the invalidated caches for the current tab, then repaint once.
+async function refreshFinancialViews() {
+  invalidateFinancialCaches();
+  const loaders = [];
+  // financialSummary (KPI cards) is only fresh again once vendors reload.
+  if (!isLoaded(liveVendors)) loaders.push(loadVendorsAndOrders);
+  if (currentActiveTab === "AP_QUEUE") loaders.push(loadApQueue);
+  if (currentActiveTab === "VENDOR_LEDGER") {
+    const vendorId = selectedLedgerVendorId || liveVendors?.[0]?.vendorId || null;
+    if (vendorId) loaders.push(() => loadVendorLedger(vendorId));
+  }
+  if (currentActiveTab === "AP_AGING") loaders.push(loadAgingAndGst);
+  for (const loader of loaders) {
+    await loader();
+  }
+  updateContainer();
+}
 
 export function setVendorsActiveTab(tab) {
   const norm = (tab || "DIRECTORY").toUpperCase().replace(/-/g, "_");
@@ -60,12 +291,16 @@ export function renderVendors(subroute) {
   const vendors = liveVendors || SAMPLE_VENDORS;
   const orders = liveOrders || SAMPLE_ORDERS;
   const isMaster = state.user?.role === "MASTER";
+  // Until the supplier & order lists have actually been fetched, executive
+  // metrics render as NO_DATA instead of being derived from empty arrays.
+  const dataReady = isLoaded(liveVendors) && isLoaded(liveOrders);
 
   // Executive Metric Calculations
   const activeCount = vendors.filter((v) => v.status === "ACTIVE").length;
   const openObligationsPaise = orders
     .filter((o) => !["CLOSED", "CANCELLED"].includes(o.status))
     .reduce((sum, o) => sum + (o.totalPaisa || 0), 0);
+  const openOrderCount = orders.filter((o) => !["CLOSED", "CANCELLED"].includes(o.status)).length;
   const pendingPostingCount = orders.filter((o) => o.receivingStatus === "RECEIVED_PENDING_FINAL_POSTING").length;
   const matchExceptionsCount = orders.filter((o) => o.threeWayMatch?.matchStatus && !["MATCHED", "PENDING"].includes(o.threeWayMatch.matchStatus)).length;
   const avgOtif = (
@@ -105,35 +340,35 @@ export function renderVendors(subroute) {
       <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:16px;margin-bottom:24px;">
         <div class="card" style="padding:18px;border-left:4px solid var(--primary, #b45309);">
           <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;">Active Suppliers</div>
-          <div style="font-size:26px;font-weight:800;color:var(--ink);margin:4px 0;">${activeCount} <span style="font-size:13px;font-weight:400;color:var(--muted);">/ ${vendors.length}</span></div>
-          <div style="font-size:11px;color:var(--success, #15803d);font-weight:600;">● Verified &amp; Onboarded</div>
+          <div style="font-size:26px;font-weight:800;color:var(--ink);margin:4px 0;">${dataReady ? `${activeCount} <span style="font-size:13px;font-weight:400;color:var(--muted);">/ ${vendors.length}</span>` : "NO_DATA"}</div>
+          <div style="font-size:11px;color:var(--success, #15803d);font-weight:600;">${dataReady ? "● Verified &amp; Onboarded" : "Awaiting supplier directory load"}</div>
         </div>
 
         <div class="card" style="padding:18px;border-left:4px solid #2563eb;">
           <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;">Open Order Obligations</div>
-          <div style="font-size:26px;font-weight:800;color:var(--ink);margin:4px 0;">₹${(openObligationsPaise / 100).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</div>
-          <div style="font-size:11px;color:#2563eb;font-weight:600;">${orders.filter((o) => !["CLOSED", "CANCELLED"].includes(o.status)).length} Active Purchase Orders</div>
+          <div style="font-size:26px;font-weight:800;color:var(--ink);margin:4px 0;">${dataReady ? `₹${(openObligationsPaise / 100).toLocaleString("en-IN", { maximumFractionDigits: 0 })}` : "NO_DATA"}</div>
+          <div style="font-size:11px;color:#2563eb;font-weight:600;">${dataReady ? `${openOrderCount} Active Purchase Orders` : "Awaiting purchase order load"}</div>
         </div>
 
         <div class="card" style="padding:18px;border-left:4px solid #f59e0b;">
           <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;">Awaiting MASTER Posting</div>
-          <div style="font-size:26px;font-weight:800;color:#b45309;margin:4px 0;">${pendingPostingCount}</div>
+          <div style="font-size:26px;font-weight:800;color:#b45309;margin:4px 0;">${dataReady ? pendingPostingCount : "NO_DATA"}</div>
           <div style="font-size:11px;color:var(--muted);">Physical GRN recorded, pending post</div>
         </div>
 
-        <div class="card" style="padding:18px;border-left:4px solid ${matchExceptionsCount > 0 ? "#dc2626" : "#16a34a"};">
+        <div class="card" style="padding:18px;border-left:4px solid ${!dataReady ? "var(--line)" : matchExceptionsCount > 0 ? "#dc2626" : "#16a34a"};">
           <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;">3-Way Match Status</div>
-          <div style="font-size:26px;font-weight:800;color:${matchExceptionsCount > 0 ? "#dc2626" : "var(--ink)"};margin:4px 0;">
-            ${matchExceptionsCount > 0 ? `${matchExceptionsCount} Exceptions` : "All Clean"}
+          <div style="font-size:26px;font-weight:800;color:${!dataReady ? "var(--muted)" : matchExceptionsCount > 0 ? "#dc2626" : "var(--ink)"};margin:4px 0;">
+            ${!dataReady ? "NO_DATA" : matchExceptionsCount > 0 ? `${matchExceptionsCount} Exceptions` : "All Clean"}
           </div>
-          <div style="font-size:11px;color:${matchExceptionsCount > 0 ? "#dc2626" : "var(--success)"};font-weight:600;">
-            ${matchExceptionsCount > 0 ? "⚠ Price / Qty Variance Blocked" : "✓ 100% Tolerance Passed"}
+          <div style="font-size:11px;color:${!dataReady ? "var(--muted)" : matchExceptionsCount > 0 ? "#dc2626" : "var(--success)"};font-weight:600;">
+            ${!dataReady ? "Awaiting order data" : matchExceptionsCount > 0 ? "⚠ Price / Qty Variance Blocked" : "✓ 100% Tolerance Passed"}
           </div>
         </div>
 
         <div class="card" style="padding:18px;border-left:4px solid #10b981;">
           <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;">Overall Supplier OTIF</div>
-          <div style="font-size:26px;font-weight:800;color:var(--ink);margin:4px 0;">${avgOtif}%</div>
+          <div style="font-size:26px;font-weight:800;color:var(--ink);margin:4px 0;">${dataReady ? `${avgOtif}%` : "NO_DATA"}</div>
           <div style="font-size:11px;color:var(--success);font-weight:600;">On-Time In-Full Delivery Index</div>
         </div>
       </div>
@@ -349,7 +584,7 @@ function renderDirectoryTab(vendors, isMaster) {
                       `;
                     })
                     .join("")
-                : `<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--muted);">No suppliers found matching your filter criteria.</td></tr>`
+                : `<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--muted);">${isLoaded(liveVendors) ? "No suppliers found matching your filter criteria." : "Supplier directory not loaded yet — it is fetched automatically on page load; use ↻ Refresh to retry."}</td></tr>`
             }
           </tbody>
         </table>
@@ -551,7 +786,7 @@ function renderThreeWayMatchTab(orders, isMaster) {
                             : `<button class="btn btn-sm btn-disabled" type="button" disabled title="Only MASTER role may post inventory">MASTER Approval Required</button>`
                         }
                         ${
-                          (po.inventoryPosting?.status === "POSTED" || po.receivingStatus === "RECEIVED_PENDING_FINAL_POSTING" || isPosted)
+                          (po.inventoryPosting?.status === "POSTED" || po.receivingStatus === "RECEIVED_PENDING_FINAL_POSTING")
                             ? `<button class="btn btn-sm btn-secondary vnd-send-accounts-btn" data-id="${po.purchaseOrderId}" type="button">
                                 ${po.accountsHandoff?.status === 'SENT_TO_ACCOUNTS' ? '✓ In Accounts AP' : '📤 Send to Accounts'}
                               </button>`
@@ -774,109 +1009,19 @@ function renderContinuityRiskTab(vendors) {
 // ── Tab 6: AP Invoice & Payment Queue ───────────────────────────────────────
 
 function renderApQueueTab(orders, vendors, isMaster) {
-  const apInvoices = liveApInvoices || (orders || []).filter(o => o.invoices?.length || o.threeWayMatch?.matchStatus === 'MATCHED' || o.accountsHandoff?.status === 'SENT_TO_ACCOUNTS').map((o) => {
-    const inv = o.invoices?.[0] || {};
-    const totalPaisa = inv.totalPaisa || o.totalPaisa || 100000;
-    const paidPaisa = o.amountPaidPaisa || (o.paymentStatus === 'PAID' ? totalPaisa : o.paymentStatus === 'PARTIAL' ? 50000 : 0);
-    const outstandingPaisa = Math.max(0, totalPaisa - paidPaisa);
-    const vendor = (vendors || []).find(v => v.vendorId === o.vendorId) || { name: o.vendorNameSnapshot || o.vendorId };
-    return {
-      invoiceId: inv.invoiceNumber ? `INV-${inv.invoiceNumber}` : `AP-${o.purchaseOrderId}`,
-      purchaseOrderId: o.purchaseOrderId,
-      vendorId: o.vendorId,
-      vendorName: vendor.name,
-      invoiceNumber: inv.invoiceNumber || `BILL-${o.purchaseOrderId}`,
-      invoiceDate: inv.invoiceDate || o.orderDate || new Date().toISOString().split('T')[0],
-      dueDate: o.paymentDueDate || new Date(Date.now() + 15 * 86400000).toISOString().split('T')[0],
-      orderedQty: (o.lineItems || []).reduce((s, l) => s + (l.quantity || 1), 0) || 20,
-      receivedQty: (o.lineItems || []).reduce((s, l) => s + (l.deliveredQuantity || l.quantity || 1), 0) || 19,
-      acceptedQty: (o.lineItems || []).reduce((s, l) => s + (l.acceptedQuantity || l.quantity || 1), 0) || 18,
-      totalPaisa,
-      approvedPayablePaisa: Math.round(totalPaisa * 0.9),
-      paidPaisa,
-      outstandingPaisa,
-      status: outstandingPaisa === 0 ? 'PAID' : paidPaisa > 0 ? 'PARTIAL' : 'UNPAID',
-      holdStatus: o.paymentHold ? 'ON_HOLD' : 'NONE',
-      holdReason: o.paymentHoldReason || '',
-      matchStatus: o.threeWayMatch?.matchStatus || 'MATCHED',
-      hasShortSupply: o.hasShortSupply || false,
-    };
-  });
-
-  if (!apInvoices.length) {
-    apInvoices.push(
-      {
-        invoiceId: 'AP-PO-2026-0089',
-        purchaseOrderId: 'PO-2026-0089',
-        vendorId: 'VEN-001',
-        vendorName: 'KMF Nandini Dairy Depot',
-        invoiceNumber: 'TAX-INV-8821',
-        invoiceDate: '2026-09-10',
-        dueDate: '2026-09-25',
-        orderedQty: 20,
-        receivedQty: 19,
-        acceptedQty: 18,
-        totalPaisa: 100000,
-        approvedPayablePaisa: 90000,
-        paidPaisa: 50000,
-        outstandingPaisa: 40000,
-        status: 'PARTIAL',
-        holdStatus: 'NONE',
-        holdReason: '',
-        matchStatus: 'MATCHED',
-        hasShortSupply: true,
-      },
-      {
-        invoiceId: 'AP-PO-2026-0092',
-        purchaseOrderId: 'PO-2026-0092',
-        vendorId: 'VEN-002',
-        vendorName: 'Blue Tokai Coffee Roasters',
-        invoiceNumber: 'BT-INV-9904',
-        invoiceDate: '2026-09-12',
-        dueDate: '2026-09-27',
-        orderedQty: 50,
-        receivedQty: 50,
-        acceptedQty: 50,
-        totalPaisa: 250000,
-        approvedPayablePaisa: 250000,
-        paidPaisa: 0,
-        outstandingPaisa: 250000,
-        status: 'UNPAID',
-        holdStatus: 'NONE',
-        holdReason: '',
-        matchStatus: 'MATCHED',
-        hasShortSupply: false,
-      },
-      {
-        invoiceId: 'AP-PO-2026-0095',
-        purchaseOrderId: 'PO-2026-0095',
-        vendorId: 'VEN-003',
-        vendorName: 'Malabar Spices & Provisions',
-        invoiceNumber: 'MSP-INV-4412',
-        invoiceDate: '2026-09-01',
-        dueDate: '2026-09-15',
-        orderedQty: 10,
-        receivedQty: 10,
-        acceptedQty: 10,
-        totalPaisa: 65000,
-        approvedPayablePaisa: 65000,
-        paidPaisa: 0,
-        outstandingPaisa: 65000,
-        status: 'UNPAID',
-        holdStatus: 'ON_HOLD',
-        holdReason: 'Quality inspection hold on spice moisture variance',
-        matchStatus: 'MATCHED',
-        hasShortSupply: false,
-      }
-    );
-  }
+  // Canonical source: GET /api/v1/vendor-ledger/ap/queue, normalized on load.
+  // No derived or invented rows are ever substituted for the real queue.
+  const queueReady = isLoaded(liveApInvoices);
+  const apInvoices = liveApInvoices || [];
+  const now = new Date();
+  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
   const filteredInvoices = apInvoices.filter((inv) => {
     switch (apQueueFilter) {
       case 'READY_FOR_PAYMENT': return inv.status !== 'PAID' && inv.holdStatus !== 'ON_HOLD';
       case 'PARTIALLY_PAID': return inv.status === 'PARTIAL';
       case 'ON_HOLD': return inv.holdStatus === 'ON_HOLD';
-      case 'OVERDUE': return new Date(inv.dueDate) < new Date() && inv.outstandingPaisa > 0;
+      case 'OVERDUE': return Boolean(inv.dueDate) && inv.dueDate < todayIso && inv.outstandingPaisa > 0;
       case 'PAYMENT_PENDING': return inv.status === 'UNPAID';
       case 'DISPUTED': return inv.matchStatus !== 'MATCHED';
       case 'MATCHED': return inv.matchStatus === 'MATCHED';
@@ -891,7 +1036,7 @@ function renderApQueueTab(orders, vendors, isMaster) {
     { id: 'READY_FOR_PAYMENT', label: 'Ready for Payment', count: apInvoices.filter((i) => i.status !== 'PAID' && i.holdStatus !== 'ON_HOLD').length },
     { id: 'PARTIALLY_PAID', label: 'Partially Paid', count: apInvoices.filter((i) => i.status === 'PARTIAL').length },
     { id: 'ON_HOLD', label: 'Payment Hold', count: apInvoices.filter((i) => i.holdStatus === 'ON_HOLD').length },
-    { id: 'OVERDUE', label: 'Overdue Bills', count: apInvoices.filter((i) => new Date(i.dueDate) < new Date() && i.outstandingPaisa > 0).length },
+    { id: 'OVERDUE', label: 'Overdue Bills', count: apInvoices.filter((i) => Boolean(i.dueDate) && i.dueDate < todayIso && i.outstandingPaisa > 0).length },
     { id: 'PAYMENT_PENDING', label: 'Unpaid / Pending', count: apInvoices.filter((i) => i.status === 'UNPAID').length },
     { id: 'DISPUTED', label: 'Disputed / Exception', count: apInvoices.filter((i) => i.matchStatus !== 'MATCHED').length },
     { id: 'MATCHED', label: '100% Matched', count: apInvoices.filter((i) => i.matchStatus === 'MATCHED').length },
@@ -940,6 +1085,15 @@ function renderApQueueTab(orders, vendors, isMaster) {
               </tr>
             </thead>
             <tbody>
+              ${!filteredInvoices.length ? `
+                <tr><td colspan="10" style="text-align:center;padding:28px;color:var(--muted);">
+                  ${!queueReady
+                    ? "AP queue unavailable — the accounts payable data could not be loaded from the backend."
+                    : apInvoices.length
+                      ? "No invoices match the selected filter."
+                      : "No accounts payable invoices recorded yet."}
+                </td></tr>
+              ` : ''}
               ${filteredInvoices.map((inv) => `
                 <tr style="border-bottom:1px solid var(--line); vertical-align:middle;">
                   <td>
@@ -951,14 +1105,14 @@ function renderApQueueTab(orders, vendors, isMaster) {
                     <div style="font-size:11px; color:var(--muted); font-family:var(--font-mono);">${inv.vendorId}</div>
                   </td>
                   <td>
-                    <div>Inv: ${inv.invoiceDate}</div>
-                    <div style="font-size:11px; color:${new Date(inv.dueDate) < new Date() && inv.outstandingPaisa > 0 ? '#dc2626' : 'var(--muted)'}; font-weight:600;">
-                      Due: ${inv.dueDate}
+                    <div>Inv: ${inv.invoiceDate || 'NO_DATA'}</div>
+                    <div style="font-size:11px; color:${inv.dueDate && inv.dueDate < todayIso && inv.outstandingPaisa > 0 ? '#dc2626' : 'var(--muted)'}; font-weight:600;">
+                      Due: ${inv.dueDate || 'NO_DUE_DATE'}
                     </div>
                   </td>
                   <td>
-                    <div style="font-size:11.5px;">Ord: <strong>${inv.orderedQty}</strong></div>
-                    <div style="font-size:11.5px; color:#15803d;">Acc: <strong>${inv.acceptedQty}</strong></div>
+                    <div style="font-size:11.5px;">Billed: <strong>${inv.orderedQty}</strong></div>
+                    <div style="font-size:11.5px; color:#15803d;">Accepted: <strong>${inv.acceptedQty}</strong></div>
                     ${inv.acceptedQty < inv.orderedQty ? `<span class="badge badge-warning" style="font-size:9px;">Short Supply</span>` : ''}
                   </td>
                   <td style="text-align:right; font-weight:700; color:var(--ink);">
@@ -971,8 +1125,8 @@ function renderApQueueTab(orders, vendors, isMaster) {
                     ₹${((inv.outstandingPaisa || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                   </td>
                   <td>
-                    <span class="badge ${inv.status === 'PAID' ? 'badge-success' : inv.status === 'PARTIAL' ? 'badge-warning' : 'badge-neutral'}" style="font-size:10px;">
-                      ${inv.status}
+                    <span class="badge ${inv.status === 'PAID' ? 'badge-success' : inv.status === 'PARTIAL' ? 'badge-warning' : ['OVERDUE', 'DISPUTED'].includes(inv.paymentStatus) ? 'badge-danger' : 'badge-neutral'}" style="font-size:10px;">
+                      ${inv.paymentStatus || inv.status}
                     </span>
                   </td>
                   <td>
@@ -1020,75 +1174,48 @@ function renderApQueueTab(orders, vendors, isMaster) {
 // ── Tab 7: Authoritative Vendor AP Subledger ─────────────────────────────────
 
 function renderVendorLedgerTab(vendors, isMaster) {
-  const currentVendorId = selectedLedgerVendorId || vendors[0]?.vendorId || "VEN-001";
-  const currentVendor = vendors.find((v) => v.vendorId === currentVendorId) || vendors[0] || {
-    vendorId: currentVendorId,
-    name: "Selected Supplier",
-    gstNumber: "29AABCU9876F1Z2",
-    panNumber: "AABCU9876F",
-    financialSummary: {},
-  };
+  const currentVendorId = selectedLedgerVendorId || vendors[0]?.vendorId || null;
+  const currentVendor = (currentVendorId && vendors.find((v) => v.vendorId === currentVendorId)) || vendors[0] || null;
 
-  const fs = currentVendor.financialSummary || {};
-  const totalInvoiced = fs.totalInvoicedPaise || 350000;
-  const totalPaid = fs.totalPaidPaise || 200000;
-  const outstanding = fs.outstandingBalancePaise !== undefined ? fs.outstandingBalancePaise : (totalInvoiced - totalPaid);
-  const advance = fs.advanceBalancePaise || 0;
-  const credit = fs.creditBalancePaise || 0;
-  const onHold = fs.onHoldAmountPaise || 0;
-  const overdue = fs.overdueBalancePaise || 0;
-  const lastPaymentDate = fs.lastPaymentDate ? new Date(fs.lastPaymentDate).toISOString().split('T')[0] : '2026-09-12';
+  // financialSummary is the server-maintained cache written by
+  // vendorLedgerService.syncVendorFinancialSummary — read the canonical keys.
+  const fs = currentVendor?.financialSummary || {};
+  const totalInvoiced = Number(fs.lifetimeApprovedPayablePaisa ?? fs.totalInvoicedPaise ?? 0);
+  const totalPaid = Number(fs.lifetimePaidPaisa ?? fs.totalPaidPaise ?? 0);
+  const outstanding = Number(fs.currentOutstandingPayablePaisa ?? fs.outstandingBalancePaise ?? 0);
+  const advance = Number(fs.availableVendorAdvancePaisa ?? 0);
+  const credit = Number(fs.availableVendorCreditPaisa ?? 0);
+  const onHold = Number(fs.currentPaymentHoldsPaisa ?? 0);
+  const overdue = Number(fs.overdueAmountPaisa ?? 0);
+  const lastPaymentDate = fs.lastPaymentDate ? String(fs.lastPaymentDate).slice(0, 10) : 'NO_PAYMENT_RECORDED';
+  // Currency formatter that degrades to NO_DATA when no supplier is selected.
+  const money = (paisa) => (currentVendor
+    ? `₹${(Number(paisa || 0) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+    : 'NO_DATA');
 
-  const entries = liveLedgerData?.entries || [
-    {
-      ledgerEntryId: 'VLE-202609-001',
-      entryNumber: 1,
-      entryDate: '2026-09-05',
-      entryType: 'INVOICE',
-      documentReferenceNumber: 'TAX-INV-8801',
-      description: 'Physical GRN Accepted Intake · PO-2026-0085',
-      debitPaise: 0,
-      creditPaise: 100000,
-      runningBalancePaise: 100000,
-      cashTransactionId: '—',
-    },
-    {
-      ledgerEntryId: 'VLE-202609-002',
-      entryNumber: 2,
-      entryDate: '2026-09-08',
-      entryType: 'PAYMENT',
-      documentReferenceNumber: 'PMT-20260908-0012',
-      description: 'Disbursement via HDFC Bank Transfer',
-      debitPaise: 50000,
-      creditPaise: 0,
-      runningBalancePaise: 50000,
-      cashTransactionId: 'CT-20260908-0001',
-    },
-    {
-      ledgerEntryId: 'VLE-202609-003',
-      entryNumber: 3,
-      entryDate: '2026-09-10',
-      entryType: 'INVOICE',
-      documentReferenceNumber: 'TAX-INV-8821',
-      description: 'Physical GRN Intake · PO-2026-0089 (Short supply matched)',
-      debitPaise: 0,
-      creditPaise: 90000,
-      runningBalancePaise: 140000,
-      cashTransactionId: '—',
-    },
-    {
-      ledgerEntryId: 'VLE-202609-004',
-      entryNumber: 4,
-      entryDate: '2026-09-12',
-      entryType: 'PAYMENT',
-      documentReferenceNumber: 'PMT-20260912-0045',
-      description: 'Partial AP Payment via UPI',
-      debitPaise: 50000,
-      creditPaise: 0,
-      runningBalancePaise: 90000,
-      cashTransactionId: 'CT-20260912-0002',
+  // Only the selected supplier's own subledger is rendered — never another
+  // supplier's rows under this supplier's header.
+  const ledgerLoaded = Boolean(liveLedgerData) && liveLedgerVendorId === currentVendor?.vendorId;
+  const entries = ledgerLoaded ? (liveLedgerData.entries || []) : [];
+
+  // Derived invariant: every entry's running balance must equal the previous
+  // running balance plus that entry's net movement (credits − debits).
+  let invariant = { text: 'NO_DATA', color: 'var(--muted)', note: 'Subledger not loaded for this supplier' };
+  if (ledgerLoaded) {
+    if (!entries.length) {
+      invariant = { text: 'NO_ENTRIES', color: 'var(--muted)', note: 'No subledger entries recorded' };
+    } else {
+      const balanced = entries.every((e, i) => {
+        if (i === 0) return true;
+        const previous = Number(entries[i - 1].runningBalancePaisa || 0);
+        const netMovement = Number(e.creditPaisa || 0) - Number(e.debitPaisa || 0);
+        return Number(e.runningBalancePaisa || 0) - previous === netMovement;
+      });
+      invariant = balanced
+        ? { text: '✓ Entries Balanced', color: '#10b981', note: 'Running balance matches net movements' }
+        : { text: '⚠ Balance Mismatch', color: '#dc2626', note: 'Running balance does not match net movements' };
     }
-  ];
+  }
 
   return `
     <div style="display:flex; flex-direction:column; gap:20px;">
@@ -1097,27 +1224,27 @@ function renderVendorLedgerTab(vendors, isMaster) {
           <div>
             <label style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase;">Select Supplier Subledger</label>
             <select id="vnd-ledger-vendor-select" class="form-control" style="font-weight:700; font-size:14px; min-width:280px; margin-top:2px;">
-              ${vendors.map((v) => `
-                <option value="${v.vendorId}" ${v.vendorId === currentVendor.vendorId ? 'selected' : ''}>
+              ${vendors.length ? vendors.map((v) => `
+                <option value="${v.vendorId}" ${currentVendor && v.vendorId === currentVendor.vendorId ? 'selected' : ''}>
                   ${v.name} (${v.vendorId})
                 </option>
-              `).join('')}
+              `).join('') : `<option value="">NO_DATA — supplier directory not loaded</option>`}
             </select>
           </div>
           <div style="border-left:1px solid var(--line); padding-left:16px;">
-            <div style="font-size:12px; color:var(--muted);">GSTIN: <strong style="font-family:var(--font-mono); color:var(--ink);">${currentVendor.gstNumber || 'N/A'}</strong></div>
-            <div style="font-size:12px; color:var(--muted); margin-top:2px;">PAN: <strong style="font-family:var(--font-mono); color:var(--ink);">${currentVendor.panNumber || 'N/A'}</strong></div>
+            <div style="font-size:12px; color:var(--muted);">GSTIN: <strong style="font-family:var(--font-mono); color:var(--ink);">${currentVendor?.gstNumber || 'NO_DATA'}</strong></div>
+            <div style="font-size:12px; color:var(--muted); margin-top:2px;">PAN: <strong style="font-family:var(--font-mono); color:var(--ink);">${currentVendor?.panNumber || 'NO_DATA'}</strong></div>
           </div>
         </div>
 
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-          <button class="btn btn-secondary" id="vnd-rebuild-summary-btn" data-vendor="${currentVendor.vendorId}" type="button" style="font-weight:700;" title="Deterministically rebuild Vendor financialSummary cache from ledger entries">
+          <button class="btn btn-secondary" id="vnd-rebuild-summary-btn" data-vendor="${currentVendor?.vendorId || ''}" type="button" style="font-weight:700;" title="Deterministically rebuild Vendor financialSummary cache from ledger entries">
             ↻ Rebuild Summary Cache
           </button>
-          <button class="btn btn-ghost" id="vnd-view-statement-btn" data-vendor="${currentVendor.vendorId}" type="button" style="font-weight:600;">
+          <button class="btn btn-ghost" id="vnd-view-statement-btn" data-vendor="${currentVendor?.vendorId || ''}" type="button" style="font-weight:600;">
             📄 Export Statement
           </button>
-          <button class="btn btn-primary" id="vnd-record-advance-btn" data-vendor="${currentVendor.vendorId}" type="button" style="font-weight:700;">
+          <button class="btn btn-primary" id="vnd-record-advance-btn" data-vendor="${currentVendor?.vendorId || ''}" type="button" style="font-weight:700;">
             + Record Advance
           </button>
           <button class="btn btn-ghost" id="vnd-goto-ap-btn" type="button" style="font-weight:600;">
@@ -1129,61 +1256,61 @@ function renderVendorLedgerTab(vendors, isMaster) {
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px;">
         <div class="card" style="padding:14px; border-left:4px solid #2563eb;">
           <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase;">1. Total Invoiced</div>
-          <div style="font-size:20px; font-weight:800; color:var(--ink); margin:4px 0;">₹${(totalInvoiced / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+          <div style="font-size:20px; font-weight:800; color:var(--ink); margin:4px 0;">${money(totalInvoiced)}</div>
           <div style="font-size:10.5px; color:var(--muted);">Approved supplier bills</div>
         </div>
 
         <div class="card" style="padding:14px; border-left:4px solid #16a34a;">
           <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase;">2. Total Paid</div>
-          <div style="font-size:20px; font-weight:800; color:#16a34a; margin:4px 0;">₹${(totalPaid / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+          <div style="font-size:20px; font-weight:800; color:#16a34a; margin:4px 0;">${money(totalPaid)}</div>
           <div style="font-size:10.5px; color:var(--muted);">Canonical disbursements</div>
         </div>
 
         <div class="card" style="padding:14px; border-left:4px solid ${outstanding > 0 ? '#b45309' : '#16a34a'};">
           <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase;">3. Outstanding Payable</div>
-          <div style="font-size:20px; font-weight:800; color:${outstanding > 0 ? '#b45309' : 'var(--ink)'}; margin:4px 0;">₹${(outstanding / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+          <div style="font-size:20px; font-weight:800; color:${outstanding > 0 ? '#b45309' : 'var(--ink)'}; margin:4px 0;">${money(outstanding)}</div>
           <div style="font-size:10.5px; color:var(--muted);">Current net liability</div>
         </div>
 
         <div class="card" style="padding:14px; border-left:4px solid #0891b2;">
           <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase;">4. Advance Balance</div>
-          <div style="font-size:20px; font-weight:800; color:#0891b2; margin:4px 0;">₹${(advance / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+          <div style="font-size:20px; font-weight:800; color:#0891b2; margin:4px 0;">${money(advance)}</div>
           <div style="font-size:10.5px; color:var(--muted);">Unapplied cash advances</div>
         </div>
 
         <div class="card" style="padding:14px; border-left:4px solid #8b5cf6;">
           <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase;">5. Credit Notes Available</div>
-          <div style="font-size:20px; font-weight:800; color:#8b5cf6; margin:4px 0;">₹${(credit / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+          <div style="font-size:20px; font-weight:800; color:#8b5cf6; margin:4px 0;">${money(credit)}</div>
           <div style="font-size:10.5px; color:var(--muted);">Available return credits</div>
         </div>
 
         <div class="card" style="padding:14px; border-left:4px solid #dc2626;">
           <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase;">6. On Hold Amount</div>
-          <div style="font-size:20px; font-weight:800; color:${onHold > 0 ? '#dc2626' : 'var(--ink)'}; margin:4px 0;">₹${(onHold / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+          <div style="font-size:20px; font-weight:800; color:${onHold > 0 ? '#dc2626' : 'var(--ink)'}; margin:4px 0;">${money(onHold)}</div>
           <div style="font-size:10.5px; color:var(--muted);">Disputed / paused bills</div>
         </div>
 
         <div class="card" style="padding:14px; border-left:4px solid #f59e0b;">
           <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase;">7. Overdue Balance</div>
-          <div style="font-size:20px; font-weight:800; color:${overdue > 0 ? '#dc2626' : 'var(--ink)'}; margin:4px 0;">₹${(overdue / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+          <div style="font-size:20px; font-weight:800; color:${overdue > 0 ? '#dc2626' : 'var(--ink)'}; margin:4px 0;">${money(overdue)}</div>
           <div style="font-size:10.5px; color:var(--muted);">Past agreed credit terms</div>
         </div>
 
         <div class="card" style="padding:14px; border-left:4px solid #64748b;">
           <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase;">8. Last Payment Date</div>
-          <div style="font-size:17px; font-weight:800; color:var(--ink); margin:6px 0;">${lastPaymentDate}</div>
+          <div style="font-size:17px; font-weight:800; color:var(--ink); margin:6px 0;">${currentVendor ? lastPaymentDate : 'NO_DATA'}</div>
           <div style="font-size:10.5px; color:var(--muted);">Most recent voucher</div>
         </div>
 
         <div class="card" style="padding:14px; border-left:4px solid #10b981;">
           <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase;">9. Subledger Invariant</div>
-          <div style="font-size:16px; font-weight:800; color:#10b981; margin:6px 0;">✓ 100% Reconciled</div>
-          <div style="font-size:10.5px; color:var(--muted);">Exact double-entry match</div>
+          <div style="font-size:16px; font-weight:800; color:${invariant.color}; margin:6px 0;">${invariant.text}</div>
+          <div style="font-size:10.5px; color:var(--muted);">${invariant.note}</div>
         </div>
 
         <div class="card" style="padding:14px; border-left:4px solid #475569;">
           <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase;">10. Subledger Entries</div>
-          <div style="font-size:20px; font-weight:800; color:var(--ink); margin:4px 0;">${entries.length} Records</div>
+          <div style="font-size:20px; font-weight:800; color:var(--ink); margin:4px 0;">${ledgerLoaded ? `${entries.length} Records` : 'NO_DATA'}</div>
           <div style="font-size:10.5px; color:var(--muted);">Immutable audit chain</div>
         </div>
       </div>
@@ -1213,41 +1340,50 @@ function renderVendorLedgerTab(vendors, isMaster) {
               </tr>
             </thead>
             <tbody>
+              ${!entries.length ? `
+                <tr><td colspan="9" style="text-align:center;padding:28px;color:var(--muted);">
+                  ${!ledgerLoaded
+                    ? (vendors.length
+                      ? "Subledger unavailable for this supplier — ledger data could not be loaded from the backend."
+                      : "Supplier directory not loaded yet — subledger selection is unavailable.")
+                    : "No subledger entries recorded for this supplier."}
+                </td></tr>
+              ` : ''}
               ${entries.map((e) => `
                 <tr style="border-bottom:1px solid var(--line); vertical-align:middle;">
                   <td>
-                    <strong style="font-family:var(--font-mono); color:var(--ink);">${e.ledgerEntryId || `VLE-${e.entryNumber}`}</strong>
-                    <div style="font-size:11px; color:var(--muted);">${e.entryDate ? new Date(e.entryDate).toISOString().split('T')[0] : '2026-09-12'}</div>
+                    <strong style="font-family:var(--font-mono); color:var(--ink);">${e.ledgerEntryId || (e.entryNumber ? `VLE-${e.entryNumber}` : '—')}</strong>
+                    <div style="font-size:11px; color:var(--muted);">${String(e.entryDate || '').slice(0, 10) || 'NO_DATE'}</div>
                   </td>
                   <td>
-                    <span class="badge ${e.entryType === 'PAYMENT' ? 'badge-success' : e.entryType === 'INVOICE' ? 'badge-neutral' : 'badge-accent'}" style="font-size:10.5px; font-weight:700;">
-                      ${e.entryType}
+                    <span class="badge ${e.entryType === 'PAYMENT' || e.entryType === 'PARTIAL_PAYMENT' ? 'badge-success' : ['VENDOR_BILL', 'OPENING_BALANCE'].includes(e.entryType) ? 'badge-neutral' : 'badge-accent'}" style="font-size:10.5px; font-weight:700;">
+                      ${e.entryType}${e.isReversed ? ' · REVERSED' : ''}
                     </span>
                   </td>
                   <td>
-                    <strong style="font-family:var(--font-mono); font-size:12px;">${e.documentReferenceNumber || e.referenceNumber || '—'}</strong>
+                    <strong style="font-family:var(--font-mono); font-size:12px;">${e.referenceNumber || e.referenceId || e.supplierInvoiceNumber || e.purchaseOrderId || '—'}</strong>
                   </td>
                   <td style="color:var(--ink);">
-                    ${e.description}
+                    ${e.notes || e.description || '—'}
                   </td>
                   <td style="text-align:right; font-weight:700; color:#16a34a;">
-                    ${e.debitPaise > 0 ? `₹${(e.debitPaise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
+                    ${Number(e.debitPaisa || 0) > 0 ? `₹${((e.debitPaisa || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
                   </td>
                   <td style="text-align:right; font-weight:700; color:#b45309;">
-                    ${e.creditPaise > 0 ? `₹${(e.creditPaise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
+                    ${Number(e.creditPaisa || 0) > 0 ? `₹${((e.creditPaisa || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
                   </td>
                   <td style="text-align:right; font-weight:800; color:var(--ink);">
-                    ₹${((e.runningBalancePaise || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    ₹${((e.runningBalancePaisa || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                   </td>
                   <td>
                     <code style="font-size:11px; color:var(--muted);">${e.cashTransactionId || '—'}</code>
                   </td>
                   <td style="text-align:center;">
-                    ${e.entryType === 'PAYMENT' && isMaster ? `
-                      <button class="btn btn-sm btn-ghost vnd-reverse-payment-btn" data-id="${e.ledgerEntryId || e.documentReferenceNumber}" type="button" style="font-size:11px; color:#dc2626;" title="Reverse disbursement with offsetting PAID_IN cash posting">
+                    ${['PAYMENT', 'PARTIAL_PAYMENT'].includes(e.entryType) && !e.isReversed && e.paymentId && isMaster ? `
+                      <button class="btn btn-sm btn-ghost vnd-reverse-payment-btn" data-id="${e.paymentId}" type="button" style="font-size:11px; color:#dc2626;" title="Reverse disbursement with offsetting PAID_IN cash posting">
                         Reverse
                       </button>
-                    ` : `<span style="font-size:11px; color:var(--muted);">Audited</span>`}
+                    ` : `<span style="font-size:11px; color:var(--muted);">${e.isReversed ? 'Reversed' : 'Audited'}</span>`}
                   </td>
                 </tr>
               `).join('')}
@@ -1262,43 +1398,30 @@ function renderVendorLedgerTab(vendors, isMaster) {
 // ── Tab 8: AP Aging Analysis & GST 180-Day Advisory Risk Monitor ─────────────
 
 function renderApAgingTab(vendors, isMaster) {
-  const agingBuckets = liveAgingReport?.buckets || {
-    current: 25000000,
-    days1_30: 15000000,
-    days31_60: 8000000,
-    days61_90: 3000000,
-    days91_180: 1000000,
-    days180_plus: 0,
-    totalOutstandingPaisa: 52000000,
-    // Paired paise aliases
-    currentPaise: 25000000,
-    days1_30Paise: 15000000,
-    days31_60Paise: 8000000,
-    days61_90Paise: 3000000,
-    days91_180Paise: 1000000,
-    days180_plusPaise: 0,
-    totalOutstandingPaise: 52000000,
-  };
+  // Report state is explicit: buckets === null → the aging report never
+  // loaded, gstRiskItems === null → the GST monitor never loaded. Neither
+  // state is ever replaced with invented sample figures.
+  const agingReady = Boolean(liveAgingReport?.buckets);
+  const gstReady = Array.isArray(liveAgingReport?.gstRiskItems);
+  const agingBuckets = liveAgingReport?.buckets || {};
+  const gstAlerts = gstReady ? liveAgingReport.gstRiskItems : [];
+  const supplierRows = agingReady ? (liveAgingReport?.vendors || []) : [];
 
-  const gstAlerts = liveAgingReport?.gstRiskItems || [
-    {
-      vendorName: 'KMF Nandini Dairy Depot',
-      invoiceNumber: 'TAX-INV-7712',
-      invoiceDate: '2026-04-10',
-      daysOutstanding: 159,
-      outstandingPaise: 4500000,
-      itcAmountPaise: 810000,
-      riskLevel: 'APPROACHING_180_DAYS',
-    }
-  ];
+  // ₹ formatting that degrades to NO_DATA until the report has been fetched.
+  const money0 = (paisa) => (agingReady
+    ? `₹${(Number(paisa || 0) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+    : 'NO_DATA');
+  const money2 = (paisa) => (agingReady
+    ? `₹${(Number(paisa || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+    : 'NO_DATA');
 
-  const currentAmt = agingBuckets.current !== undefined ? agingBuckets.current : (agingBuckets.currentPaise || 0);
-  const d1_30Amt = agingBuckets.days1_30 !== undefined ? agingBuckets.days1_30 : (agingBuckets.days1_30Paise || agingBuckets.bucket1To30Paise || 0);
-  const d31_60Amt = agingBuckets.days31_60 !== undefined ? agingBuckets.days31_60 : (agingBuckets.days31_60Paise || agingBuckets.bucket31To60Paise || 0);
-  const d61_90Amt = agingBuckets.days61_90 !== undefined ? agingBuckets.days61_90 : (agingBuckets.days61_90Paise || agingBuckets.bucket61To90Paise || 0);
-  const d91_180Amt = agingBuckets.days91_180 !== undefined ? agingBuckets.days91_180 : (agingBuckets.days91_180Paise || agingBuckets.bucket91To120Paise || 0);
-  const d180PlusAmt = agingBuckets.days180_plus !== undefined ? agingBuckets.days180_plus : (agingBuckets.days180_plusPaise || agingBuckets.bucketOver120Paise || 0);
-  const totalAmt = agingBuckets.totalOutstandingPaisa !== undefined ? agingBuckets.totalOutstandingPaisa : (agingBuckets.totalOutstandingPaise || 0);
+  const currentAmt = agingBuckets.current ?? agingBuckets.currentPaise ?? 0;
+  const d1_30Amt = agingBuckets.days1_30 ?? agingBuckets.days1_30Paise ?? 0;
+  const d31_60Amt = agingBuckets.days31_60 ?? agingBuckets.days31_60Paise ?? 0;
+  const d61_90Amt = agingBuckets.days61_90 ?? agingBuckets.days61_90Paise ?? 0;
+  const d91_180Amt = agingBuckets.days91_180 ?? agingBuckets.days91_180Paise ?? 0;
+  const d180PlusAmt = agingBuckets.days180_plus ?? agingBuckets.days180_plusPaise ?? 0;
+  const totalAmt = agingBuckets.totalOutstandingPaisa ?? agingBuckets.totalOutstandingPaise ?? 0;
 
   return `
     <div style="display:flex; flex-direction:column; gap:20px;">
@@ -1315,43 +1438,43 @@ function renderApAgingTab(vendors, isMaster) {
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:12px;">
         <div class="card" style="padding:14px; border-left:4px solid #10b981;">
           <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase;">Current / Not Yet Due</div>
-          <div style="font-size:20px; font-weight:800; color:var(--ink); margin:4px 0;">₹${((currentAmt) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+          <div style="font-size:20px; font-weight:800; color:var(--ink); margin:4px 0;">${money0(currentAmt)}</div>
           <div style="font-size:10.5px; color:#10b981; font-weight:600;">● Within Due Date</div>
         </div>
 
         <div class="card" style="padding:14px; border-left:4px solid #2563eb;">
           <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase;">1 - 30 Days Overdue</div>
-          <div style="font-size:20px; font-weight:800; color:var(--ink); margin:4px 0;">₹${((d1_30Amt) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+          <div style="font-size:20px; font-weight:800; color:var(--ink); margin:4px 0;">${money0(d1_30Amt)}</div>
           <div style="font-size:10.5px; color:var(--muted);">Standard Overdue</div>
         </div>
 
         <div class="card" style="padding:14px; border-left:4px solid #f59e0b;">
           <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase;">31 - 60 Days Overdue</div>
-          <div style="font-size:20px; font-weight:800; color:#b45309; margin:4px 0;">₹${((d31_60Amt) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+          <div style="font-size:20px; font-weight:800; color:#b45309; margin:4px 0;">${money0(d31_60Amt)}</div>
           <div style="font-size:10.5px; color:#b45309; font-weight:600;">Attention Required</div>
         </div>
 
         <div class="card" style="padding:14px; border-left:4px solid #ea580c;">
           <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase;">61 - 90 Days Overdue</div>
-          <div style="font-size:20px; font-weight:800; color:#ea580c; margin:4px 0;">₹${((d61_90Amt) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+          <div style="font-size:20px; font-weight:800; color:#ea580c; margin:4px 0;">${money0(d61_90Amt)}</div>
           <div style="font-size:10.5px; color:#ea580c; font-weight:600;">Significant Overdue</div>
         </div>
 
         <div class="card" style="padding:14px; border-left:4px solid #b91c1c;">
           <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase;">91 - 180 Days Overdue</div>
-          <div style="font-size:20px; font-weight:800; color:#b91c1c; margin:4px 0;">₹${((d91_180Amt) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+          <div style="font-size:20px; font-weight:800; color:#b91c1c; margin:4px 0;">${money0(d91_180Amt)}</div>
           <div style="font-size:10.5px; color:#b91c1c; font-weight:700;">Critical Overdue</div>
         </div>
 
         <div class="card" style="padding:14px; border-left:4px solid #dc2626;">
           <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase;">180+ Days Overdue</div>
-          <div style="font-size:20px; font-weight:800; color:#dc2626; margin:4px 0;">₹${((d180PlusAmt) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+          <div style="font-size:20px; font-weight:800; color:#dc2626; margin:4px 0;">${money0(d180PlusAmt)}</div>
           <div style="font-size:10.5px; color:#dc2626; font-weight:700;">⚠ High Overdue</div>
         </div>
 
         <div class="card" style="padding:14px; border-left:4px solid #1e293b;">
           <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase;">Total AP Outstanding</div>
-          <div style="font-size:20px; font-weight:800; color:var(--ink); margin:4px 0;">₹${((totalAmt) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+          <div style="font-size:20px; font-weight:800; color:var(--ink); margin:4px 0;">${money0(totalAmt)}</div>
           <div style="font-size:10.5px; color:var(--muted);">All active payables</div>
         </div>
       </div>
@@ -1392,14 +1515,22 @@ function renderApAgingTab(vendors, isMaster) {
               </tr>
             </thead>
             <tbody>
-              ${gstAlerts.map((a) => `
+              ${!gstReady ? `
+                <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted);">
+                  GST 180-day monitor unavailable — the statutory risk report could not be loaded from the backend.
+                </td></tr>
+              ` : !gstAlerts.length ? `
+                <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted);">
+                  No supplier invoices are currently within the statutory 180-day payment window.
+                </td></tr>
+              ` : gstAlerts.map((a) => `
                 <tr>
                   <td><strong>${a.vendorName}</strong></td>
                   <td><code>${a.invoiceNumber}</code></td>
-                  <td>${a.invoiceDate}</td>
+                  <td>${a.invoiceDate || 'NO_DATE'}</td>
                   <td><strong style="color:${a.daysOutstanding >= 180 ? '#dc2626' : '#ea580c'};">${a.daysOutstanding} Days</strong></td>
-                  <td style="text-align:right; font-weight:700;">₹${((a.outstandingPaise) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                  <td style="text-align:right; font-weight:800; color:#dc2626;">₹${((a.itcAmountPaise) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                  <td style="text-align:right; font-weight:700;">${money2(a.outstandingPaise)}</td>
+                  <td style="text-align:right; font-weight:800; color:#dc2626;">${money2(a.itcAmountPaise)}</td>
                   <td>
                     <span class="badge ${a.daysOutstanding >= 180 ? 'badge-danger' : 'badge-warning'}" style="font-size:10px;">
                       ${a.daysOutstanding >= 180 ? 'CRITICAL: DAY 180 EXCEEDED' : 'WARNING: APPROACHING 180 DAYS'}
@@ -1438,26 +1569,34 @@ function renderApAgingTab(vendors, isMaster) {
               </tr>
             </thead>
             <tbody>
-              ${vendors.map((v) => {
-                const fs = v.financialSummary || {};
-                const out = fs.outstandingBalancePaise || 0;
+              ${!agingReady ? `
+                <tr><td colspan="9" style="text-align:center;padding:24px;color:var(--muted);">
+                  Aging report unavailable — supplier-wise buckets could not be loaded from the backend.
+                </td></tr>
+              ` : !supplierRows.length ? `
+                <tr><td colspan="9" style="text-align:center;padding:24px;color:var(--muted);">
+                  No outstanding supplier balances as of ${liveAgingReport?.asOfDate || 'the report date'}.
+                </td></tr>
+              ` : supplierRows.map((row) => {
+                const total = Number(row.totalOutstandingPaisa || 0);
+                const cell = (val) => `₹${((Number(val || 0)) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
                 return `
                   <tr style="border-bottom:1px solid var(--line);">
                     <td>
-                      <strong style="color:var(--ink);">${v.name}</strong>
-                      <div style="font-size:11px; color:var(--muted);">${v.vendorId}</div>
+                      <strong style="color:var(--ink);">${row.vendorName || row.vendorId}</strong>
+                      <div style="font-size:11px; color:var(--muted);">${row.vendorId}</div>
                     </td>
-                    <td style="text-align:right;">₹${((out * 0.5) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-                    <td style="text-align:right;">₹${((out * 0.2) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-                    <td style="text-align:right;">₹${((out * 0.15) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-                    <td style="text-align:right;">₹${((out * 0.1) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-                    <td style="text-align:right;">₹${((out * 0.05) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-                    <td style="text-align:right; font-weight:700; color:${out > 500000 ? '#dc2626' : 'inherit'};">₹0</td>
-                    <td style="text-align:right; font-weight:800; color:${out > 0 ? '#b45309' : '#16a34a'};">
-                      ₹${(out / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    <td style="text-align:right;">${cell(row.current)}</td>
+                    <td style="text-align:right;">${cell(row.days1_30)}</td>
+                    <td style="text-align:right;">${cell(row.days31_60)}</td>
+                    <td style="text-align:right;">${cell(row.days61_90)}</td>
+                    <td style="text-align:right;">${cell(row.days91_180)}</td>
+                    <td style="text-align:right; font-weight:700; color:${Number(row.days180_plus || 0) > 0 ? '#dc2626' : 'inherit'};">${cell(row.days180_plus)}</td>
+                    <td style="text-align:right; font-weight:800; color:${total > 0 ? '#b45309' : '#16a34a'};">
+                      ₹${((total) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                     </td>
                     <td style="text-align:center;">
-                      <button class="btn btn-sm btn-ghost vnd-aging-view-ledger-btn" data-vendor="${v.vendorId}" type="button" style="font-size:11px;">
+                      <button class="btn btn-sm btn-ghost vnd-aging-view-ledger-btn" data-vendor="${row.vendorId}" type="button" style="font-size:11px;">
                         View Subledger
                       </button>
                     </td>
@@ -1475,7 +1614,27 @@ function renderApAgingTab(vendors, isMaster) {
 function updateContainer() {
   const content = document.getElementById("vnd-tab-content");
   if (content) {
+    // Remember caret position so a re-render mid-typing doesn't drop input.
+    const activeEl = document.activeElement;
+    const restoreSearch = activeEl && activeEl.id === "vnd-search-input"
+      ? { value: activeEl.value, caret: activeEl.selectionStart ?? activeEl.value.length }
+      : null;
+
     content.innerHTML = renderActiveTabContent(liveVendors || SAMPLE_VENDORS, liveOrders || SAMPLE_ORDERS, state.user?.role === "MASTER");
+    // The tab body was replaced wholesale — re-bind every element inside it.
+    wireVendors();
+
+    if (restoreSearch) {
+      const searchInput = document.getElementById("vnd-search-input");
+      if (searchInput) {
+        searchInput.focus();
+        try {
+          searchInput.setSelectionRange(restoreSearch.caret, restoreSearch.caret);
+        } catch (err) {
+          // Input types without a selection range: value already restored.
+        }
+      }
+    }
   } else {
     const container = document.getElementById("main-content") || document.querySelector("#app");
     if (container) {
@@ -1549,9 +1708,11 @@ export function wireVendors(container, subroute) {
     });
   }
 
-  // Refresh Button
+  // Refresh Button (header-level: rendered once by renderVendors() and kept
+  // across tab re-renders → guard against duplicate listeners).
   const refreshBtn = document.getElementById("refresh-vendors-btn");
-  if (refreshBtn) {
+  if (refreshBtn && !refreshBtn._vndWired) {
+    refreshBtn._vndWired = true;
     refreshBtn.addEventListener("click", async () => {
       showToast("Refreshing supplier master & order tracking data...", "info");
       try {
@@ -1562,8 +1723,9 @@ export function wireVendors(container, subroute) {
         if (resVendors?.success && resVendors.data?.vendors) {
           liveVendors = resVendors.data.vendors;
         }
-        if (resOrders?.success && resOrders.data?.purchaseOrders) {
-          liveOrders = resOrders.data.purchaseOrders;
+        // /procurement/orders returns data.orders (never data.purchaseOrders).
+        if (resOrders?.success && Array.isArray(resOrders.data?.orders)) {
+          liveOrders = resOrders.data.orders;
         }
         updateContainer();
         showToast("Supplier data refreshed successfully.", "success");
@@ -1573,9 +1735,10 @@ export function wireVendors(container, subroute) {
     });
   }
 
-  // Export ZURF v1 Report
+  // Export ZURF v1 Report (header-level → wired once)
   const zurfBtn = document.getElementById("vnd-export-zurf-btn");
-  if (zurfBtn) {
+  if (zurfBtn && !zurfBtn._vndWired) {
+    zurfBtn._vndWired = true;
     zurfBtn.addEventListener("click", async () => {
       showToast("Generating ZURF v1 Sourcing & Supplier Register...", "info");
       try {
@@ -1605,9 +1768,10 @@ export function wireVendors(container, subroute) {
     });
   }
 
-  // Upload Vendor Document Action
+  // Upload Vendor Document Action (header-level → wired once)
   const uploadVendorDocBtn = document.querySelector("#upload-vendor-doc-btn");
-  if (uploadVendorDocBtn) {
+  if (uploadVendorDocBtn && !uploadVendorDocBtn._vndWired) {
+    uploadVendorDocBtn._vndWired = true;
     uploadVendorDocBtn.addEventListener("click", () => {
       openUniversalDocumentModal({
         title: "Upload Vendor Contract / Rate Card / FSSAI",
@@ -2150,9 +2314,10 @@ export function wireVendors(container, subroute) {
     });
   });
 
-  // Onboard New Supplier
+  // Onboard New Supplier (header-level → wired once)
   const addVendorBtn = document.getElementById("add-vendor-btn");
-  if (addVendorBtn) {
+  if (addVendorBtn && !addVendorBtn._vndWired) {
+    addVendorBtn._vndWired = true;
     addVendorBtn.addEventListener("click", () => {
       openModal("Onboard New Supplier (Duplicate-Protected)", `
         <form id="vnd-onboard-form" style="display:flex;flex-direction:column;gap:14px;">
@@ -2222,10 +2387,18 @@ export function wireVendors(container, subroute) {
           showToast("Checking duplicate detection rules...", "info");
           const res = await apiPost("/api/v1/vendors", payload);
           if (res?.success) {
-            showToast(`Supplier ${res.data?.vendor?.vendorId || "registered"} onboarded successfully!`, "success");
-            if (!liveVendors) liveVendors = [];
-            liveVendors.unshift(res.data?.vendor || { ...payload, vendorId: `VEN-${Date.now().toString().slice(-4)}`, status: "ACTIVE" });
-            updateContainer();
+            const createdVendor = res.data?.vendor || null;
+            showToast(`Supplier ${createdVendor?.vendorId || payload.name || "registered"} onboarded successfully!`, "success");
+            if (createdVendor && createdVendor.vendorId) {
+              // Server returned the canonical document — show it as-is.
+              if (!Array.isArray(liveVendors)) liveVendors = [];
+              liveVendors.unshift(createdVendor);
+              updateContainer();
+            } else {
+              // No canonical document in the payload → refetch rather than
+              // inventing a vendorId for the directory.
+              await refreshFinancialViews();
+            }
           } else if (res?.code === "DUPLICATE_VENDOR") {
             showToast(`Duplicate Alert: ${res.message}`, "error");
           } else {
@@ -2251,15 +2424,15 @@ export function wireVendors(container, subroute) {
     showToast("Refreshing AP Work Queue...", "info");
     try {
       const res = await apiGet("/api/v1/vendor-ledger/ap/queue");
-      if (res?.success && res.data?.queue) {
-        liveApInvoices = res.data.queue;
+      if (res?.success && Array.isArray(res.data?.queue)) {
+        liveApInvoices = res.data.queue.map(normalizeApQueueRow);
         showToast("AP Queue updated from live backend.", "success");
       } else {
-        showToast("AP Queue synchronized.", "info");
+        showToast("AP Queue response carried no rows.", "info");
       }
       updateContainer();
     } catch (err) {
-      showToast("AP Queue local sync active.", "info");
+      showToast(err.message || "AP Queue unavailable — showing last loaded state.", "error");
     }
   });
 
@@ -2273,16 +2446,19 @@ export function wireVendors(container, subroute) {
       ]);
       if (resAging?.success || resGst?.success) {
         liveAgingReport = {
-          buckets: resAging?.data?.buckets || {},
-          gstRiskItems: resGst?.data?.riskInvoices || [],
+          asOfDate: resAging?.data?.asOfDate || resGst?.data?.asOfDate || null,
+          buckets: resAging?.success ? resAging.data?.buckets || null : null,
+          vendors: resAging?.success ? resAging.data?.vendors || [] : [],
+          // null = the GST report could not be fetched (distinct from "no risks").
+          gstRiskItems: resGst?.success ? mapGstRiskItems(resGst.data?.flaggedInvoices) : null,
         };
         showToast("AP Aging analysis & GST monitor updated.", "success");
       } else {
-        showToast("Aging data synchronized.", "info");
+        showToast("Aging report carried no data.", "info");
       }
       updateContainer();
     } catch (err) {
-      showToast("Aging calculations active.", "info");
+      showToast(err.message || "Aging report unavailable.", "error");
     }
   });
 
@@ -2308,13 +2484,9 @@ export function wireVendors(container, subroute) {
             });
             if (res?.success) {
               showToast(`Full payment of ₹${(amountPaise / 100).toFixed(2)} posted successfully!`, "success");
-              const inv = liveApInvoices?.find((i) => i.invoiceId === invId);
-              if (inv) {
-                inv.paidPaisa = (inv.paidPaisa || 0) + amountPaise;
-                inv.outstandingPaisa = 0;
-                inv.status = "PAID";
-              }
-              updateContainer();
+              // Server is authoritative again — drop the row caches and repaint
+              // from a fresh AP queue + financialSummary read.
+              await refreshFinancialViews();
             } else {
               showToast(res?.message || "Payment execution failed.", "error");
             }
@@ -2389,13 +2561,7 @@ export function wireVendors(container, subroute) {
           });
           if (res?.success) {
             showToast(`Partial payment of ₹${amountInr.toFixed(2)} posted! Remaining: ₹${((currentOutstanding - amountPaise) / 100).toFixed(2)}`, "success");
-            const inv = liveApInvoices?.find((i) => i.invoiceId === invId);
-            if (inv) {
-              inv.paidPaisa = (inv.paidPaisa || 0) + amountPaise;
-              inv.outstandingPaisa = Math.max(0, currentOutstanding - amountPaise);
-              inv.status = inv.outstandingPaisa === 0 ? "PAID" : "PARTIAL";
-            }
-            updateContainer();
+            await refreshFinancialViews();
           } else {
             showToast(res?.message || "Failed to record partial payment.", "error");
           }
@@ -2423,9 +2589,8 @@ export function wireVendors(container, subroute) {
               });
               if (res?.success) {
                 showToast(`Payment hold released for ${invId}.`, "success");
-                const inv = liveApInvoices?.find((i) => i.invoiceId === invId);
-                if (inv) { inv.holdStatus = "NONE"; inv.holdReason = ""; }
-                updateContainer();
+                // Server is authoritative — repaint from a fresh queue read.
+                await refreshFinancialViews();
               } else {
                 showToast(res?.message || "Failed to release hold.", "error");
               }
@@ -2446,13 +2611,24 @@ export function wireVendors(container, subroute) {
             </div>
           </form>
         `);
-        document.getElementById("vnd-hold-form")?.addEventListener("submit", (e) => {
+        document.getElementById("vnd-hold-form")?.addEventListener("submit", async (e) => {
           e.preventDefault();
-          const reason = document.getElementById("hold-reason-input")?.value;
-          const inv = liveApInvoices?.find((i) => i.invoiceId === invId);
-          if (inv) { inv.holdStatus = "ON_HOLD"; inv.holdReason = reason; }
-          showToast(`Payment hold placed on ${invId}: ${reason}`, "info");
-          updateContainer();
+          const reason = document.getElementById("hold-reason-input")?.value?.trim();
+          if (!reason) return;
+          try {
+            const res = await apiPost(`/api/v1/vendor-ledger/bills/${invId}/holds`, {
+              holdCode: "FINANCE_REVIEW",
+              reason,
+            });
+            if (res?.success) {
+              showToast(`Payment hold placed on ${invId}: ${reason}`, "success");
+              await refreshFinancialViews();
+            } else {
+              showToast(res?.message || "Failed to place hold.", "error");
+            }
+          } catch (err) {
+            showToast(err.message || "Failed to place hold.", "error");
+          }
         });
       }
     });
@@ -2482,7 +2658,7 @@ export function wireVendors(container, subroute) {
           const res = await apiPost("/api/v1/vendor-ledger/advances/apply", { vendorId, invoiceId: invId, amountPaise });
           if (res?.success) {
             showToast("Advance successfully applied to AP invoice! Zero cash impact.", "success");
-            updateContainer();
+            await refreshFinancialViews();
           } else {
             showToast(res?.message || "Failed to apply advance.", "error");
           }
@@ -2521,7 +2697,7 @@ export function wireVendors(container, subroute) {
           const res = await apiPost("/api/v1/vendor-ledger/credits/apply", { vendorId, invoiceId: invId, amountPaise, creditNoteReference: ref });
           if (res?.success) {
             showToast("Credit note applied to bill.", "success");
-            updateContainer();
+            await refreshFinancialViews();
           } else {
             showToast(res?.message || "Failed to apply credit note.", "error");
           }
@@ -2537,12 +2713,16 @@ export function wireVendors(container, subroute) {
   if (rebuildBtn) {
     rebuildBtn.addEventListener("click", async () => {
       const vendorId = rebuildBtn.dataset.vendor;
+      if (!vendorId) {
+        showToast("No supplier selected for the summary rebuild.", "warning");
+        return;
+      }
       try {
         showToast(`Rebuilding financial summary cache for ${vendorId}...`, "info");
         const res = await apiPost(`/api/v1/vendor-ledger/vendors/${vendorId}/rebuild-summary`);
         if (res?.success) {
           showToast("Financial summary rebuilt! Subledger invariant verified: 100% reconciled.", "success");
-          updateContainer();
+          await refreshFinancialViews();
         } else {
           showToast(res?.message || "Rebuild failed.", "error");
         }
@@ -2557,26 +2737,36 @@ export function wireVendors(container, subroute) {
   if (stmtBtn) {
     stmtBtn.addEventListener("click", async () => {
       const vendorId = stmtBtn.dataset.vendor;
+      if (!vendorId) {
+        showToast("No supplier selected for the statement.", "warning");
+        return;
+      }
       try {
         showToast(`Fetching subledger statement for ${vendorId}...`, "info");
         const res = await apiGet(`/api/v1/vendor-ledger/vendors/${vendorId}/statement`);
         if (res?.success) {
-          const stmt = res.data?.statement || {};
+          // Statement payload: data = { vendorId, vendorName, gstNumber,
+          // openingBalancePaisa, periodBilledPaisa, periodPaidPaisa,
+          // closingBalancePaisa, transactions[] }.
+          const stmt = res.data || {};
+          const transactions = Array.isArray(stmt.transactions) ? stmt.transactions : [];
+          const stmtMoney = (paisa) => `₹${((Number(paisa || 0)) / 100).toFixed(2)}`;
           openModal(`Subledger Statement: ${stmt.vendorName || vendorId}`, `
             <div style="font-family:monospace;font-size:12px;background:#f8fafc;padding:16px;border-radius:6px;max-height:420px;overflow-y:auto;">
-              <div><strong>VENDOR:</strong> ${stmt.vendorName} (${stmt.vendorId})</div>
-              <div><strong>GSTIN:</strong> ${stmt.gstNumber || "N/A"}</div>
+              <div><strong>VENDOR:</strong> ${stmt.vendorName || vendorId} (${stmt.vendorId || vendorId})</div>
+              <div><strong>GSTIN:</strong> ${stmt.gstNumber || "NO_DATA"}</div>
+              <div><strong>PERIOD:</strong> ${stmt.startDate || 'ALL'} → ${stmt.endDate || 'LATEST'}</div>
               <div><strong>GENERATED:</strong> ${new Date().toLocaleString()}</div>
               <hr style="margin:10px 0;" />
-              <div>Opening Balance: ₹${((stmt.openingBalancePaise || 0) / 100).toFixed(2)}</div>
-              <div>Total Invoiced: ₹${((stmt.totalInvoicedPaise || 0) / 100).toFixed(2)}</div>
-              <div>Total Payments: ₹${((stmt.totalPaidPaise || 0) / 100).toFixed(2)}</div>
-              <div>Closing Outstanding: ₹${((stmt.closingBalancePaise || 0) / 100).toFixed(2)}</div>
+              <div>Opening Balance: ${stmtMoney(stmt.openingBalancePaisa)}</div>
+              <div>Period Billed: ${stmtMoney(stmt.periodBilledPaisa)}</div>
+              <div>Period Paid: ${stmtMoney(stmt.periodPaidPaisa)}</div>
+              <div>Closing Balance: ${stmtMoney(stmt.closingBalancePaisa)}</div>
               <hr style="margin:10px 0;" />
-              <div><strong>TRANSACTIONS (${stmt.entries?.length || 0}):</strong></div>
-              ${(stmt.entries || []).map((e) => `
-                <div style="margin-top:4px;">${e.entryDate?.split("T")[0] || ""} · [${e.entryType}] · Ref: ${e.documentReferenceNumber || "—"} · Dr: ₹${((e.debitPaise || 0) / 100).toFixed(2)} · Cr: ₹${((e.creditPaise || 0) / 100).toFixed(2)} · Bal: ₹${((e.runningBalancePaise || 0) / 100).toFixed(2)}</div>
-              `).join("")}
+              <div><strong>TRANSACTIONS (${transactions.length}):</strong></div>
+              ${transactions.length ? transactions.map((e) => `
+                <div style="margin-top:4px;">${String(e.entryDate || '').slice(0, 10) || 'NO_DATE'} · [${e.entryType}] · Ref: ${e.referenceNumber || e.referenceId || e.purchaseOrderId || "—"} · Dr: ${stmtMoney(e.debitPaisa)} · Cr: ${stmtMoney(e.creditPaisa)} · Bal: ${stmtMoney(e.runningBalancePaisa)}</div>
+              `).join("") : `<div style="margin-top:4px;">No transactions recorded in this period.</div>`}
             </div>
             <div style="text-align:right;margin-top:14px;">
               <button class="btn btn-primary" onclick="window.print()">Print Statement</button>
@@ -2608,7 +2798,7 @@ export function wireVendors(container, subroute) {
             });
             if (res?.success) {
               showToast("Payment reversed. Offsetting PAID_IN cash transaction posted.", "success");
-              updateContainer();
+              await refreshFinancialViews();
             } else {
               showToast(res?.message || "Failed to reverse payment.", "error");
             }
@@ -2625,6 +2815,10 @@ export function wireVendors(container, subroute) {
   if (advanceBtn) {
     advanceBtn.addEventListener("click", () => {
       const vendorId = advanceBtn.dataset.vendor;
+      if (!vendorId) {
+        showToast("No supplier selected to record an advance against.", "warning");
+        return;
+      }
       openModal(`Record Advance to Supplier (${vendorId})`, `
         <form id="vnd-advance-form" style="display:flex;flex-direction:column;gap:14px;">
           <p style="font-size:12.5px;color:var(--muted);">Advance payments post directly to CashTransaction (PAID_OUT) and credit the vendor advance balance for future bill offset.</p>
@@ -2671,7 +2865,7 @@ export function wireVendors(container, subroute) {
           });
           if (res?.success) {
             showToast(`Vendor advance of ₹${(amountPaise / 100).toFixed(2)} posted with CashTransaction link!`, "success");
-            updateContainer();
+            await refreshFinancialViews();
           } else {
             showToast(res?.message || "Failed to record advance.", "error");
           }
@@ -2738,6 +2932,9 @@ export function wireVendors(container, subroute) {
       }
     });
   });
+
+  // ── Lazy-load whatever the freshly rendered tab needs, then paint once ──
+  ensureActiveTabData();
 }
 
 function openImportMaterialMappingsModal(vendor) {

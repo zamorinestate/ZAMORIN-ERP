@@ -15,6 +15,7 @@ const {
   recordAdvance,
   applyAdvance,
   applyCreditNote,
+  placePaymentHold,
   releasePaymentHold,
   getApAgingReport,
   getGstMonitoringReport,
@@ -112,6 +113,12 @@ router.post(
 );
 
 // 6. Payment Holds
+router.post(
+  '/bills/:invoiceId/holds',
+  authorize('FINANCE:POST', { allowedRoles: ['MASTER'] }),
+  placePaymentHold
+);
+
 router.post(
   '/bills/:invoiceId/holds/release',
   authorize('FINANCE:POST', { allowedRoles: ['MASTER'] }),
