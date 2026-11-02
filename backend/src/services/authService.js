@@ -490,7 +490,13 @@ function createAccessToken({
 async function recordFailedLogin(user) {
   user.failedLoginAttempts += 1;
 
+  // Primary Master accounts cannot be moved out of ACTIVE (enforced by the
+  // User model validator), so they are never locked by failed-login attempts;
+  // we only track the counter for audit purposes.
+  const canLock = !user.isPrimaryMaster;
+
   if (
+    canLock &&
     user.failedLoginAttempts >=
     MAX_FAILED_LOGIN_ATTEMPTS
   ) {
@@ -504,7 +510,12 @@ async function recordFailedLogin(user) {
     );
   }
 
-  await user.save();
+  try {
+    await user.save();
+  } catch (_saveErr) {
+    // Never let a persistence/validation failure mask the original
+    // invalid-credentials error surfaced to the caller.
+  }
 }
 
 async function clearExpiredTemporaryLock(user) {
