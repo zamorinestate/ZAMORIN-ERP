@@ -63,3 +63,13 @@
   --shadow-card: var(--shadow-card);
   --shadow-pop: var(--shadow-pop);
 }
+
+/* Layout: only the main content scrolls; the sidebar stays fixed. */
+@layer base {
+  html, body { height: 100%; overflow: hidden; }
+  .app-shell, .shell { height: 100vh; min-height: 100vh; overflow: hidden; }
+  .main-shell, .main-wrapper, .main { overflow-y: auto; overflow-x: hidden; }
+  .sidebar { overflow: hidden; }
+  .sb-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+  .sb-scroll::-webkit-scrollbar { display: none; }
+}

@@ -6570,3 +6570,13 @@ h1, h2, h3, h4 { font-family: inherit; color: var(--ink); }
 .zs-brand { flex: 0 0 auto; }
 .zs-shell .zs-tab::before, .zs-shell .zs-tab::after { display: none !important; content: none !important; }
 .zs-shell .sub.nav-link::before { display: none !important; content: none !important; }
+
+/* =============================================================================
+   LAYOUT: only the main content scrolls; the sidebar stays fixed (no page scroll)
+   ============================================================================= */
+html, body { height: 100%; overflow: hidden; }
+.app-shell, .shell { height: 100vh; min-height: 100vh; overflow: hidden; }
+.main-shell, .main-wrapper, .main { overflow-y: auto; overflow-x: hidden; }
+.sidebar { overflow: hidden; }
+.sb-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+.sb-scroll::-webkit-scrollbar { display: none; }
