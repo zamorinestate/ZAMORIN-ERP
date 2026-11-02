@@ -6590,6 +6590,7 @@ html, body { height: 100%; overflow: hidden; }
 /* =============================================================================
    FORM ELEMENTS: consistent kit styling for bare inputs/selects/textareas
    ============================================================================= */
+@layer base {
 input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]):not([type="file"]),
 select,
 textarea {
@@ -6629,3 +6630,15 @@ input::placeholder,
 textarea::placeholder {
   color: var(--faint);
 }
+
+/* Native select dropdown list + option styling */
+select option {
+  background: var(--surface);
+  color: var(--ink);
+}
+select optgroup {
+  background: var(--surface-2);
+  color: var(--mute);
+  font-weight: 600;
+}
+} /* end @layer base */

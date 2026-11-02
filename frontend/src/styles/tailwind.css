@@ -80,6 +80,7 @@
   }
 
   /* Form elements: consistent kit styling for bare inputs/selects/textareas */
+  @layer base {
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]):not([type="file"]),
   select,
   textarea {
@@ -112,4 +113,8 @@
     outline: 0;
   }
   input::placeholder, textarea::placeholder { color: var(--faint); }
+
+  select option { background: var(--surface); color: var(--ink); }
+  select optgroup { background: var(--surface-2); color: var(--mute); font-weight: 600; }
+  } /* end @layer base */
 }
