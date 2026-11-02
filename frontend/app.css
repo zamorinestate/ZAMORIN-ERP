@@ -6587,6 +6587,10 @@ html, body { height: 100%; overflow: hidden; }
   scrollbar-width: thin;
 }
 
+/* Keep the topbar above the sidebar when scrolling (sidebar must not overlay nav bar) */
+.sidebar { z-index: 20 !important; }
+.topbar { z-index: 30 !important; }
+
 /* =============================================================================
    FORM ELEMENTS: consistent kit styling for bare inputs/selects/textareas
    ============================================================================= */

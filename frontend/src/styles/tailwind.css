@@ -79,6 +79,10 @@
     scrollbar-width: thin;
   }
 
+  /* Topbar paints above the sidebar */
+  .sidebar { z-index: 20 !important; }
+  .topbar { z-index: 30 !important; }
+
   /* Form elements: consistent kit styling for bare inputs/selects/textareas */
   @layer base {
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]):not([type="file"]),
