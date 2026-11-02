@@ -78,4 +78,38 @@
     overflow-x: hidden !important;
     scrollbar-width: thin;
   }
+
+  /* Form elements: consistent kit styling for bare inputs/selects/textareas */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]):not([type="file"]),
+  select,
+  textarea {
+    background: var(--surface);
+    color: var(--ink);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-ctl, 10px);
+    font: inherit;
+    min-height: 44px;
+    padding: 0 14px;
+    box-sizing: border-box;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  select {
+    padding-right: 40px;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-color: var(--surface);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%238795AD' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+    background-position: right 14px center;
+    background-repeat: no-repeat;
+  }
+  textarea { min-height: 96px; padding: 12px 14px; resize: vertical; }
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]):not([type="file"]):focus,
+  select:focus,
+  textarea:focus {
+    border-color: var(--brand);
+    box-shadow: 0 0 0 4px var(--ring);
+    outline: 0;
+  }
+  input::placeholder, textarea::placeholder { color: var(--faint); }
 }
