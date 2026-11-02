@@ -70,5 +70,12 @@
   .app-shell, .shell { height: 100vh; min-height: 100vh; overflow: hidden; }
   .main-shell, .main-wrapper, .main { overflow-y: auto; overflow-x: hidden; }
   .sidebar { overflow: hidden; }
-  .sb-scroll { overflow-y: auto; scrollbar-width: thin; }
+  .zs-shell .sidebar-nav,
+  .zs-shell .sb-scroll,
+  .sidebar-nav,
+  .sb-scroll {
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    scrollbar-width: thin;
+  }
 }
