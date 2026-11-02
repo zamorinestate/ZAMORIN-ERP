@@ -6374,7 +6374,7 @@ h1, h2, h3, h4 { font-family: inherit; color: var(--ink); }
 /* ============================================================
    KIT v3 SHELL: full-width top bar, grouped sidebar (Main / Navigation / Sidebar boards)
    ============================================================ */
-:root { --topbar-height: 64px; }
+:root { --topbar-height: 68px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .bd { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; line-height: 1.4; }
 .bd i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
