@@ -379,7 +379,7 @@ async function redeemGiftCard({
 
   // Validate secret code hash
   if (hashSecret(secretCode) !== giftCard.cardCodeHash) {
-    throw new ApiError(401, 'INVALID_GIFT_CARD_SECRET', 'Gift card secret code is incorrect.');
+    throw new ApiError(400, 'INVALID_GIFT_CARD_SECRET', 'Gift card secret code is incorrect.');
   }
 
   // Concurrency-guarded atomic update

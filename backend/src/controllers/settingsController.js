@@ -1839,6 +1839,17 @@ async function connectGoogleBusinessProfile(req, res, next) {
   }
 }
 
+async function disconnectGoogleBusinessProfile(req, res, next) {
+  try {
+    const organisationId = req.user?.organisationId || 'ORG-ZAMORIN';
+    const cafeId = req.body?.cafeId || req.query?.cafeId || req.user?.primaryCafeId || 'ZC-0001';
+    const result = await gbpService.disconnectProfile({ organisationId, cafeId });
+    return res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function syncGoogleReviews(req, res, next) {
   try {
     const organisationId = req.user?.organisationId || 'ORG-ZAMORIN';
@@ -1926,6 +1937,7 @@ module.exports = {
   addEmployeeSupportTicketReply,
   getGoogleBusinessSummary,
   connectGoogleBusinessProfile,
+  disconnectGoogleBusinessProfile,
   syncGoogleReviews,
   replyGoogleReview,
   updateGoogleBusinessMetrics,

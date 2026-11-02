@@ -51,6 +51,7 @@ const {
   addEmployeeSupportTicketReply,
   getGoogleBusinessSummary,
   connectGoogleBusinessProfile,
+  disconnectGoogleBusinessProfile,
   syncGoogleReviews,
   replyGoogleReview,
   updateGoogleBusinessMetrics,
@@ -148,6 +149,7 @@ router.use('/updates', updateRoutes);
 // ── Google Business Profile Dashboard (A005 & A006) ─────────────────────────
 router.get('/google-business/summary', getGoogleBusinessSummary);
 router.post('/google-business/connect', connectGoogleBusinessProfile);
+router.post('/google-business/disconnect', disconnectGoogleBusinessProfile);
 router.post('/google-business/sync-reviews', syncGoogleReviews);
 router.post('/google-business/reviews/:reviewId/reply', replyGoogleReview);
 router.post('/google-business/metrics', updateGoogleBusinessMetrics);

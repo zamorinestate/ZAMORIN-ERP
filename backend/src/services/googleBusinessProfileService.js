@@ -177,10 +177,30 @@ async function getProfileSummary({ organisationId, cafeId }) {
   };
 }
 
+/**
+ * Disconnect a Google Business Profile for an outlet
+ */
+async function disconnectProfile({ organisationId, cafeId }) {
+  if (!organisationId || !cafeId) {
+    throw new ApiError(400, 'MISSING_GBP_FIELDS', 'organisationId and cafeId are required.');
+  }
+  const profile = await GoogleBusinessProfile.findOne({ organisationId, cafeId });
+  if (!profile) {
+    return { success: true, connected: false, message: 'No connected profile found.' };
+  }
+  profile.syncStatus = 'DISCONNECTED';
+  profile.locationId = '';
+  profile.displayName = '';
+  profile.lastSyncedAt = new Date();
+  await profile.save();
+  return { success: true, connected: false, message: 'Google Business Profile disconnected.' };
+}
+
 module.exports = {
   upsertProfileConnection,
   recordInsightsMetrics,
   syncReviews,
   replyToReview,
   getProfileSummary,
+  disconnectProfile,
 };

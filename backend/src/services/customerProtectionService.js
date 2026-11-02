@@ -76,14 +76,21 @@ async function requestCustomerOtp({ organisationId, cafeId = 'ZC-0001', customer
 
   await challenge.save();
 
-  return {
+  // Security: never leak the raw OTP in the API response in production. In
+  // non-production (dev/test) the value is returned so QA can complete the
+  // flow without an SMS gateway; production relies on the SMS delivery path.
+  const isProduction = process.env.NODE_ENV === 'production';
+  const result = {
     success: true,
     challengeId,
-    otp: rawOtp,
     expiresAt,
     maskedPhone: maskCustomerPhone(targetPhone),
     message: `Verification OTP dispatched to customer ${maskCustomerPhone(targetPhone)}`,
   };
+  if (!isProduction) {
+    result.otp = rawOtp;
+  }
+  return result;
 }
 
 /**
