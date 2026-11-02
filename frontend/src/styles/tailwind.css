@@ -70,6 +70,5 @@
   .app-shell, .shell { height: 100vh; min-height: 100vh; overflow: hidden; }
   .main-shell, .main-wrapper, .main { overflow-y: auto; overflow-x: hidden; }
   .sidebar { overflow: hidden; }
-  .sb-scroll { scrollbar-width: none; -ms-overflow-style: none; }
-  .sb-scroll::-webkit-scrollbar { display: none; }
+  .sb-scroll { overflow-y: auto; scrollbar-width: thin; }
 }
