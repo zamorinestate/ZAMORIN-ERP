@@ -53,7 +53,19 @@ async function fetchPassbookOverview() {
   try {
     const payload = await apiGet(`/passbook/overview?cafeId=${currentScope}&period=${currentPeriod}`);
     if (payload?.data) {
-      passbookData = payload.data;
+      const d = payload.data;
+      // Normalise backend field names (totalBookBalancePaisa, totalReservedPaisa,
+      // freeBalancePaisa, ...) onto the UI's expected KPI names so the seeded
+      // treasury data actually renders instead of showing ₹0.00.
+      if (d.kpis) {
+        const k = d.kpis;
+        k.totalTreasuryBalancePaisa = k.totalTreasuryBalancePaisa ?? k.totalBookBalancePaisa ?? 0;
+        k.totalBankBalancePaisa = k.totalBankBalancePaisa ?? k.totalBookBalancePaisa ?? 0;
+        k.totalVaultCashPaisa = k.totalVaultCashPaisa ?? 0;
+        k.reservedFundsPaisa = k.reservedFundsPaisa ?? k.totalReservedPaisa ?? 0;
+        k.freeLiquidityPaisa = k.freeLiquidityPaisa ?? k.freeBalancePaisa ?? 0;
+      }
+      passbookData = d;
       return passbookData;
     }
   } catch (err) {
@@ -1239,6 +1251,18 @@ function openPostManualEntryModal() {
 // ─── Wiring Function ─────────────────────────────────────────────────────────
 export async function wirePassbook() {
   await fetchPassbookOverview();
+
+  // The router paints renderPassbook() (with null data -> zeros) before this
+  // runs. Refresh the child workspace now that the overview data is loaded so
+  // the KPIs/tables reflect the seeded treasury data instead of staying at 0.
+  const childContent = document.getElementById("passbook-child-content");
+  if (childContent) {
+    const hash = window.location.hash.replace(/^#\/?/, "");
+    const parts = hash.split("/");
+    const activeChildRoute = parts[1] || "overview";
+    const paramId = parts[2] || null;
+    childContent.innerHTML = renderChildWorkspace(activeChildRoute, paramId);
+  }
 
   // Helper: re-render the entire passbook page content and re-wire
   async function reRender() {
