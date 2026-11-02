@@ -2,6 +2,8 @@
 // PAGE: Finance & Accounts — SCR-010 Consolidated 12-Workspace Financial Hub
 // General Ledger • Sales Audit • AP • AR • Cash & Bank • Tax • Budgets • Close • Statements • Integrity
 // =============================================================================
+import { askText } from "../utils/dialogs.js";
+import { exportDomTable } from "../utils/exportFile.js";
 import { apiGet, apiPost } from "../apiClient.js";
 import { state } from "../state.js";
 import { showToast, openModal, closeModal } from "../components.js";
@@ -22,6 +24,12 @@ async function loadCafesList() {
   }
   return cachedCafes;
 }
+
+function renderLoadError(wrap, err) {
+  const msg = String(err?.message || "Request failed.").replace(/[<>&]/g, "");
+  wrap.innerHTML = `<div class="glass-card" style="padding:18px;" role="alert"><strong>This data could not be loaded.</strong><p style="margin:6px 0 0;color:var(--muted);">${msg} Nothing is shown rather than showing wrong figures. Refresh to try again.</p></div>`;
+}
+const NOT_SAVED = "Not connected: this form is not linked to the server yet. Nothing was saved.";
 
 function fmtInr(paisa) {
   if (paisa === null || paisa === undefined) return "₹0.00";
@@ -214,8 +222,7 @@ async function loadFinanceOverview(wrap) {
     }
     renderCurrentWorkspace(wrap);
   } catch (err) {
-    liveFinanceData = DEFAULT_FINANCE_DATA;
-    renderCurrentWorkspace(wrap);
+    return renderLoadError(wrap, err);
   }
 }
 
@@ -288,7 +295,7 @@ function renderCurrentWorkspace(wrap) {
       title: "Financial Statements",
       icon: "📑",
       desc: "Audited Profit & Loss Statement, Balance Sheet, Cash Flow and Trial Balance.",
-      actionsHtml: `<button class="btn btn-sm btn-secondary" id="btn-child-export-stmts" type="button">Export Statements (CSV)</button>`
+      actionsHtml: `<button class="btn btn-sm btn-secondary" id="btn-child-export-stmts" type="button">Export Statements (XLSX)</button>`
     },
     "integrity": {
       title: "Finance Integrity Audit",
@@ -377,10 +384,8 @@ function renderCurrentWorkspace(wrap) {
   });
 
   wrap.querySelector("#btn-child-export-stmts")?.addEventListener("click", () => {
-    showToast("Exporting certified P&L, Balance Sheet, and Trial Balance to CSV...", "info");
-    setTimeout(() => {
-      showToast("Financial Statements CSV downloaded.", "success");
-    }, 500);
+    const ok = exportDomTable(wrap, { title: "Financial Statements" });
+    showToast(ok ? "Financial statements exported (XLSX)." : "No statement table on screen to export.", ok ? "success" : "info");
   });
 
   wrap.querySelector("#btn-child-run-fin-audit")?.addEventListener("click", () => {
@@ -632,7 +637,7 @@ async function renderSalesAuditTab(wrap) {
       storeDays = res.storeDays;
     }
   } catch (err) {
-    // Graceful fallback to default mock dataset
+    return renderLoadError(wrap, err);
   }
 
   wrap.innerHTML = `
@@ -685,13 +690,9 @@ async function renderSalesAuditTab(wrap) {
     btn.addEventListener("click", async () => {
       const storeDayId = btn.dataset.id;
       const target = storeDays.find(d => d.storeDayId === storeDayId);
-      if (target) {
-        target.status = "FINANCE_CLEARED";
-        target.clearedBy = "Finance Lead";
-      }
       try {
         await apiPost(`/finance/sales-audit/store-days/${storeDayId}/clear`, {});
-      } catch (err) {}
+      } catch (err) { showToast(err?.message || "The server did not accept this. Nothing was changed.", "error"); return; }
       showToast(`Store Day ${storeDayId} cleared and verified by Finance.`, "success");
       renderSalesAuditTab(wrap);
     });
@@ -707,7 +708,7 @@ async function renderJournalsTab(wrap) {
       journals = res.journals;
     }
   } catch (err) {
-    // Graceful fallback to default mock dataset
+    return renderLoadError(wrap, err);
   }
 
   wrap.innerHTML = `
@@ -763,12 +764,9 @@ async function renderJournalsTab(wrap) {
     btn.addEventListener("click", async () => {
       const id = btn.dataset.id;
       const target = journals.find(j => j.journalId === id);
-      if (target) {
-        target.status = "POSTED";
-      }
       try {
         await apiPost(`/finance/journals/${id}/post`, {});
-      } catch (err) {}
+      } catch (err) { showToast(err?.message || "The server did not accept this. Nothing was changed.", "error"); return; }
       showToast(`Journal ${id} posted to General Ledger.`, "success");
       renderJournalsTab(wrap);
     });
@@ -777,15 +775,12 @@ async function renderJournalsTab(wrap) {
   wrap.querySelectorAll(".btn-reverse-journal").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const id = btn.dataset.id;
-      const reason = prompt("Enter mandatory reason for reversing this journal:");
+      const reason = await askText({ title: "Reverse this journal", label: "Reason (required, kept in the audit trail)", okLabel: "Reverse" });
       if (!reason) return;
       const target = journals.find(j => j.journalId === id);
-      if (target) {
-        target.status = "REVERSED";
-      }
       try {
         await apiPost(`/finance/journals/${id}/reverse`, { reason });
-      } catch (err) {}
+      } catch (err) { showToast(err?.message || "The server did not accept this. Nothing was changed.", "error"); return; }
       showToast(`Journal ${id} reversed successfully.`, "success");
       renderJournalsTab(wrap);
     });
@@ -814,7 +809,7 @@ async function renderAPTab(wrap) {
       }
     }
   } catch (err) {
-    // Graceful fallback to default mock dataset
+    return renderLoadError(wrap, err);
   }
 
   wrap.innerHTML = `
@@ -893,7 +888,7 @@ async function renderARTab(wrap) {
       receivables = res.receivables;
     }
   } catch (err) {
-    // Graceful fallback to default mock dataset
+    return renderLoadError(wrap, err);
   }
 
   wrap.innerHTML = `
@@ -947,11 +942,24 @@ async function renderARTab(wrap) {
     btn.addEventListener("click", () => {
       const id = btn.dataset.id;
       const target = receivables.find(r => r.receivableId === id);
-      if (target) {
-        target.status = "SETTLED";
-      }
-      showToast(`Collection receipt posted for receivable ${id}.`, "success");
-      renderARTab(wrap);
+      if (!target) return;
+      const key = `ar-${id}-${Date.now()}`;
+      openModal({
+        title: `Collect payment · ${id}`, saveLabel: "Record collection", maxWidth: "420px",
+        body: `<label class="form-label">Amount (INR)</label><input id="ar-amt" class="form-input" type="number" step="0.01" min="0.01" value="${((target.amountPaisa || 0) / 100).toFixed(2)}">
+          <label class="form-label" style="margin-top:8px">Paid by</label><select id="ar-pm" class="form-input">${["CASH","UPI","CARD","BANK_TRANSFER","CHEQUE"].map((m) => `<option>${m}</option>`).join("")}</select>
+          <label class="form-label" style="margin-top:8px">Reference (UTR / cheque no.)</label><input id="ar-ref" class="form-input" maxlength="60">`,
+        onSave: async () => {
+          const amountPaisa = Math.round(Number(document.querySelector("#ar-amt")?.value || 0) * 100);
+          if (!(amountPaisa > 0)) { showToast("Enter an amount above zero.", "error"); return false; }
+          try {
+            await apiPost("/finance/receivables/receipts", { receivableId: id, amountPaisa, paymentMethod: document.querySelector("#ar-pm").value, referenceNumber: document.querySelector("#ar-ref").value.trim() || undefined, idempotencyKey: key });
+          } catch (err) { showToast(err?.message || "The collection was not recorded.", "error"); return false; }
+          showToast(`Collection recorded for ${id}.`, "success");
+          renderARTab(wrap);
+          return true;
+        },
+      });
     });
   });
 }
@@ -965,7 +973,7 @@ async function renderMarketplacesTab(wrap) {
       settlements = res.settlements;
     }
   } catch (err) {
-    // Graceful fallback to default mock dataset
+    return renderLoadError(wrap, err);
   }
 
   wrap.innerHTML = `
@@ -1021,7 +1029,7 @@ async function renderCashBankTab(wrap) {
       accounts = res.accounts;
     }
   } catch (err) {
-    // Graceful fallback to default mock dataset
+    return renderLoadError(wrap, err);
   }
 
   wrap.innerHTML = `
@@ -1063,7 +1071,7 @@ async function renderBudgetsTab(wrap) {
       budgets = res.budgets;
     }
   } catch (err) {
-    // Graceful fallback to default mock dataset
+    return renderLoadError(wrap, err);
   }
 
   wrap.innerHTML = `
@@ -1115,7 +1123,7 @@ async function renderTaxTab(wrap) {
       data = res;
     }
   } catch (err) {
-    // Graceful fallback to default mock dataset
+    return renderLoadError(wrap, err);
   }
 
   const gstr1 = data.gstr1Readiness || DEFAULT_TAX_DATA.gstr1Readiness;
@@ -1177,7 +1185,7 @@ async function renderPeriodCloseTab(wrap) {
       checklist = res.closeChecklist || checklist;
     }
   } catch (err) {
-    // Graceful fallback to default mock dataset
+    return renderLoadError(wrap, err);
   }
 
   wrap.innerHTML = `
@@ -1219,9 +1227,14 @@ async function renderPeriodCloseTab(wrap) {
   if (reopenBtn) {
     reopenBtn.addEventListener("click", async () => {
       const id = reopenBtn.dataset.id;
-      const reason = prompt("Enter mandatory auditable reason for reopening this period:");
+      const reason = await askText({ title: "Reopen this period", label: "Reason (required, kept in the audit trail)", okLabel: "Reopen" });
       if (!reason) return;
-      period.status = "OPEN";
+      try {
+        await apiPost(`/finance/close/periods/${encodeURIComponent(id)}/reopen`, { reason });
+      } catch (err) {
+        showToast(err?.message || "The server did not reopen the period. Nothing was changed.", "error");
+        return;
+      }
       showToast(`Financial period ${id} reopened for adjustments.`, "success");
       renderPeriodCloseTab(wrap);
     });
@@ -1237,7 +1250,7 @@ async function renderStatementsTab(wrap) {
       data = res;
     }
   } catch (err) {
-    // Graceful fallback to default mock dataset
+    return renderLoadError(wrap, err);
   }
 
   const pnl = data.pnl || DEFAULT_STATEMENTS_DATA.pnl;
@@ -1250,7 +1263,7 @@ async function renderStatementsTab(wrap) {
           <h3 style="font-size:16px; font-weight:700; margin:0; color:var(--ink);">Authoritative Financial Statements</h3>
           <p style="font-size:13px; color:var(--muted); margin:2px 0 0;">Basis: ${pnl.basis} • Period: ${pnl.period}</p>
         </div>
-        <button id="btn-tab-export-stmts" class="btn btn-secondary btn-sm">Export Statements (CSV)</button>
+        <button id="btn-tab-export-stmts" class="btn btn-secondary btn-sm">Export Statements (XLSX)</button>
       </div>
 
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
@@ -1317,7 +1330,7 @@ async function renderIntegrityTab(wrap) {
       res = apiRes;
     }
   } catch (err) {
-    // Graceful fallback to default mock dataset
+    return renderLoadError(wrap, err);
   }
 
   const issues = res.issues || [];
@@ -1444,7 +1457,7 @@ async function openNewJournalModal(wrap) {
         status: "DRAFT",
       };
 
-      DEFAULT_JOURNALS.unshift(newEntry);
+      showToast(NOT_SAVED, "error"); return;
       showToast("Balanced draft journal created.", "success");
       document.querySelector("#modal-root").innerHTML = "";
       const inner = wrap.querySelector("#fin-submodule-inner-content");
@@ -1470,7 +1483,7 @@ async function openNewAPBillModal(wrap) {
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
           <div>
             <label class="form-label" style="font-size:12px; font-weight:600;">Supplier Invoice #</label>
-            <input type="text" name="invoiceNum" class="form-input" required placeholder="INV-2026-99" value="INV-BTE-${Math.floor(1000 + Math.random()*9000)}">
+            <input type="text" name="invoiceNum" class="form-input" required placeholder="INV-2026-99" value="">
           </div>
           <div>
             <label class="form-label" style="font-size:12px; font-weight:600;">Due Date</label>
@@ -1519,7 +1532,7 @@ async function openNewAPBillModal(wrap) {
         cafeId: fd.get("cafeId"),
       };
 
-      DEFAULT_AP_INVOICES.unshift(newBill);
+      showToast(NOT_SAVED, "error"); return;
       showToast("AP Supplier Bill registered and booked in ledger.", "success");
       document.querySelector("#modal-root").innerHTML = "";
       const inner = wrap.querySelector("#fin-submodule-inner-content");
@@ -1580,8 +1593,7 @@ function openNewARCollectionModal(wrap) {
         dueDate: new Date().toISOString().slice(0, 10),
       };
 
-      DEFAULT_RECEIVABLES.unshift(newAR);
-      showToast("AR collection received and credited to bank account.", "success");
+      showToast("Use the Collect button on a receivable row. Nothing was saved from this form.", "error"); return;
       document.querySelector("#modal-root").innerHTML = "";
       const inner = wrap.querySelector("#fin-submodule-inner-content");
       if (inner) renderARTab(inner);
@@ -1648,7 +1660,7 @@ function openAddBankAccountModal(wrap) {
         status: "ACTIVE",
       };
 
-      DEFAULT_BANK_ACCOUNTS.push(newAcct);
+      showToast(NOT_SAVED, "error"); return;
       showToast("Authorized bank account registered in chart of accounts.", "success");
       document.querySelector("#modal-root").innerHTML = "";
       const inner = wrap.querySelector("#fin-submodule-inner-content");
@@ -1698,7 +1710,7 @@ function openAllocateBudgetModal(wrap) {
         variancePaisa: capPaisa,
       };
 
-      DEFAULT_BUDGETS.push(newB);
+      showToast(NOT_SAVED, "error"); return;
       showToast("Departmental budget cap allocated.", "success");
       document.querySelector("#modal-root").innerHTML = "";
       const inner = wrap.querySelector("#fin-submodule-inner-content");

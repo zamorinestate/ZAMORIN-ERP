@@ -6,6 +6,7 @@
 // Strictly SELF-SERVICE ONLY (req.auth.userId). Zero peer financial leakage.
 // =============================================================================
 
+import { exportGrid } from "../utils/exportFile.js";
 import { ApiClientError, apiGet, apiPost } from "../apiClient.js";
 import { emptyState, skeleton, showToast } from "../components.js";
 import { icon } from "../icons.js";
@@ -610,7 +611,7 @@ function renderStatementTab(data) {
         </div>`}
 
         <div class="flex justify-end gap-sm" style="margin-top:20px;">
-          <button class="btn btn-secondary" id="btn-export-loan-csv">Export CSV</button>
+          <button class="btn btn-secondary" id="btn-export-loan-csv">Export XLSX</button>
           <button class="btn btn-primary" onclick="window.print()">${icon("printer", 14)} Print Statement</button>
         </div>
       </div>
@@ -1214,25 +1215,14 @@ function openDefermentModal(loanId, onDone) {
 // ── UTILITIES: EXPORT CSV ────────────────────────────────────────────────────
 function exportLoanCsv() {
   const loans = loadedData?.loanAdvances || [];
-  const rows = [
-    "FacilityID,Type,Principal,Repaid,Outstanding,Status",
-    ...loans.map(l => [
-      l.loanAdvanceId || l.id,
-      l.requestType,
-      ((l.principalPaise || l.requestedAmountPaise || 0) / 100).toFixed(2),
-      ((l.totalRepaidPaise || 0) / 100).toFixed(2),
-      ((l.outstandingPrincipalPaise || 0) / 100).toFixed(2),
-      l.status,
-    ].join(",")),
-  ];
   if (loans.length === 0) { showToast("No loan records to export", "info"); return; }
-  const csvContent = "data:text/csv;charset=utf-8," + rows.join("\n");
-  const encodedUri = encodeURI(csvContent);
-  const link = document.createElement("a");
-  link.setAttribute("href", encodedUri);
-  link.setAttribute("download", `Zamorin_Loans_Statement_${new Date().getFullYear()}.csv`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  showToast("Loans & Advances statement CSV downloaded ✓", "mint");
+  const headers = ["Facility ID", "Type", "Principal", "Repaid", "Outstanding", "Status"];
+  const rows = loans.map((l) => [
+    l.loanAdvanceId || l.id, l.requestType,
+    ((l.principalPaise || l.requestedAmountPaise || 0) / 100).toFixed(2),
+    ((l.totalRepaidPaise || 0) / 100).toFixed(2),
+    ((l.outstandingPrincipalPaise || 0) / 100).toFixed(2), l.status,
+  ]);
+  exportGrid({ headers, rows, title: "Loans and Advances Statement", filename: `Zamorin_Loans_Statement_${new Date().getFullYear()}` });
+  showToast("Loans & Advances statement downloaded (XLSX) ✓", "mint");
 }

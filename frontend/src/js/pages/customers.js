@@ -114,6 +114,11 @@ export function renderCustomers(subroute) {
 }
 
 function renderActiveSubpanel() {
+  const banner = window.__custLoadError ? `<div role="alert" style="margin-bottom:12px;padding:10px 12px;border:1px solid var(--err);border-radius:8px;color:var(--err);font-size:13px;">${String(window.__custLoadError).replace(/[<>&]/g, "")}</div>` : "";
+  return banner + renderActiveSubpanelInner();
+}
+
+function renderActiveSubpanelInner() {
   if (activeSubTab === "overview") {
     return renderOverviewSubpanel();
   }
@@ -679,8 +684,8 @@ async function loadCustomerData() {
       apiGet("/cafes").catch(() => null),
     ]);
 
-    if (ovRes?.data) cachedOverview = ovRes.data;
-    else cachedOverview = { ...DEFAULT_OVERVIEW };
+    if (ovRes?.data) { cachedOverview = ovRes.data; window.__custLoadError = ""; }
+    else { cachedOverview = { ...DEFAULT_OVERVIEW }; window.__custLoadError = "The customer summary could not be loaded, so the figures below are not real."; }
     if (listRes?.data?.customers) cachedCustomers = listRes.data.customers;
     if (rewRes?.data?.rewards) cachedRewards = rewRes.data.rewards;
     if (fbRes?.data?.feedbacks) cachedFeedbacks = fbRes.data.feedbacks;
@@ -688,6 +693,7 @@ async function loadCustomerData() {
     if (cafesRes?.data?.cafes) cachedCafes = cafesRes.data.cafes;
   } catch (err) {
     console.warn("Customer data load notice:", err);
+    window.__custLoadError = err?.message || "Customer data could not be loaded.";
     if (!cachedOverview) cachedOverview = { ...DEFAULT_OVERVIEW };
   }
 }
@@ -1116,11 +1122,8 @@ function openCreateRewardModal(root) {
       modal.close();
       await loadCustomerData();
       rerender(root);
-    } catch {
-      showToast("Reward item added to catalogue.", "success");
-      modal.close();
-      await loadCustomerData();
-      rerender(root);
+    } catch (err) {
+      showToast(err?.message || "The reward was not saved.", "error");
     }
   });
 }
@@ -1163,8 +1166,7 @@ function openCreateSegmentModal(root) {
       showToast("Segment name is required.", "error");
       return;
     }
-    showToast(`Segment "${name}" created with automated rule evaluation.`, "success");
-    modal.close();
+    showToast("Not connected: segments are not saved on the server yet (campaigns need a message service). Nothing was created.", "error");
   });
 }
 
@@ -1254,7 +1256,7 @@ function openDpdpSettingsModal(root) {
         </div>
         <div style="padding:12px; background:var(--bg-subtle, #f8fafc); border-radius:6px; border:1px solid var(--border-subtle);">
           <div style="font-weight:700; color:var(--ink);">Marketing Opt-In Revocation Processing</div>
-          <div style="color:var(--muted); font-size:12px; margin-top:2px;">Immediate automated suppression across SMS and email gateways.</div>
+          <div style="color:var(--muted); font-size:12px; margin-top:2px;">Marketing opt-outs are recorded on the customer profile. No SMS or email service is connected.</div>
         </div>
       </div>
 

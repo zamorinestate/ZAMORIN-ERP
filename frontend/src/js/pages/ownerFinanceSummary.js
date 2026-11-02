@@ -1,3 +1,4 @@
+import { showDataError } from "../utils/dialogs.js";
 // =============================================================================
 // ZAMORIN CAFE ERP — SCREEN OWN-SCR-004: OWNER FINANCE SUMMARY
 // Design System v2 (Ledger & Roastery Theme)
@@ -8,6 +9,7 @@
 // Department Orders • Payables • Budgets • Management Reports
 // =============================================================================
 
+import { exportGrid } from "../utils/exportFile.js";
 import { apiGet, apiPost } from "../apiClient.js";
 import { state } from "../state.js";
 import { ROLES } from "../navigation.js";
@@ -117,6 +119,12 @@ const DEFAULT_FINANCE_DATA = {
 };
 
 export function renderOwnerFinanceSummary() {
+  const e = window.__finSummaryError;
+  const banner = e ? `<div class="data-error-banner" role="alert" style="margin:0 0 12px;padding:10px 12px;border:1px solid var(--err);border-radius:10px;color:var(--err);font-size:13px;">The finance summary could not be loaded (${String(e).replace(/[<>&]/g, "").slice(0, 160)}). The figures shown are not real.</div>` : "";
+  return banner + renderOwnerFinanceSummaryInner();
+}
+
+function renderOwnerFinanceSummaryInner() {
   const isOwner = state.role === ROLES.OWNER || state.user?.role === "OWNER";
   const data = cachedFinanceSummary || DEFAULT_FINANCE_DATA;
 
@@ -1115,6 +1123,7 @@ async function fetchFinanceSummaryData() {
     }
 
     if (body.kpis) {
+      window.__finSummaryError = "";
       cachedFinanceSummary = {
         kpis: {
           ...DEFAULT_FINANCE_DATA.kpis,
@@ -1133,6 +1142,7 @@ async function fetchFinanceSummaryData() {
     }
   } catch (err) {
     console.warn("Could not fetch remote finance summary:", err);
+    window.__finSummaryError = err?.message || "request failed";
     if (!cachedFinanceSummary) cachedFinanceSummary = { ...DEFAULT_FINANCE_DATA };
   }
 }
@@ -1235,16 +1245,7 @@ function downloadFinanceCsv(cafes = [], period = "THIS_MONTH") {
     `"${c.health || "HEALTHY"}"`,
   ]);
 
-  const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.setAttribute("href", url);
-  link.setAttribute("download", `Zamorin_Finance_Summary_${period}_${new Date().toISOString().split("T")[0]}.csv`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  exportGrid({ headers, rows, title: "Zamorin_Finance_Summary", filename: `Zamorin_Finance_Summary_${period}_${new Date().toISOString().split("T")[0]}` });
 }
 
 function openExportModal() {
@@ -1263,8 +1264,8 @@ function openExportModal() {
         </p>
         <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:16px;">
           <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-            <input type="radio" name="export-format" value="CSV" checked>
-            <span><strong>Financial Data CSV</strong> (Authoritative tabular branch metrics, expense ratios, and payroll allocations)</span>
+            <input type="radio" name="export-format" value="XLSX" checked>
+            <span><strong>Financial Data (XLSX)</strong> (Authoritative tabular branch metrics, expense ratios, and payroll allocations)</span>
           </label>
           <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
             <input type="radio" name="export-format" value="SUMMARY">

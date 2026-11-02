@@ -8,8 +8,9 @@
 
 import { apiGet, apiPost } from "../apiClient.js";
 import { showToast } from "../components.js";
+import { state } from "../state.js";
 
-let captainCafeId = "ZC-0001";
+let captainCafeId = "";
 let selectedTable = null;
 let captainCart = [];
 let cachedTables = [];
@@ -43,7 +44,7 @@ async function flushOfflineOutbox() {
   const remaining = [];
   for (const item of outbox) {
     try {
-      await apiPost("/api/v1/channels/public/direct-order", item.payload);
+      await apiPost("/channels/public/direct-order", item.payload);
     } catch (_) {
       remaining.push(item);
     }
@@ -80,7 +81,7 @@ if (typeof window !== "undefined") {
 }
 
 export function renderWaiterCaptainApp(subroute) {
-  if (subroute) captainCafeId = subroute;
+  captainCafeId = subroute || captainCafeId || state.selectedCafeId || state.user?.primaryCafeId || "";
 
   return `
     <div class="captain-app-root" style="max-width:520px; margin:0 auto; min-height:100vh; background:#0F172A; color:#F8FAFC; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display:flex; flex-direction:column;">
@@ -245,12 +246,17 @@ export async function wireWaiterCaptainApp(root, subroute) {
     }
 
     try {
-      await apiPost("/api/v1/channels/public/direct-order", orderPayload);
+      await apiPost("/channels/public/direct-order", orderPayload);
       showToast(`🔥 KOT fired for Table ${selectedTable.tableNumber}!`, "success");
       captainCart = [];
       updateCaptainCartFooter(root);
       renderCaptainMenuItems(root);
     } catch (err) {
+      // The server answered and refused the order: do not queue it, keep the cart.
+      if (err && err.status) {
+        showToast(err.message || "The KOT was rejected by the server. Nothing was sent.", "error");
+        return;
+      }
       // Network failure fallback -> queue to offline outbox
       queueOfflineKot(orderPayload);
       showToast(`📡 Network error: KOT saved to offline outbox. Will auto-sync when online!`, "warning");
@@ -263,7 +269,7 @@ export async function wireWaiterCaptainApp(root, subroute) {
   // Request Bill
   root.querySelector("#btn-captain-request-bill")?.addEventListener("click", () => {
     if (!selectedTable) return;
-    showToast(`Bill requested for Table ${selectedTable.tableNumber}. Cashier notified!`, "success");
+    showToast(`Bill requests are not connected to the cashier desk yet. Please tell the cashier that Table ${selectedTable.tableNumber} is ready to pay.`, "warning");
   });
 
   // Refresh floor
@@ -275,18 +281,11 @@ export async function wireWaiterCaptainApp(root, subroute) {
 
 async function loadFloorTables(root) {
   try {
-    const res = await apiGet(`/api/v1/channels/tables?cafeId=${captainCafeId}`);
+    const res = await apiGet(`/channels/tables?cafeId=${captainCafeId}`);
     cachedTables = res.data?.tables || res.data || [];
   } catch (e) {
-    // Fallback demo tables
-    cachedTables = [
-      { tableId: "T-01", tableNumber: "1", status: "VACANT", capacity: 2 },
-      { tableId: "T-02", tableNumber: "2", status: "OCCUPIED", capacity: 4 },
-      { tableId: "T-03", tableNumber: "3", status: "VACANT", capacity: 4 },
-      { tableId: "T-04", tableNumber: "4", status: "OCCUPIED", capacity: 6 },
-      { tableId: "T-05", tableNumber: "5", status: "VACANT", capacity: 2 },
-      { tableId: "T-06", tableNumber: "6", status: "VACANT", capacity: 8 },
-    ];
+    cachedTables = [];
+    showToast("Tables could not be loaded. Tap Refresh to retry.", "error");
   }
 
   const grid = root.querySelector("#captain-tables-grid");
@@ -331,16 +330,11 @@ async function loadFloorTables(root) {
 
 async function loadCaptainMenu(root) {
   try {
-    const res = await apiGet(`/api/v1/channels/public/web-menu/${captainCafeId}`);
+    const res = await apiGet(`/channels/public/web-menu/${captainCafeId}`);
     cachedCaptainMenu = res.data?.items || res.data || [];
   } catch (e) {
-    cachedCaptainMenu = [
-      { itemId: "ITEM-01", name: "Malabar Cold Brew", pricePaisa: 22000, category: "COLD_BREW" },
-      { itemId: "ITEM-02", name: "Cardamom Rose Latte", pricePaisa: 25000, category: "HOT_COFFEE" },
-      { itemId: "ITEM-03", name: "Tellicherry Pepper Paneer Wrap", pricePaisa: 28000, category: "MAINS" },
-      { itemId: "ITEM-04", name: "Ghee Roast Chicken Slider", pricePaisa: 32000, category: "MAINS" },
-      { itemId: "ITEM-05", name: "Mysore Pak Cheesecake", pricePaisa: 26000, category: "DESSERTS" },
-    ];
+    cachedCaptainMenu = [];
+    showToast("The menu could not be loaded. Tap Refresh to retry.", "error");
   }
   renderCaptainMenuItems(root);
 }

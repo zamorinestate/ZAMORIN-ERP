@@ -186,13 +186,13 @@ export async function wireRevenueShare(container, subroute) {
       e.preventDefault();
       const id = btn.dataset.id;
       apiPost(`/revenue-share/sales/${id}/approve`, { isCertified: true })
-        .catch(() => {})
-        .finally(() => {
+        .then(() => {
           const item = salesList.find((s) => s.submissionId === id);
           if (item) item.status = 'APPROVED';
           showToast(`Sales report ${id} approved & certified.`, 'success');
           renderActiveTab();
-        });
+        })
+        .catch((err) => showToast(err?.message || 'The sales report could not be approved.', 'error'));
     } else if (btn.classList.contains('btn-approve-settlement')) {
       e.preventDefault();
       const id = btn.dataset.id;
@@ -315,7 +315,7 @@ const _SAMPLE_OVERVIEW = {
     totalGrossSalesPaisa: 0,
     totalRevenueShareEarnedPaisa: 0,
     totalOutstandingPaisa: 0,
-    collectionRatePercent: 100,
+    collectionRatePercent: null,
     activeOutletsCount: 0,
     activeAgreementsCount: 0,
   },
@@ -352,7 +352,7 @@ function updateKpis() {
   const elOut = document.getElementById('kpi-outstanding');
   if (elOut) elOut.textContent = `₹${((m.totalOutstandingPaisa || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
   const elRate = document.getElementById('kpi-collection-rate');
-  if (elRate) elRate.textContent = `${m.collectionRatePercent || 100}%`;
+  if (elRate) elRate.textContent = m.collectionRatePercent == null ? "—" : `${m.collectionRatePercent}%`;
   const elOutlets = document.getElementById('kpi-active-outlets');
   if (elOutlets) elOutlets.textContent = `${m.activeOutletsCount || 0} Outlets (${m.activeAgreementsCount || 0} Active Leases)`;
 }
@@ -1550,28 +1550,12 @@ function showSimulateSettlementModal() {
             simData = json.data.simulation || json.data;
           }
         } catch {
-          console.warn('[Revenue Share] Simulating locally for offline/mock...');
+          console.warn('[Revenue Share] Simulation request failed.');
         }
 
         if (!simData) {
-          const outlet = outletsList.find((o) => o.outletId === outletId) || outletsList[0];
-          const grossPaisa = 48500000;
-          const sharePaisa = Math.round(grossPaisa * 0.12);
-          const mgPaisa = 4500000;
-          const shortfall = Math.max(0, mgPaisa - sharePaisa);
-          const netPayable = Math.max(sharePaisa, mgPaisa);
-
-          simData = {
-            outletId,
-            outletName: outlet?.name || 'Selected Outlet',
-            periodStart,
-            periodEnd,
-            totalGrossSalesPaisa: grossPaisa,
-            eligibleRevenuePaisa: grossPaisa,
-            baseRevenueSharePaisa: sharePaisa,
-            minimumGuaranteeShortfallPaisa: shortfall,
-            netPayablePaisa: netPayable,
-          };
+          showToast('The server could not run the simulation, so no figures are shown.', 'error');
+          return;
         }
 
         close();

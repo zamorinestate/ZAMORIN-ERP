@@ -1036,7 +1036,7 @@ function openCreateQuoteModal(root) {
         items: items,
       };
 
-      liveQuotes.unshift(newQuote);
+      showToast("Not connected: quotes are not saved on the server yet. Nothing was saved.", "coral"); return false;
       showToast(`Institutional quote ${newQuote.quoteId} issued for ${inst}!`, "mint");
       refreshDeptView(root);
       return true;
@@ -1095,64 +1095,37 @@ function openConvertQuoteModal(quoteId, root) {
         return false;
       }
 
-      // Mark quote as converted
-      if (!liveQuotes) liveQuotes = [...SAMPLE_QUOTES];
-      const targetQuote = liveQuotes.find((q) => q.quoteId === quote.quoteId);
-      if (targetQuote) targetQuote.status = "CONVERTED";
-
-      // Create new department order
-      if (!liveOrders) liveOrders = [...SAMPLE_ORDERS];
-      const newOrderId = `DO-2026-000${liveOrders.length + 1}`;
-      const newOrder = {
-        orderId: newOrderId,
+      const orderBody = {
         institutionName: quote.institutionName,
         departmentName: quote.departmentName,
         careOfContact: quote.contactPerson,
-        cafeId: cafeId,
-        orderDate: new Date().toISOString().slice(0, 10),
+        poNumber: po,
+        cafeId,
         fulfilmentDate: date,
         promisedTimeWindow: windowTime,
-        items: [
-          {
-            name: quote.items || "Institutional Catering Menu",
-            quantity: quote.headcount,
-            unit: "guests",
-            unitPricePaisa: Math.round((quote.amount * 100) / quote.headcount),
-            totalPaisa: quote.amount * 100,
-          },
-        ],
         headcount: { estimated: quote.headcount, guaranteed: quote.headcount, final: quote.headcount, actual: quote.headcount },
-        totalPaisa: quote.amount * 100,
-        settledPaisa: 0,
-        orderStatus: "CONFIRMED",
-        fulfilmentStatus: "SCHEDULED",
-        creditStatus: "CREDIT_OPEN",
-        poNumber: po,
+        items: [{
+          name: quote.items || "Institutional Catering Menu",
+          quantity: quote.headcount,
+          unit: "guests",
+          unitPricePaisa: Math.round((quote.amount * 100) / quote.headcount),
+          totalPaisa: quote.amount * 100,
+        }],
+        deliveryLocation: { notes: loc },
       };
-
-      liveOrders.unshift(newOrder);
-
-      // Attempt backend API sync
+      let created;
       try {
-        await apiPost("/department-orders", {
-          body: {
-            institutionName: quote.institutionName,
-            departmentName: quote.departmentName,
-            careOfContact: quote.contactPerson,
-            poNumber: po,
-            cafeId,
-            fulfilmentDate: date,
-            promisedTimeWindow: windowTime,
-            headcount: newOrder.headcount,
-            items: newOrder.items,
-            deliveryLocation: { notes: loc },
-          },
-        });
+        created = await apiPost("/department-orders", { body: orderBody });
       } catch (e) {
-        // Fallback gracefully
+        showToast(e?.message || "The server did not create the order. The quote was not converted.", "coral");
+        return false;
       }
+      const newOrderId = created?.data?.orderId || created?.orderId || created?.data?.order?.orderId || "";
+      const targetQuote = (liveQuotes || []).find((q) => q.quoteId === quote.quoteId);
+      if (targetQuote) targetQuote.status = "CONVERTED";
+      await fetchDeptOrdersFromServer(root);
 
-      showToast(`Quote ${quote.quoteId} successfully converted to Order ${newOrderId}!`, "mint");
+      showToast(`Quote ${quote.quoteId} successfully converted to Order ${newOrderId || "(see register)"}.`, "mint");
       refreshDeptView(root);
       return true;
     },
@@ -1233,7 +1206,7 @@ function openAddInstitutionModal(root) {
         paymentTerms: terms,
       };
 
-      liveAccounts.unshift(newAccount);
+      showToast("Not connected: institutional accounts are not saved on the server yet. Nothing was saved.", "coral"); return false;
       showToast(`Institutional account ${newId} registered for ${name}!`, "mint");
       refreshDeptView(root);
       return true;
@@ -1449,7 +1422,6 @@ async function fetchDeptOrdersFromServer(root) {
       refreshDeptView(root);
     }
   } catch (err) {
-    showToast("Loaded offline department order ledger", "info");
-    refreshDeptView(root);
+    showToast(err?.message || "Could not refresh department orders.", "error");
   }
 }

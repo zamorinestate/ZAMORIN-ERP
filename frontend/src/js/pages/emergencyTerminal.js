@@ -8,6 +8,8 @@
  */
 
 import { apiGet, apiPost } from "../apiClient.js";
+import { showToast } from "../components.js";
+import { askText } from "../utils/dialogs.js";
 
 let emergencyTimer = null;
 let activeOrders = [];
@@ -71,9 +73,9 @@ export function wireEmergencyTerminal(container, subroute) {
     snoozeBtn.addEventListener("click", async () => {
       try {
         await apiPost("/channels/pause", { durationMinutes: 30, reason: "Emergency mobile terminal snooze" });
-        alert("Aggregators snoozed for 30 minutes.");
+        showToast("Aggregator orders paused for 30 minutes.", "success");
       } catch (err) {
-        alert("Snooze request failed: " + (err.message || "Unknown error"));
+        showToast("Pause request failed: " + (err.message || "Unknown error"), "error");
       }
     });
   }
@@ -164,10 +166,10 @@ async function fetchEmergencyOrders(root) {
           } catch (canErr) {
             await apiPost(`/channels/orders/${encodeURIComponent(id)}/accept`, { prepTimeMinutes: prepTime });
           }
-          alert(`Order ${id} accepted (${prepTime} min)! Routed to kitchen.`);
+          showToast(`Order ${id} accepted (${prepTime} min).`, "success");
           fetchEmergencyOrders(root);
         } catch (err) {
-          alert(`Accept failed: ` + (err.message || "Error"));
+          showToast(`Accept failed: ` + (err.message || "Error"), "error");
         }
       });
     });
@@ -175,7 +177,7 @@ async function fetchEmergencyOrders(root) {
     root.querySelectorAll(".btn-reject-order").forEach(btn => {
       btn.addEventListener("click", async (e) => {
         const id = e.currentTarget.getAttribute("data-id");
-        const reason = prompt("Enter cancellation/rejection reason:", "KITCHEN_OVERLOAD");
+        const reason = await askText({ title: "Reject order " + id, label: "Reason for rejection", value: "KITCHEN_OVERLOAD", required: true, okLabel: "Reject order" });
         if (!reason) return;
         try {
           try {
@@ -186,10 +188,10 @@ async function fetchEmergencyOrders(root) {
           } catch (canErr) {
             await apiPost(`/channels/orders/${encodeURIComponent(id)}/reject`, { reason });
           }
-          alert(`Order ${id} rejected.`);
+          showToast(`Order ${id} rejected.`, "success");
           fetchEmergencyOrders(root);
         } catch (err) {
-          alert(`Reject failed: ` + (err.message || "Error"));
+          showToast(`Reject failed: ` + (err.message || "Error"), "error");
         }
       });
     });

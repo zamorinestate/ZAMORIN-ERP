@@ -4,6 +4,7 @@ import {
   apiPost,
 } from "../apiClient.js";
 
+import { exportGrid } from "../utils/exportFile.js";
 import {
   confirmAction,
   emptyState,
@@ -16,6 +17,7 @@ import {
   openPayrollPayslips,
 } from "./payrollPayslips.js";
 
+import { askText } from "../utils/dialogs.js";
 import { state } from "../state.js";
 import { navigate } from "../router.js";
 
@@ -1043,7 +1045,7 @@ function renderActiveTabContent(userRole) {
     case "year_end":
       return renderSimpleTab("Year-End / YTD Accumulators", "Cumulative financial year 2026-27 gross-to-net totals.", "YTD Total Payroll: ₹96,50,000 (INR). Annual projections on track.");
     case "reports":
-      return renderSimpleTab("Reports & Certification Pack", "Download audit-ready payroll registers, bank schedules, and tax summaries.", "Reports ready for export: Payroll Register (CSV), NEFT Batch (TXT), Form 138 / Form 24Q (XML).");
+      return renderSimpleTab("Reports & Certification Pack", "Download audit-ready payroll registers, bank schedules, and tax summaries.", "Reports ready for export: Payroll Register (XLSX), NEFT Batch (TXT), Form 138 / Form 24Q (XML).");
     case "audit":
       return renderAuditTab();
     default:
@@ -1122,37 +1124,14 @@ function openCreateRunModal(root) {
     const notes = String(formData.get("notes") || "").trim();
 
     try {
-      await apiPost("/payroll/runs", {
-        body: { cafeId, periodKey, ...(notes ? { notes } : {}) },
-      });
-      showToast("Payroll run created successfully.", "mint");
-      overlay.remove();
-      loadAllPayrollData(root);
+      await apiPost("/payroll/runs", { cafeId, periodKey, ...(notes ? { notes } : {}) });
     } catch (err) {
-      if (isDevMode()) {
-        loadedPayrollRuns.unshift({
-          payrollRunId: `PR-${periodKey.replace("-", "")}-000${loadedPayrollRuns.length + 1}`,
-          organisationId: "ORG-ZAMORIN-01",
-          cafeId,
-          cafeName: cafes.find((c) => c.cafeId === cafeId)?.name || cafeId,
-          periodKey,
-          periodStartDate: `${periodKey}-01`,
-          periodEndDate: `${periodKey}-31`,
-          status: "DRAFT",
-          employeeCount: 10,
-          totalGrossPaise: 0,
-          totalDeductionPaise: 0,
-          totalNetPayPaise: 0,
-          currency: "INR",
-          notes,
-        });
-        showToast("Payroll run created (Dev Preview).", "mint");
-        overlay.remove();
-        renderPayrollControlCentre(root);
-      } else {
-        showToast(apiErrorMessage(err), "coral");
-      }
+      showToast(apiErrorMessage(err), "coral");
+      return;
     }
+    showToast("Payroll run created.", "mint");
+    overlay.remove();
+    loadAllPayrollData(root);
   });
 }
 
@@ -1181,37 +1160,31 @@ async function handlePayrollAction(root, payrollRunId, action) {
   const endpoint = endpointMap[action];
   if (!endpoint) return;
 
+  let payload = {};
+  if (action === "void") {
+    const reason = await askText({
+      title: `Void payroll run ${payrollRunId}`,
+      label: "Reason for voiding (recorded in the audit trail)",
+      required: true,
+      okLabel: "Void run",
+    });
+    if (!reason) return;
+    payload = { reason };
+  }
+
   confirmAction({
     title: `${action.toUpperCase()} Payroll Run ${payrollRunId}?`,
     description: `Execute authoritative transition for ${payrollRunId}.`,
     confirmLabel: "Confirm",
     onConfirm: async () => {
       try {
-        await apiPost(endpoint, {
-          body: action === "void" ? { voidReason: "Administrative cancellation" } : {},
-        });
-        showToast(`Action ${action} executed successfully.`, "mint");
-        loadAllPayrollData(root);
+        await apiPost(endpoint, payload);
       } catch (err) {
-        if (isDevMode()) {
-          const run = loadedPayrollRuns.find((r) => r.payrollRunId === payrollRunId);
-          if (run) {
-            if (action === "calculate") {
-              run.status = "CALCULATED";
-              run.totalGrossPaise = 30000000;
-              run.totalDeductionPaise = 3600000;
-              run.totalNetPayPaise = 26400000;
-            } else if (action === "submit") run.status = "SUBMITTED";
-            else if (action === "approve") run.status = "APPROVED";
-            else if (action === "pay") run.status = "PAID";
-            else if (action === "void") run.status = "VOIDED";
-          }
-          showToast(`Action ${action} executed (Dev Preview).`, "mint");
-          renderPayrollControlCentre(root);
-        } else {
-          showToast(apiErrorMessage(err), "coral");
-        }
+        showToast(apiErrorMessage(err), "coral");
+        return;
       }
+      showToast(`Action ${action} completed.`, "mint");
+      loadAllPayrollData(root);
     },
   });
 }
@@ -1344,7 +1317,7 @@ function wireEvents(root) {
       "", // Base salary is not on the payslip aggregate; blank rather than invented.
       s.ytdGross,
     ]);
-    exportPayrollCsv("staff_compensation_master.csv", ["Employee ID", "Name", "Designation", "Base Salary", "Gross Rate"], staffRows);
+    exportPayrollCsv("staff_compensation_master.xlsx", ["Employee ID", "Name", "Designation", "Base Salary", "Gross Rate"], staffRows);
   });
   root.querySelector("#btn-child-run-gates")?.addEventListener("click", () => {
     const d = cachedIntegrity;
@@ -1376,14 +1349,31 @@ function wireEvents(root) {
       ok ? "mint" : "amber"
     );
   });
-  root.querySelector("#btn-child-gen-batch")?.addEventListener("click", () => {
-    showToast("Disbursement batch generated and queued for NEFT release.", "mint");
+  const latestRun = () => (loadedPayrollRuns || []).find((r) => ["APPROVED", "ISSUED", "PAID"].includes(r.status)) || null;
+  root.querySelector("#btn-child-gen-batch")?.addEventListener("click", async () => {
+    const run = latestRun();
+    if (!run) return showToast("No approved payroll run is available for a disbursement schedule.", "amber");
+    try {
+      const res = await apiGet(`/payroll/export/bank-disbursement/${run.payrollRunId}`, { bypassCache: true });
+      const n = res?.data?.lines?.length ?? res?.data?.items?.length ?? res?.data?.count;
+      showToast(`Disbursement schedule for ${run.payrollRunId} loaded${n != null ? ` (${n} lines)` : ""}. Bank release is not connected — nothing was sent.`, "mint");
+    } catch (err) {
+      showToast(apiErrorMessage(err), "coral");
+    }
   });
-  root.querySelector("#btn-child-bulk-payslips")?.addEventListener("click", () => {
-    showToast("Bulk payslip PDFs generated and published to employee self-service.", "mint");
+  root.querySelector("#btn-child-bulk-payslips")?.addEventListener("click", async () => {
+    const run = (loadedPayrollRuns || []).find((r) => r.status === "APPROVED") || null;
+    if (!run) return showToast("Payslips can be issued only for an APPROVED payroll run.", "amber");
+    try {
+      const res = await apiPost(`/payroll/runs/${run.payrollRunId}/issue-payslips`, {});
+      showToast(`Payslips issued for ${run.payrollRunId}${res?.data?.issuedCount != null ? ` (${res.data.issuedCount})` : ""}.`, "mint");
+      loadAllPayrollData(root);
+    } catch (err) {
+      showToast(apiErrorMessage(err), "coral");
+    }
   });
   root.querySelector("#btn-child-gen-challans")?.addEventListener("click", () => {
-    showToast("EPF ECR & ESI monthly challans generated.", "mint");
+    showToast("EPF ECR and ESI challan generation is not connected. Nothing was generated.", "amber");
   });
   root.querySelector("#btn-child-export-ytd")?.addEventListener("click", async () => {
     // YTD accumulators are aggregated from real payslip rows across the loaded runs.
@@ -1394,16 +1384,16 @@ function wireEvents(root) {
       return;
     }
     exportPayrollCsv(
-      "ytd_tax_accumulators.csv",
+      "ytd_tax_accumulators.xlsx",
       ["Employee ID", "Name", "YTD Gross", "YTD TDS", "YTD EPF", "YTD ESI"],
       rows.map((r) => [r.employeeId, r.name, r.ytdGross, r.ytdTds, r.ytdEpf, r.ytdEsi])
     );
   });
   root.querySelector("#btn-child-export-reports")?.addEventListener("click", () => {
-    exportPayrollCsv("payroll_finance_jv.csv", ["Account Code", "Account Name", "Debit", "Credit"], []);
+    showToast("The payroll finance journal export is not connected. No file was produced.", "amber");
   });
   root.querySelector("#btn-child-download-audit")?.addEventListener("click", () => {
-    exportPayrollCsv("payroll_audit_trail.csv", ["Timestamp", "Run ID", "Event", "Actor", "Status"], []);
+    showToast("The payroll audit-trail export is not connected. No file was produced.", "amber");
   });
 }
 
@@ -1457,15 +1447,9 @@ async function buildEmployeePayslipRows() {
 }
 
 function exportPayrollCsv(filename, headers, rows) {
-  let csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
-  const encodedUri = encodeURI(csvContent);
-  const link = document.createElement("a");
-  link.setAttribute("href", encodedUri);
-  link.setAttribute("download", filename);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  showToast(`Exported ${filename}`, "mint");
+  if (!rows.length) { showToast("No rows available to export yet.", "info"); return; }
+  exportGrid({ headers, rows, title: String(filename).replace(/\.(csv|xlsx)$/i, "").replace(/_/g, " "), filename });
+  showToast(`Exported ${String(filename).replace(/\.csv$/i, "")}.xlsx`, "mint");
 }
 
 // ─── RENDER MAIN VIEW ────────────────────────────────────────────────────────
@@ -1688,25 +1672,11 @@ export function wirePayrollManagement(container, subroute) {
     activeTab = subroute || "overview";
   }
   const root = container.querySelector("#payroll-management-root") || container;
-  if (!cachedOverview) {
-    cachedOverview = getDevOverviewFixture();
-    loadedPayrollRuns = getDevRunsFixture();
-    cachedCompliance = getDevComplianceFixture();
-    cachedIntegrity = getDevIntegrityFixture();
-    cachedCafes = getDevCafesFixture();
-  }
   renderPayrollControlCentre(root);
   loadAllPayrollData(root);
 }
 
 export default function render(root) {
-  if (!cachedOverview) {
-    cachedOverview = getDevOverviewFixture();
-    loadedPayrollRuns = getDevRunsFixture();
-    cachedCompliance = getDevComplianceFixture();
-    cachedIntegrity = getDevIntegrityFixture();
-    cachedCafes = getDevCafesFixture();
-  }
   renderPayrollControlCentre(root);
   loadAllPayrollData(root);
 }

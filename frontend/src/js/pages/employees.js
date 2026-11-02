@@ -3,9 +3,11 @@
 // World-Class HRIS + Workforce Administration + Employee 360 + Positioning
 // =============================================================================
 
+import { exportGrid } from "../utils/exportFile.js";
 import { apiGet, apiPost } from "../apiClient.js";
 import { showToast, openModal, renderModuleErrorState } from "../components.js";
 import { state } from "../state.js";
+import { ROLES } from "../navigation.js";
 import { navigate } from "../router.js";
 import { exportCentreModal } from "../components/exportCentreModal.js";
 
@@ -742,12 +744,17 @@ async function fetchWorkforceData() {
   if (isLoadingData) return;
   isLoadingData = true;
   try {
+    // Workforce integrity is a Master/Owner governance control; Café Admin is
+    // not authorised for it, so do not fire a request that can only 403.
+    const role = String(state.role || state.user?.role || "").toLowerCase();
+    const canReadIntegrity =
+      role === ROLES.MASTER || role === ROLES.OWNER;
     const [ov, emp, pos, stf, itg, cf] = await Promise.allSettled([
       apiGet("/employees/overview"),
       apiGet("/employees"),
       apiGet("/employees/positions"),
       apiGet("/employees/staffing-requests"),
-      apiGet("/employees/integrity"),
+      canReadIntegrity ? apiGet("/employees/integrity") : Promise.resolve(null),
       apiGet("/cafes"),
     ]);
     liveOverview = ov.status === "fulfilled" ? ov.value?.data : null;
@@ -993,16 +1000,8 @@ function exportDirectoryCSV() {
     e.employmentStatus || '',
     e.joiningDate ? String(e.joiningDate).split('T')[0] : '',
   ]);
-  const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `Zamorin_Employee_Directory_${new Date().toISOString().split('T')[0]}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  showToast("Employee directory exported as CSV.", "success");
+  exportGrid({ headers, rows, title: "Zamorin_Employee_Directory", filename: `Zamorin_Employee_Directory_${new Date().toISOString().split('T')[0]}` });
+  showToast("Employee directory exported (XLSX).", "success");
 }
 
 // ─── MODAL WIZARDS ────────────────────────────────────────────────────────────
@@ -1091,7 +1090,16 @@ function openOnboardingWizard() {
       role: "STAFF",
     };
 
-    const newEmpId = `EMP-${String(liveEmployees.length + 1).padStart(4, "0")}`;
+        let createdEmp = null;
+    try {
+      const created = await apiPost("/employees", payload);
+      createdEmp = created?.data?.employee || created?.data || null;
+    } catch (err) {
+      showToast(err?.message || "The server did not accept this request. Nothing was saved.", "error");
+      return;
+    }
+
+const newEmpId = createdEmp?.userId || createdEmp?.employeeId || "";
     const newEmp = {
       userId: newEmpId,
       name: payload.name,
@@ -1108,11 +1116,8 @@ function openOnboardingWizard() {
     };
     liveEmployees.unshift(newEmp);
 
-    try {
-      await apiPost("/employees", payload).catch(() => null);
-    } catch {}
 
-    showToast(`Employee ${payload.name} (${newEmpId}) onboarded successfully!`, "success");
+    showToast(`Employee ${payload.name} onboarded.`, "success");
     document.getElementById("modal-root").innerHTML = "";
     rerenderCurrentSubpanel();
   });
@@ -1184,7 +1189,14 @@ function openStaffingRequestModal() {
       reason: document.getElementById("sr-reason").value,
     };
 
-    const newReqId = `SR-2026-${String(liveStaffingRequests.length + 1).padStart(3, "0")}`;
+        try {
+      await apiPost("/employees/staffing-requests", payload);
+    } catch (err) {
+      showToast(err?.message || "The server did not accept this request. Nothing was saved.", "error");
+      return;
+    }
+
+const newReqId = `SR-2026-${String(liveStaffingRequests.length + 1).padStart(3, "0")}`;
     const newReq = {
       requestId: newReqId,
       cafeId: payload.cafeId,
@@ -1198,9 +1210,6 @@ function openStaffingRequestModal() {
     };
     liveStaffingRequests.unshift(newReq);
 
-    try {
-      await apiPost("/employees/staffing-requests", payload).catch(() => null);
-    } catch {}
 
     showToast(`Staffing requisition ${newReqId} submitted for ${payload.positionTitle}!`, "success");
     document.getElementById("modal-root").innerHTML = "";
@@ -1268,7 +1277,14 @@ function openCreatePositionModal() {
       isCritical: document.getElementById("cp-critical").value === "true",
     };
 
-    const newPosId = `POS-2026-${String(livePositions.length + 1).padStart(3, "0")}`;
+        try {
+      await apiPost("/employees/positions", payload);
+    } catch (err) {
+      showToast(err?.message || "The server did not accept this request. Nothing was saved.", "error");
+      return;
+    }
+
+const newPosId = `POS-2026-${String(livePositions.length + 1).padStart(3, "0")}`;
     const newPos = {
       positionId: newPosId,
       positionTitle: payload.positionTitle,
@@ -1280,9 +1296,6 @@ function openCreatePositionModal() {
     };
     livePositions.unshift(newPos);
 
-    try {
-      await apiPost("/employees/positions", payload).catch(() => null);
-    } catch {}
 
     showToast(`Position ${payload.positionTitle} created successfully.`, "success");
     document.getElementById("modal-root").innerHTML = "";
@@ -1471,7 +1484,14 @@ function openVerifySkillModal() {
       proficiency: document.getElementById("vs-prof").value,
     };
 
-    let existingEmp = liveSkills.find(s => s.userId === userId);
+        try {
+      await apiPost(`/employees/${userId}/skills`, payload);
+    } catch (err) {
+      showToast(err?.message || "The server did not accept this request. Nothing was saved.", "error");
+      return;
+    }
+
+let existingEmp = liveSkills.find(s => s.userId === userId);
     if (!existingEmp) {
       existingEmp = {
         userId,
@@ -1488,9 +1508,6 @@ function openVerifySkillModal() {
       status: "VERIFIED"
     });
 
-    try {
-      await apiPost(`/employees/${userId}/skills`, payload).catch(() => null);
-    } catch {}
 
     showToast(`Skill "${payload.skillName}" (${payload.proficiency}) verified for ${userId}!`, "success");
     document.getElementById("modal-root").innerHTML = "";
@@ -1545,7 +1562,14 @@ function openAssignTrainingModal() {
       dueDate: document.getElementById("at-due").value,
     };
 
-    let existingEmp = liveSkills.find(s => s.userId === userId);
+        try {
+      await apiPost(`/employees/${userId}/training`, payload);
+    } catch (err) {
+      showToast(err?.message || "The server did not accept this request. Nothing was saved.", "error");
+      return;
+    }
+
+let existingEmp = liveSkills.find(s => s.userId === userId);
     if (!existingEmp) {
       existingEmp = {
         userId,
@@ -1562,9 +1586,6 @@ function openAssignTrainingModal() {
       status: "IN_PROGRESS"
     });
 
-    try {
-      await apiPost(`/employees/${userId}/training`, payload).catch(() => null);
-    } catch {}
 
     showToast(`Training "${payload.trainingTitle}" assigned to ${userId}!`, "success");
     document.getElementById("modal-root").innerHTML = "";
@@ -1643,14 +1664,18 @@ function openOffboardModal(targetUserId) {
       accessRevoked: document.getElementById("ob-access").checked,
     };
 
-    const emp = liveEmployees.find(e => e.userId === userId);
+        try {
+      await apiPost(`/employees/${userId}/offboard`, payload);
+    } catch (err) {
+      showToast(err?.message || "The server did not accept this request. Nothing was saved.", "error");
+      return;
+    }
+
+const emp = liveEmployees.find(e => e.userId === userId);
     if (emp) {
       emp.employmentStatus = "NOTICE_PERIOD";
     }
 
-    try {
-      await apiPost(`/employees/${userId}/offboard`, payload).catch(() => null);
-    } catch {}
 
     showToast(`Offboarding clearance initiated for ${userId} (${payload.exitType}).`, "success");
     document.getElementById("modal-root").innerHTML = "";
@@ -1769,23 +1794,25 @@ function openLetterGeneratorModal() {
       documentName: document.getElementById("gl-doc-name").value,
     };
 
-    const docId = `DOC-2026-${String(liveDocuments.length + 85).padStart(4, "0")}`;
-    const newDoc = {
+    let gen = null;
+    try {
+      gen = await apiPost(`/employees/${userId}/documents/generate`, payload);
+    } catch (err) {
+      showToast(err?.message || "The document could not be generated. Nothing was saved.", "error");
+      return;
+    }
+    const docId = gen?.data?.documentId || gen?.data?.docId || "";
+    liveDocuments.unshift({
       docId,
       title: payload.documentName,
       employeeId: userId,
       employeeName: liveEmployees.find(e => e.userId === userId)?.name || userId,
       category: payload.category,
       date: new Date().toISOString().split("T")[0],
-      status: "ISSUED"
-    };
-    liveDocuments.unshift(newDoc);
+      status: "ISSUED",
+    });
 
-    try {
-      await apiPost(`/employees/${userId}/documents/generate`, payload).catch(() => null);
-    } catch {}
-
-    showToast(`HR Document "${payload.documentName}" generated successfully (${docId})!`, "success");
+    showToast(`HR Document "${payload.documentName}" generated${docId ? ` (${docId})` : ""}.`, "success");
     document.getElementById("modal-root").innerHTML = "";
     rerenderCurrentSubpanel();
   });
@@ -1865,7 +1892,7 @@ export function openOnboardEmployeeModal() {
             <div>
               <label style="font-size:11.5px; font-weight:600; display:block; margin-bottom:4px;">Primary Café</label>
               <select id="oe-cafe" style="width:100%; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:12.5px;">
-                ${liveCafes.map(c => `<option value="${c.cafeId}">${c.name || c.cafeId}</option>`).join('') || '<option value="ZC-0001">Kozhikode Roastery</option>'}
+                ${liveCafes.map(c => `<option value="${c.cafeId}">${c.name || c.cafeId}</option>`).join('') || '<option value="">No cafés available</option>'}
               </select>
             </div>
             <div>

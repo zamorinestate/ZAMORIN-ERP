@@ -6,6 +6,7 @@
 // Finalised Transactions + Tax Receipts + Tenders + Refunds + Voids + GST Register + Reconciliation + EOD
 // =============================================================================
 
+import { exportDomTable } from "../utils/exportFile.js";
 import { apiGet, apiPost } from "../apiClient.js";
 import { state } from "../state.js";
 import { ROLES } from "../navigation.js";
@@ -708,7 +709,7 @@ function renderReceiptsSubpanel() {
               <span>📤</span> Upload Receipt
             </button>
             <button id="btn-export-receipts-csv" class="btn btn-sm btn-secondary" style="font-weight:600;">
-              Export CSV
+              Export XLSX
             </button>
           </div>
         </div>
@@ -1135,9 +1136,6 @@ function renderTaxSubpanel() {
           <p style="font-size:12.5px; color:var(--muted); margin:0;">Authoritative tax records mapped to Legal Registrations (Karnataka 29AABCT1332L1ZV &amp; Kerala 32AABCT1332L1ZW)</p>
         </div>
         <div style="display:flex; gap:8px;">
-          <button class="btn btn-ghost" id="export-gst-csv-btn" type="button" style="font-size:12.5px; padding:6px 14px;">
-            ⬇ Export CSV
-          </button>
           <button class="btn btn-ghost" id="export-gst-xlsx-btn" type="button" style="font-size:12.5px; padding:6px 14px;">
             ⬇ Export Excel
           </button>
@@ -1711,7 +1709,8 @@ function wireSubpanelActions(root) {
   const exportReceiptsCsvBtn = root.querySelector("#btn-export-receipts-csv");
   if (exportReceiptsCsvBtn) {
     exportReceiptsCsvBtn.addEventListener("click", () => {
-      showToast("Exporting payment receipts register as CSV...", "success");
+      const ok = exportDomTable(root.querySelector("#btn-export-receipts-csv").closest(".card, section, div[class*='card']")?.parentElement || root, { title: "Payment Receipts Register" });
+      showToast(ok ? "Payment receipts register exported (XLSX)." : "No receipts to export.", ok ? "success" : "info");
     });
   }
 
@@ -1751,10 +1750,10 @@ function wireSubpanelActions(root) {
   });
 
   // 12. Export Buttons & File Exporter
-  root.querySelectorAll(".export-action-btn, #export-gst-csv-btn, #export-gst-xlsx-btn").forEach((btn) => {
+  root.querySelectorAll(".export-action-btn, #export-gst-xlsx-btn").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      const exportType = btn.dataset.export || (btn.id === "export-gst-xlsx-btn" ? "gst-xlsx" : "gst-csv");
+      const exportType = btn.dataset.export || (btn.id === "export-gst-xlsx-btn" ? "gst-xlsx" : "gst-xlsx");
       handleExportReport(exportType);
     });
   });
@@ -1764,7 +1763,7 @@ function handleExportReport(exportType) {
   const dateStr = selectedBusinessDate || new Date().toISOString().split("T")[0];
   const bills = cachedBills.length > 0 ? cachedBills : DEFAULT_BILLS;
 
-  function triggerDownload(content, fileName, mimeType = "text/csv;charset=utf-8;") {
+  function triggerDownload(content, fileName, mimeType = "application/octet-stream") {
     const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -1814,13 +1813,11 @@ function handleExportReport(exportType) {
           URL.revokeObjectURL(url);
           showToast("Modern Excel workbook downloaded successfully!", "success");
         } else {
-          window.open(`/ZAMORIN_OFFICIAL_EXCEL_TEMPLATE.xlsx`, '_blank');
-          showToast("Excel workbook downloaded successfully!", "success");
+          showToast("The report server did not return a workbook. Please retry.", "error");
         }
       })
       .catch(() => {
-        window.open(`/ZAMORIN_OFFICIAL_EXCEL_TEMPLATE.xlsx`, '_blank');
-        showToast("Excel workbook downloaded successfully!", "success");
+        showToast("Could not reach the report server. Nothing was downloaded.", "error");
       });
     return;
   }

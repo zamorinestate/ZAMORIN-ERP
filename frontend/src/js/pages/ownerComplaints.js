@@ -86,8 +86,12 @@ export async function initOwnerComplaints() {
     btnNew.addEventListener('click', openNewComplaintModal);
   }
 
+  window.__complaintsLoadError = "";
   await loadData();
   renderSection();
+  if (window.__complaintsLoadError) {
+    document.getElementById('oc-content-area')?.insertAdjacentHTML('afterbegin', `<div role="alert" style="margin-bottom:12px;padding:10px 12px;border:1px solid var(--err);border-radius:8px;color:var(--err);font-size:13px;">This page could not load its data (${String(window.__complaintsLoadError).replace(/[<>&]/g, '')}). The figures below are not real.</div>`);
+  }
 }
 
 async function loadData() {
@@ -100,6 +104,7 @@ async function loadData() {
     if (complaintsRes && complaintsRes.success) cachedComplaints = complaintsRes.data;
   } catch (err) {
     console.warn('Complaints load notice:', err.message);
+    window.__complaintsLoadError = err.message || 'This data could not be loaded.';
   }
 }
 
@@ -285,7 +290,11 @@ function openNewComplaintModal() {
   document.getElementById('form-new-complaint')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const payload = {
-      cafeId: state.currentCafeId || state.user?.cafeId || 'CAFE-001',
+      cafeId:
+        state.currentCafeId ||
+        state.user?.primaryCafeId ||
+        state.user?.assignedCafeIds?.[0] ||
+        "",
       channel: document.getElementById('cmp-channel').value,
       complaintCategory: document.getElementById('cmp-cat').value,
       severity: document.getElementById('cmp-sev').value,

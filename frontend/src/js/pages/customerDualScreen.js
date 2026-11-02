@@ -38,28 +38,22 @@ export function renderDualScreen(subroute) {
             </div>
 
             <div id="ds-cart-items" style="display:flex; flex-direction:column; gap:12px; max-height:480px; overflow-y:auto;">
-              <div style="display:flex; justify-content:space-between; align-items:center; background:#1E293B; padding:12px 16px; border-radius:8px;">
-                <div>
-                  <div style="font-weight:700; font-size:15px;">Malabar Monsooned Pour-Over</div>
-                  <div style="color:#94A3B8; font-size:12px;">Hot • Regular • No Sugar</div>
-                </div>
-                <div style="font-weight:800; font-size:16px; color:#D4AF37;">₹280.00</div>
-              </div>
+              <div style="color:#94A3B8; font-size:14px; padding:12px 4px;">Waiting for the next order…</div>
             </div>
           </div>
 
           <div style="border-top:1px solid #1E293B; padding-top:16px; margin-top:20px;">
             <div style="display:flex; justify-content:space-between; color:#94A3B8; font-size:14px; margin-bottom:6px;">
               <span>Subtotal</span>
-              <span id="ds-subtotal">₹280.00</span>
+              <span id="ds-subtotal">₹0.00</span>
             </div>
             <div style="display:flex; justify-content:space-between; color:#94A3B8; font-size:14px; margin-bottom:8px;">
               <span>GST (5%)</span>
-              <span id="ds-gst">₹14.00</span>
+              <span id="ds-gst">₹0.00</span>
             </div>
             <div style="display:flex; justify-content:space-between; color:#F8FAFC; font-size:24px; font-weight:900;">
               <span>Total Amount</span>
-              <span id="ds-total" style="color:#10B981;">₹294.00</span>
+              <span id="ds-total" style="color:#10B981;">₹0.00</span>
             </div>
           </div>
         </div>
@@ -70,11 +64,11 @@ export function renderDualScreen(subroute) {
           <div style="font-size:12px; color:#94A3B8; margin-bottom:24px;">GPay • PhonePe • Paytm • BHIM • CRED</div>
 
           <div style="background:#FFFFFF; padding:16px; border-radius:16px; box-shadow:0 10px 25px rgba(0,0,0,0.5); margin-bottom:20px;">
-            <img id="ds-upi-qr" src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=upi://pay?pa=zamorincafe@icici&pn=ZamorinCafe&am=294.00&cu=INR" alt="Dynamic UPI QR" style="width:200px; height:200px; display:block;" />
+            <img id="ds-upi-qr" src="" hidden alt="Dynamic UPI QR" style="width:200px; height:200px; display:block;" />
           </div>
 
           <div id="ds-qr-amount-pill" style="background:#1E293B; border:1px solid #334155; padding:8px 20px; border-radius:30px; font-size:18px; font-weight:800; color:#D4AF37;">
-            Pay Exactly: <span id="ds-qr-amount-text">₹294.00</span>
+            Pay Exactly: <span id="ds-qr-amount-text">₹0.00</span>
           </div>
 
           <div style="margin-top:24px; font-size:12px; color:#64748B;">
@@ -112,7 +106,7 @@ export function wireDualScreen(container, subroute) {
         itemsEl.innerHTML = data.items.map(i => `
           <div style="display:flex; justify-content:space-between; align-items:center; background:#1E293B; padding:12px 16px; border-radius:8px;">
             <div>
-              <div style="font-weight:700; font-size:15px;">${i.name}</div>
+              <div style="font-weight:700; font-size:15px;">${String(i.name ?? "").replace(/[<>&]/g, "")}</div>
               <div style="color:#94A3B8; font-size:12px;">Qty: ${i.qty || 1}</div>
             </div>
             <div style="font-weight:800; font-size:16px; color:#D4AF37;">₹${((i.pricePaisa * (i.qty || 1)) / 100).toFixed(2)}</div>
@@ -128,9 +122,10 @@ export function wireDualScreen(container, subroute) {
       if (totalEl) totalEl.textContent = formattedTotal;
       if (qrTextEl) qrTextEl.textContent = formattedTotal;
 
+      // Show a QR only when the till sends an image it generated itself. No payment details go to outside services.
       if (qrEl) {
-        const upiUri = `upi://pay?pa=zamorincafe@icici&pn=ZamorinCafe&am=${(totalPaisa / 100).toFixed(2)}&cu=INR`;
-        qrEl.src = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(upiUri)}`;
+        if (data.upiQrDataUrl && /^data:image\//.test(data.upiQrDataUrl)) { qrEl.src = data.upiQrDataUrl; qrEl.hidden = false; }
+        else { qrEl.removeAttribute("src"); qrEl.hidden = true; }
       }
     };
   } catch (err) {

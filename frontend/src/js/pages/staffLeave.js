@@ -6,6 +6,7 @@
 // Strictly SELF-SERVICE ONLY. Zero coworker or team absence leakage.
 // =============================================================================
 
+import { exportGrid } from "../utils/exportFile.js";
 import { state } from "../state.js";
 import { showToast } from "../components.js";
 import { icon } from "../icons.js";
@@ -630,7 +631,7 @@ function renderStatementTab() {
 
         <div class="flex justify-end gap-sm" style="margin-top:20px;">
           <button class="btn btn-secondary" id="btn-export-leave-csv">
-            Export CSV
+            Export XLSX
           </button>
           <button class="btn btn-primary" onclick="window.print()">
             ${icon("printer", 14)} Print Full Statement
@@ -1095,33 +1096,9 @@ function openCancelLeaveModal(leaveId, onDone) {
 
 // ── EXPORT CSV UTILITY ───────────────────────────────────────────────────────
 function exportLeaveCsv() {
-  const rows = [
-    ["Request ID", "Leave Type", "Start Date", "End Date", "Days Charged", "Status", "Reason"].join(","),
-  ];
-
-  if (cachedRequests.length === 0) {
-    rows.push("No leave requests found,,,,,,");
-  } else {
-    for (const r of cachedRequests) {
-      const escapedReason = `"${String(r.reason || '').replace(/"/g, '""')}"`;
-      rows.push([
-        r.id || "",
-        `"${String(r.type || '').replace(/"/g, '""')}"`,
-        r.startDate || r.dates || "",
-        r.endDate || r.startDate || r.dates || "",
-        r.days ?? 1,
-        r.status || "",
-        escapedReason,
-      ].join(","));
-    }
-  }
-
-  const csvContent = "data:text/csv;charset=utf-8," + encodeURIComponent(rows.join("\n"));
-  const link = document.createElement("a");
-  link.setAttribute("href", csvContent);
-  link.setAttribute("download", `Zamorin_Leave_History_${new Date().toISOString().slice(0, 10)}.csv`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  showToast("Leave statement CSV downloaded ✓", "mint");
+  if (cachedRequests.length === 0) { showToast("No leave requests to export", "info"); return; }
+  const headers = ["Request ID", "Leave Type", "Start Date", "End Date", "Days Charged", "Status", "Reason"];
+  const rows = cachedRequests.map((r) => [r.id || "", r.type || "", r.startDate || r.dates || "", r.endDate || r.startDate || r.dates || "", r.days ?? 1, r.status || "", r.reason || ""]);
+  exportGrid({ headers, rows, title: "Leave History", filename: `Zamorin_Leave_History_${new Date().toISOString().slice(0, 10)}` });
+  showToast("Leave statement downloaded (XLSX) ✓", "mint");
 }

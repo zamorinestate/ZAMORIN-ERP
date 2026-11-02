@@ -58,8 +58,7 @@ export function renderPortfolioGovernance() {
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <select id="p18-cafe-selector" class="form-select" style="min-width:180px;background:var(--bg-surface,#1e293b);border:1px solid var(--border-color,#334155);color:var(--text-primary,#fff);border-radius:8px;padding:8px 12px;font-size:13px;">
             <option value="ALL" ${selectedCafe === 'ALL' ? 'selected' : ''}>All Estate Outlets</option>
-            <option value="ZC-0001" ${selectedCafe === 'ZC-0001' ? 'selected' : ''}>Kozhikode Beach (ZC-0001)</option>
-            <option value="ZC-0002" ${selectedCafe === 'ZC-0002' ? 'selected' : ''}>Wayanad Heritage (ZC-0002)</option>
+            ${(state.currentUser?.assignedCafeIds || state.user?.assignedCafeIds || []).map((c) => `<option value="${c}" ${selectedCafe === c ? 'selected' : ''}>${c}</option>`).join('')}
           </select>
 
           <button id="p18-refresh-btn" class="btn btn-secondary" style="display:inline-flex;align-items:center;gap:6px;background:var(--bg-surface,#1e293b);border:1px solid var(--border-color,#334155);color:var(--text-primary,#fff);border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;">

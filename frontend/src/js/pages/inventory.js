@@ -4,10 +4,12 @@
 // Replenishment • Transfers • Lots • Expiry • FEFO • Reservations • Wastage • Counts
 // Recall • Recipe Consumption • Valuation • Item 360 • Integrity • Audit
 // =============================================================================
+import { exportTable } from "../utils/exportFile.js";
 import { apiGet, apiPost, apiPatch } from "../apiClient.js";
 import { state } from "../state.js";
 import { showToast, openModal, renderCafeContextStrip, renderChildHeader, renderModuleErrorState } from "../components.js";
 import { navigate } from "../router.js";
+import { renderStockFreezeTab, renderProductionYieldTab } from "./inventoryPhase2.js";
 
 let activeTab = "overview";
 let liveOverview = null;
@@ -172,6 +174,8 @@ function renderCurrentWorkspace(wrap) {
     case "recalls": renderRecallsTab(wrap); break;
     case "integrity": renderIntegrityTab(wrap); break;
     case "data-quality": renderDataQualityTab(wrap); break;
+    case "stock-freeze": renderStockFreezeTab(wrap); break;
+    case "production-yield": renderProductionYieldTab(wrap); break;
     default: renderOverviewTab(wrap);
   }
 }
@@ -205,6 +209,8 @@ function renderOverviewContentHtml() {
       { id: "recalls", icon: "🛡️", title: "Recall & Traceability", subtitle: "Lot containment & food safety quarantine logs", badge: `${kpis.activeRecallsCount || 0} Recalls`, badgeType: kpis.activeRecallsCount > 0 ? "danger" : "success" },
       { id: "integrity", icon: "🔒", title: "Inventory Integrity", subtitle: "Invariant verification & negative stock guards", badge: "Zero Violations", badgeType: "success" },
     ] : []),
+    { id: "stock-freeze", icon: "🔒", title: "Stock Freeze", subtitle: "Lock closed periods against late or backdated entries", badge: "Period lock", badgeType: "" },
+    { id: "production-yield", icon: "⚖️", title: "Production Yield", subtitle: "Weighed batch output, shrinkage and true unit cost", badge: "Yield", badgeType: "" },
     { id: "data-quality", icon: "🛡️", title: "Data Quality & Governance", subtitle: "P05 item identity, UOM consistency, vendor mapping & auto-purchase eligibility", badge: "P05 DQ", badgeType: "accent" },
   ];
 
@@ -319,7 +325,7 @@ function renderOverviewTab(wrap) {
 async function renderStockLevelsTab(wrap) {
   await loadCafesList();
   const isMaster = state.user?.role === "MASTER";
-  const defaultCafe = cachedCafes[0]?.cafeId || state.user?.primaryCafeId || "ZC-0001";
+  const defaultCafe = cachedCafes[0]?.cafeId || state.user?.primaryCafeId || "";
   const cafeId = (selectedCafeFilter === "ALL" || !selectedCafeFilter) ? defaultCafe : selectedCafeFilter;
   const kpis = liveOverview?.kpis || {};
 
@@ -429,7 +435,7 @@ async function loadStockLevelsData(wrap, cafeId) {
   const heatmapWrap = wrap.querySelector("#stock-heatmap-container");
   if (!tableWrap) return;
 
-  const targetCafeId = cafeId || cachedCafes[0]?.cafeId || state.user?.primaryCafeId || "ZC-0001";
+  const targetCafeId = cafeId || cachedCafes[0]?.cafeId || state.user?.primaryCafeId || "";
   let stockList = [];
   let isOfflineFallback = false;
 
@@ -763,7 +769,7 @@ async function renderReplenishmentTab(wrap) {
   const sweepBtn = wrap.querySelector("#btn-run-replenishment-sweep");
   if (sweepBtn) {
     sweepBtn.addEventListener("click", async () => {
-      const targetCafe = selectedCafeFilter && selectedCafeFilter !== "ALL" ? selectedCafeFilter : (state.user?.primaryCafeId || "ZC-0001");
+      const targetCafe = selectedCafeFilter && selectedCafeFilter !== "ALL" ? selectedCafeFilter : (state.user?.primaryCafeId || "");
       sweepBtn.disabled = true;
       sweepBtn.innerHTML = `<span class="spinner" style="width:13px; height:13px;"></span> Evaluating...`;
       try {
@@ -1274,10 +1280,10 @@ async function renderMovementsTab(wrap) {
         icon: "📜",
         backBtnId: "inv-back-to-hub-btn",
         actionsHtml: `
-          <button id="btn-export-movements-csv" class="btn btn-secondary btn-sm" style="display:flex; align-items:center; gap:6px;">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-            Export Ledger (CSV)
-          </button>
+          <span style="display:inline-flex; gap:8px;">
+            <button id="btn-export-movements-xlsx" class="btn btn-secondary btn-sm" type="button">Export Ledger (XLSX)</button>
+            <button id="btn-export-movements-pdf" class="btn btn-secondary btn-sm" type="button">PDF</button>
+          </span>
         `,
       })}
 
@@ -1439,20 +1445,16 @@ async function loadMovementsData(wrap) {
   `;
 
   // Wire export button
-  const exportBtn = wrap.querySelector("#btn-export-movements-csv");
-  if (exportBtn) {
-    exportBtn.addEventListener("click", () => {
-      const csv = "Movement ID,Timestamp,Cafe ID,Item Code,Item Name,Transaction Type,Qty Change,Balance After,Reason\n" +
-        filtered.map((m) => `"${m.movementId}","${m.performedAt}","${m.cafeId}","${m.itemId}","${m.itemName || ''}","${m.movementType}",${m.quantityBase},${m.balanceAfterBase},"${(m.reason || '').replace(/"/g, '""')}"`).join("\n");
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `stock_movements_ledger_${new Date().toISOString().slice(0, 10)}.csv`;
-      a.click();
-      showToast("Stock movements ledger CSV exported.", "success");
-    });
-  }
+  const stamp = new Date().toISOString().slice(0, 10);
+  const cols = [
+    { key: "movementId", label: "Movement ID" }, { key: "performedAt", label: "Timestamp" }, { key: "cafeId", label: "Cafe" },
+    { key: "itemId", label: "Item Code" }, { key: "itemName", label: "Item Name" }, { key: "movementType", label: "Type" },
+    { key: "quantityBase", label: "Qty Change", type: "number" }, { key: "balanceAfterBase", label: "Balance After", type: "number" }, { key: "reason", label: "Reason" },
+  ];
+  ["xlsx", "pdf"].forEach((fmt) => wrap.querySelector(`#btn-export-movements-${fmt}`)?.addEventListener("click", () => {
+    exportTable({ format: fmt, title: "Stock Ledger", subtitle: stamp, filename: `stock_ledger_${stamp}`, columns: cols, rows: filtered });
+    showToast(`Stock ledger ${fmt.toUpperCase()} exported.`, "success");
+  }));
 }
 
 // ── 7. Lots & FEFO Expiry ────────────────────────────────────────────────────
@@ -2351,10 +2353,10 @@ async function renderValuationTab(wrap) {
         icon: "💰",
         backBtnId: "inv-back-to-hub-btn",
         actionsHtml: `
-          <button id="btn-export-csv" class="btn btn-secondary btn-sm" style="display:flex; align-items:center; gap:6px;">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-            Export Valuation (CSV)
-          </button>
+          <span style="display:inline-flex; gap:8px;">
+            <button id="btn-export-valuation-xlsx" class="btn btn-secondary btn-sm" type="button">Export Valuation (XLSX)</button>
+            <button id="btn-export-valuation-pdf" class="btn btn-secondary btn-sm" type="button">PDF</button>
+          </span>
         `,
       })}
 
@@ -2423,20 +2425,16 @@ async function loadValuationData(wrap) {
     </div>
   `;
 
-  const exportBtn = wrap.querySelector("#btn-export-csv");
-  if (exportBtn) {
-    exportBtn.addEventListener("click", () => {
-      const csv = "Café,SKU,Item Name,Category,On Hand,Unit Cost (₹),Total Value (₹)\n" +
-        rows.map((r) => `"${r.cafeId}","${r.sku}","${r.name}","${r.category}",${r.onHand},${(r.unitCostPaisa/100).toFixed(2)},${(r.totalValuePaisa/100).toFixed(2)}`).join("\n");
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `inventory_valuation_${new Date().toISOString().slice(0,10)}.csv`;
-      a.click();
-      showToast("Valuation CSV exported.", "success");
-    });
-  }
+  const stampV = new Date().toISOString().slice(0, 10);
+  const colsV = [
+    { key: "cafeId", label: "Cafe" }, { key: "sku", label: "SKU" }, { key: "name", label: "Item Name" }, { key: "category", label: "Category" },
+    { key: "onHand", label: "On Hand", type: "number" }, { key: "unitCost", label: "Unit Cost", type: "money" }, { key: "totalValue", label: "Total Value", type: "money" },
+  ];
+  ["xlsx", "pdf"].forEach((fmt) => wrap.querySelector(`#btn-export-valuation-${fmt}`)?.addEventListener("click", () => {
+    exportTable({ format: fmt, title: "Inventory Valuation", subtitle: stampV, filename: `inventory_valuation_${stampV}`, columns: colsV,
+      rows: rows.map((r) => ({ ...r, unitCost: (r.unitCostPaisa / 100).toFixed(2), totalValue: (r.totalValuePaisa / 100).toFixed(2) })) });
+    showToast(`Valuation ${fmt.toUpperCase()} exported.`, "success");
+  }));
 }
 
 // ── 14. Recall & Traceability ────────────────────────────────────────────────

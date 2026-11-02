@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="azure">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Zamorin Cafe ERP</title>
-  <meta name="theme-color" content="#101a30" />
+  <meta name="theme-color" content="#1D4ED8" />
   <meta name="description" content="Zamorin Cafe ERP — secure multi-location café management system" />
   <link rel="icon" type="image/svg+xml" href="/src/assets/zamorin-app-icon-vector.svg" />
   <link rel="apple-touch-icon" href="/src/assets/zamorin-app-icon-1024.png" />
@@ -14,12 +14,12 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400&family=Inter:wght@300;400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=Playfair+Display:ital,wght@0,600;0,700;0,800;1,600&family=Poppins:wght@400;500;600;700&display=swap" />
   <!-- Critical assets preload for immediate first paint -->
   <link rel="preload" as="image" href="/src/assets/zamorin-logo-stacked.svg" fetchpriority="high" />
-  <!-- Design system: tokens → layout → components → theme overrides → Login 2.0 -->
-  <link rel="stylesheet" href="/src/styles/tokens.css?v=3.5.2" />
-  <link rel="stylesheet" href="/src/styles/layout.css?v=3.5.2" />
-  <link rel="stylesheet" href="/src/styles/components.css?v=3.5.2" />
-  <link rel="stylesheet" href="/src/styles/zamorin.css?v=3.5.2" />
-  <link rel="stylesheet" href="/src/styles/login2.css?v=3.5.2" />
+  <!-- Authoritative Production Design System (Tailwind CSS v4 + Zamorin ERP UI Kit) -->
+  <!-- Tailwind utilities are compiled from src/styles/tailwind.css and load first so
+       the UI kit (app.css) always wins on shared class names. -->
+  <link rel="stylesheet" href="/src/styles/tailwind.build.css?v=4.0.0" />
+  <link rel="stylesheet" href="/app.css?v=4.0.0" />
+  <link rel="stylesheet" href="/src/styles/login2.css?v=4.0.0" />
   <script>
     (function() {
       try {
@@ -33,8 +33,10 @@
             for (var n of names) caches.delete(n);
           });
         }
-        var savedTheme = localStorage.getItem('zamorin-theme') || 'paper';
+        var savedTheme = localStorage.getItem('zamorin-theme') || localStorage.getItem('zm-theme');
+        if (['azure', 'pearl', 'paper', 'verdigris', 'midnight', 'noir'].indexOf(savedTheme) === -1) savedTheme = 'azure';
         document.documentElement.dataset.theme = savedTheme;
+        document.documentElement.setAttribute('data-theme', savedTheme);
         var savedFontSize = localStorage.getItem('zamorin-font-size') || 'standard';
         document.documentElement.dataset.fontSize = savedFontSize;
       } catch (e) {}

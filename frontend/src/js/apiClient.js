@@ -1064,9 +1064,15 @@ export async function requestJson(
   if (isGet) {
     executionPromise.catch(() => {});
     inFlightGetRequests.set(cacheKey, executionPromise);
-    executionPromise.finally(() => {
-      inFlightGetRequests.delete(cacheKey);
-    });
+    // `finally()` returns a new promise that re-throws the original rejection.
+    // Without a terminal catch that derived promise is unhandled and surfaces
+    // as a window `unhandledrejection` (a pageerror) even when every caller
+    // handles the request error. Clean up without leaking the rejection.
+    executionPromise
+      .then(
+        () => inFlightGetRequests.delete(cacheKey),
+        () => inFlightGetRequests.delete(cacheKey)
+      );
   }
 
   if (signal) {
@@ -1097,16 +1103,29 @@ export function apiGet(path, options = {}) {
   return requestJson("GET", path, options);
 }
 
+// Several call sites pass `{ body: {...} }` as the payload. Unwrap that single-key
+// wrapper so the server receives the intended fields rather than a nested object.
+function unwrapBodyWrapper(body) {
+  if (
+    body && typeof body === "object" && !Array.isArray(body) &&
+    Object.keys(body).length === 1 && body.body && typeof body.body === "object" &&
+    !(typeof FormData !== "undefined" && body instanceof FormData)
+  ) {
+    return body.body;
+  }
+  return body;
+}
+
 export function apiPost(path, body, options = {}) {
-  return requestJson("POST", path, { ...options, body });
+  return requestJson("POST", path, { ...options, body: unwrapBodyWrapper(body) });
 }
 
 export function apiPatch(path, body, options = {}) {
-  return requestJson("PATCH", path, { ...options, body });
+  return requestJson("PATCH", path, { ...options, body: unwrapBodyWrapper(body) });
 }
 
 export function apiPut(path, body, options = {}) {
-  return requestJson("PUT", path, { ...options, body });
+  return requestJson("PUT", path, { ...options, body: unwrapBodyWrapper(body) });
 }
 
 export function apiDelete(path, options = {}) {
@@ -1122,7 +1141,7 @@ export async function apiBlob(path, { signal, headers = {} } = {}) {
     method: "GET",
     signal,
     headers: {
-      Accept: "application/pdf, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, text/csv, application/octet-stream, */*",
+      Accept: "application/pdf, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/octet-stream, */*",
       ...headers,
     },
   });

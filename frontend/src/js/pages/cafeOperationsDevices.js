@@ -1,4 +1,5 @@
 import { state } from "../state.js";
+import { askText } from "../utils/dialogs.js";
 import { apiGet, apiPost } from "../apiClient.js";
 import { showToast, openModal, closeModal, confirmAction, kpiCard, skeleton, renderModuleErrorState } from "../components.js";
 import { icon } from "../icons.js";
@@ -1217,18 +1218,18 @@ async function wirePeripheralsView(root) {
         if (action === "test-print") {
           showToast(`Sending diagnostic test receipt to ${deviceId}...`, "info");
           const res = await apiPost(`/hardware/devices/${deviceId}/diagnostic`, {});
-          showToast(`✅ Test receipt compiled (${res?.data?.result?.bytesLength || 0} bytes). Print dispatched.`, "success");
+          showToast(`✅ Test receipt compiled (${res?.data?.result?.bytesLength || 0} bytes). Generated only; check the printer for output.`, "success");
         } else if (action === "kick-drawer") {
           const res = await apiPost(`/hardware/devices/${deviceId}/diagnostic`, { reason: "Operator manual test" });
           showToast(`✅ Cash drawer pulse emitted on Pin ${res?.data?.result?.pin || 2}. Zero financial entries created.`, "success");
         } else if (action === "test-scale") {
-          const rawPayload = prompt("Simulate serial scale stream (e.g. ST,GS,+00.450kg or W:0.820kg):", "ST,GS,+00.450kg");
+          const rawPayload = await askText({ title: "Scale parser test", label: "Raw scale stream (e.g. ST,GS,+00.450kg)", required: true });
           if (rawPayload) {
             const res = await apiPost("/hardware/scale/parse", { rawPayload, protocol: "TOLEDO" });
             showToast(`⚖️ Scale reading: ${res.weight} ${res.unit} (Stable: ${res.isStable})`, "success");
           }
         } else if (action === "test-scan") {
-          const code = prompt("Simulate barcode/QR scan (e.g. ZC-ITEM-001 or EAN-13):", "ZC-ITEM-001");
+          const code = await askText({ title: "Scan validator test", label: "Barcode / QR value", required: true });
           if (code) {
             const res = await apiPost("/hardware/scan/validate", {
               code,
@@ -1250,12 +1251,12 @@ async function wirePeripheralsView(root) {
         } else if (action === "test-soundbox") {
           showToast(`Triggering test speech broadcast on Soundbox ${deviceId}...`, "info");
           const res = await apiPost("/hardware/soundbox/broadcast", { amountPaisa: 12000, language: "en", terminalId: deviceId });
-          showToast(`🔊 Soundbox: Broadcast "${res?.data?.speechText}" dispatched!`, "success");
+          showToast(`🔊 Soundbox: Broadcast "${res?.data?.speechText}" requested.`, "success");
         } else if (action === "test-caller-id") {
-          const phone = prompt("Simulate incoming caller phone number:", "9876543210");
+          const phone = await askText({ title: "Caller-ID test", label: "Caller phone number", required: true });
           if (phone) {
             const res = await apiPost("/hardware/caller-id/incoming", { phoneNumber: phone, rawCallerName: "Valued Guest" });
-            showToast(`📞 Caller ID: ${res?.data?.customerName} (${res?.data?.customerPhone}) pop-up dispatched!`, "success");
+            showToast(`📞 Caller ID: ${res?.data?.customerName} (${res?.data?.customerPhone}) looked up.`, "success");
           }
         }
       } catch (err) {

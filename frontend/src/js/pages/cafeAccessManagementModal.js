@@ -6,6 +6,7 @@
 
 'use strict';
 
+import { askText, askConfirm } from '../utils/dialogs.js';
 import { apiGet, apiPost } from '../apiClient.js';
 import { showToast } from '../components.js';
 import { openQrViewerModal, downloadQrSvg, downloadQrPng, printQrCard } from '../utils/qrCodeGen.js';
@@ -292,7 +293,7 @@ function renderAccessModalContent(container, data) {
       return;
     }
 
-    const currentPassword = window.prompt('Step-up Reauthentication Required:\nPlease enter your personal login password to reveal the Permanent Café PIN:');
+    const currentPassword = await askText({ title: 'Re-enter your password', label: 'Your personal login password (required to reveal the PIN)', type: 'password', required: true, okLabel: 'Reveal PIN' });
     if (!currentPassword) return;
 
     try {
@@ -364,12 +365,10 @@ function renderAccessModalContent(container, data) {
 
   // Revoke QR
   container.querySelector('#acc-revoke-qr-btn')?.addEventListener('click', async () => {
-    const confirm = window.confirm(
-      'REVOCATION WARNING: Revoking the QR access credential will immediately disable scanning and prevent any operator from accessing this café via QR.\n\nDo you want to revoke this QR credential?'
-    );
+    const confirm = await askConfirm({ title: 'Please confirm', message: 'REVOCATION WARNING: Revoking the QR access credential will immediately disable scanning and prevent any operator from accessing this café via QR.\n\nDo you want to revoke this QR credential?', okLabel: 'Continue', danger: true });
     if (!confirm) return;
 
-    const reason = window.prompt('Please provide a reason for revocation (optional):') || '';
+    const reason = (await askText({ title: 'Reason for revocation', label: 'Reason (optional)', required: false })) || '';
     try {
       await apiPost(`/cafe-access/${encodeURIComponent(data.cafeId)}/revoke-qr`, {
         body: { reason },
@@ -391,9 +390,7 @@ function renderAccessModalContent(container, data) {
 
   // Rotate QR
   container.querySelector('#acc-rotate-qr-btn')?.addEventListener('click', async () => {
-    const confirm = window.confirm(
-      'WARNING: Regenerating the QR credential will invalidate all previously printed QR codes for this location.\n\nThe Permanent Café PIN will remain unchanged.\n\nDo you want to proceed?'
-    );
+    const confirm = await askConfirm({ title: 'Please confirm', message: 'WARNING: Regenerating the QR credential will invalidate all previously printed QR codes for this location.\n\nThe Permanent Café PIN will remain unchanged.\n\nDo you want to proceed?', okLabel: 'Continue', danger: true });
     if (!confirm) return;
 
     try {
@@ -407,9 +404,7 @@ function renderAccessModalContent(container, data) {
 
   // Rotate Link
   container.querySelector('#acc-rotate-link-btn')?.addEventListener('click', async () => {
-    const confirm = window.confirm(
-      'WARNING: Regenerating the login link will immediately invalidate any existing bookmarks or links for this café.\n\nThe Permanent Café PIN will remain unchanged.\n\nDo you want to proceed?'
-    );
+    const confirm = await askConfirm({ title: 'Please confirm', message: 'WARNING: Regenerating the login link will immediately invalidate any existing bookmarks or links for this café.\n\nThe Permanent Café PIN will remain unchanged.\n\nDo you want to proceed?', okLabel: 'Continue', danger: true });
     if (!confirm) return;
 
     try {
@@ -475,9 +470,7 @@ function renderAccessModalContent(container, data) {
   const emergencyBtn = container.querySelector('#acc-emergency-btn');
   emergencyBtn?.addEventListener('click', async () => {
     if (isEmergencyLocked) {
-      const confirmUnlock = window.confirm(
-        'Are you sure you want to release the Emergency Lock on this café?\n\nCafé Operations login via PIN, QR, and Link will resume.'
-      );
+      const confirmUnlock = await askConfirm({ title: 'Please confirm', message: 'Are you sure you want to release the Emergency Lock on this café?\n\nCafé Operations login via PIN, QR, and Link will resume.', okLabel: 'Continue', danger: true });
       if (!confirmUnlock) return;
 
       try {
@@ -490,9 +483,7 @@ function renderAccessModalContent(container, data) {
         showToast(err.message || 'Failed to release lock.', 'danger');
       }
     } else {
-      const reason = window.prompt(
-        'SECURITY ACTION: Engage Emergency Lock on Café Operations.\n\nAll gateway logins (PIN, QR, Link) will be immediately blocked.\nPlease enter an incident reason for the permanent audit trail:'
-      );
+      const reason = await askText({ title: 'Engage emergency lock', label: 'Incident reason', required: true });
       if (!reason) return;
 
       try {

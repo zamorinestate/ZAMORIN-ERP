@@ -91,13 +91,26 @@ export async function initOwnerUtilitiesWaste() {
   renderSection();
 }
 
+function resolveCafeId() {
+  return (
+    state.currentCafeId ||
+    state.user?.primaryCafeId ||
+    state.user?.assignedCafeIds?.[0] ||
+    ""
+  );
+}
+
 async function loadData() {
   try {
-    const cafeId = state.currentCafeId || 'CAFE-001';
-    const [dashRes, swmRes] = await Promise.all([
-      apiGet('/utilities-waste/dashboard'),
-      apiGet(`/utilities-waste/swm-2026/${cafeId}`)
-    ]);
+    const cafeId = resolveCafeId();
+    // The per-café SWM evaluation is scoped by authorize()'s café-access check.
+    // Without a real assigned café the request would 403 — skip it instead of
+    // inventing a café id and showing a false error.
+    const requests = [apiGet('/utilities-waste/dashboard')];
+    if (cafeId) {
+      requests.push(apiGet(`/utilities-waste/swm-2026/${encodeURIComponent(cafeId)}`));
+    }
+    const [dashRes, swmRes] = await Promise.all(requests);
     if (dashRes && dashRes.success) cachedDashboard = dashRes.data;
     if (swmRes && swmRes.success) cachedSwm = swmRes.data;
   } catch (err) {
@@ -214,7 +227,7 @@ function openUcoModal() {
   document.getElementById('form-new-uco')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const payload = {
-      cafeId: state.currentCafeId || 'CAFE-001',
+      cafeId: resolveCafeId(),
       quantityLiters: Number(document.getElementById('uco-qty').value),
       totalPolarCompoundsPercent: Number(document.getElementById('uco-tpc').value),
       collectorName: document.getElementById('uco-col').value.trim()

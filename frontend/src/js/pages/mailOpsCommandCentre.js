@@ -4,6 +4,7 @@
 // Sender Identities • Gmail Sync • Security Review • MailOps Integrity • Telemetry • Audit
 // =============================================================================
 
+import { exportGrid } from "../utils/exportFile.js";
 import { apiGet, apiPost, apiPatch, apiDelete } from "../apiClient.js";
 import { state } from "../state.js";
 import { showToast, openModal } from "../components.js";
@@ -928,7 +929,7 @@ async function renderReportsTab(wrap) {
             <h3 style="font-size:15.5px; font-weight:700; margin:0; color:var(--ink);">MailOps Communication Registers &amp; Reports</h3>
             <p style="font-size:12.5px; color:var(--muted); margin:2px 0 0;">Historical delivery register, inbound audit, and exportable operational logs.</p>
           </div>
-          <button id="btn-export-mailops-csv" class="btn btn-sm btn-secondary">Export Communication Register (CSV)</button>
+          <button id="btn-export-mailops-csv" class="btn btn-sm btn-secondary">Export Communication Register (XLSX)</button>
         </div>
 
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px;">
@@ -955,14 +956,12 @@ async function renderReportsTab(wrap) {
     const exportBtn = wrap.querySelector("#btn-export-mailops-csv");
     if (exportBtn) {
       exportBtn.addEventListener("click", () => {
-        const csv = `Metric,Value\nTotal Outbound,${summary.outboxTotal || 0}\nDelivery Success Rate,${summary.deliverySuccessRate || 100}%\nTotal Inbound,${summary.inboundTotal || 0}\nQuarantined Inbound,${summary.inboundQuarantined || 0}\n`;
-        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `mailops_report_${new Date().toISOString().slice(0, 10)}.csv`;
-        a.click();
-        showToast("Communication register exported as CSV.", "success");
+        exportGrid({
+          headers: ["Metric", "Value"],
+          rows: [["Total Outbound", summary.outboxTotal || 0], ["Delivery Success Rate", `${summary.deliverySuccessRate || 100}%`], ["Total Inbound", summary.inboundTotal || 0], ["Quarantined Inbound", summary.inboundQuarantined || 0]],
+          title: "Communication Register", filename: `mailops_report_${new Date().toISOString().slice(0, 10)}`,
+        });
+        showToast("Communication register exported (XLSX).", "success");
       });
     }
   } catch (err) {

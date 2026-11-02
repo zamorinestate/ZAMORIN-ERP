@@ -1,3 +1,4 @@
+import { askText } from "../utils/dialogs.js";
 // =============================================================================
 // ZAMORIN CAFÉ ERP — SCREEN: ORGANISATION IDENTITY MASTER
 // Standard compliance: Sections 364–395 (EXPORT_ENGINE_COMPANY_IDENTITY_MASTER_STANDARD.md)
@@ -486,7 +487,7 @@ function _wireEvents(root) {
       });
       if (!confirmed) return;
 
-      const changeReason = prompt('Please provide a brief reason for this change (required for audit):');
+      const changeReason = await askText({ title: 'Reason for this change', label: 'Required for the audit trail (at least 5 characters)', validate: (v) => (v.length >= 5 ? '' : 'Enter at least 5 characters.') });
       if (!changeReason || changeReason.trim().length < 5) {
         showToast('A change reason (min 5 characters) is required for statutory audit.', 'warning');
         return;

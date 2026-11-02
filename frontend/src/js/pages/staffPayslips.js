@@ -1343,7 +1343,7 @@ function showRaiseQueryModal(root) {
       });
 
       overlay.remove();
-      showToast("Payroll inquiry submitted successfully. HR team notified.", "mint");
+      showToast("Payroll inquiry submitted.", "mint");
       await loadPayrollQueries(root);
       currentTab = "queries";
       renderContent(root);

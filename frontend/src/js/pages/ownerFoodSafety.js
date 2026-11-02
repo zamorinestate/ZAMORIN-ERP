@@ -3,6 +3,7 @@
 // Stage 01 Strategic Expansion Workspace
 // =============================================================================
 
+import { askText } from "../utils/dialogs.js";
 import { apiGet, apiPost } from '../apiClient.js';
 import { showToast, skeleton, openModal, closeModal, confirmAction } from '../components.js';
 import { state } from '../state.js';
@@ -50,7 +51,7 @@ export function renderOwnerFoodSafety() {
           <!-- Cafe Scope Filter -->
           <select id="ofs-cafe-filter" class="form-select" style="background:var(--surface-card,#1e293b);color:var(--text-primary,#fff);border:1px solid var(--border-color,#334155);padding:8px 12px;border-radius:8px;font-size:13px;font-weight:600;">
             <option value="ALL">All Authorized Cafés</option>
-            ${(state.currentUser?.assignedCafeIds || ['ZC-0001', 'ZC-0002'])
+            ${(state.currentUser?.assignedCafeIds || [])
               .map((c) => `<option value="${c}" ${selectedCafe === c ? 'selected' : ''}>${c}</option>`)
               .join('')}
           </select>
@@ -702,7 +703,7 @@ function renderRecallsTab(container, recalls) {
   document.querySelectorAll('.ofs-step-recall').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
       const id = e.currentTarget.getAttribute('data-id');
-      const nextState = prompt('Enter next valid state (e.g. RISK_ASSESSED, QUARANTINED, RECALL_INITIATED, AFFECTED_STOCK_IDENTIFIED, ACTION_COMPLETED, VERIFIED, CLOSED):');
+      const nextState = await askText({ title: 'Advance this recall', label: 'Next state', placeholder: 'RISK_ASSESSED, QUARANTINED, RECALL_INITIATED, AFFECTED_STOCK_IDENTIFIED, ACTION_COMPLETED, VERIFIED or CLOSED', okLabel: 'Advance' });
       if (!nextState) return;
 
       try {
@@ -791,8 +792,7 @@ function openAddLicenceModal() {
         <div>
           <label style="font-size:12px;font-weight:700;color:#fff;">Café Scope</label>
           <select id="modal-lic-cafe" class="form-select" style="width:100%;padding:8px;border-radius:6px;background:rgba(255,255,255,0.05);color:#fff;border:1px solid #334155;">
-            <option value="ZC-0001">ZC-0001 (Kozhikode Beach)</option>
-            <option value="ZC-0002">ZC-0002 (Calicut City Hub)</option>
+            ${(state.currentUser?.assignedCafeIds || state.user?.assignedCafeIds || []).map((c) => `<option value="${c}">${c}</option>`).join('')}
           </select>
         </div>
         <div>
@@ -885,7 +885,7 @@ function openInitiateRecallModal() {
         reason,
         lotBatch,
         severity,
-        affectedCafes: ['ZC-0001', 'ZC-0002'],
+        affectedCafes: (state.currentUser?.assignedCafeIds || state.user?.assignedCafeIds || []),
       });
       closeModal();
       showToast('Recall case initiated in DETECTED state.', 'success');

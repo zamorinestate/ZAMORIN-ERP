@@ -146,7 +146,7 @@ function renderOverviewSection(container) {
       <div style="background:var(--surface-card,#1e293b);padding:20px;border-radius:12px;border:1px solid var(--border-color,#334155);">
         <div style="font-size:12px;color:var(--text-muted,#94a3b8);font-weight:700;text-transform:uppercase;">FoSTaC Certified Personnel</div>
         <div style="font-size:26px;font-weight:800;color:#a78bfa;margin-top:6px;">${data.fostacCertifiedCount || 0}</div>
-        <div style="font-size:11px;color:#94a3b8;margin-top:4px;">Procedure: <strong>5 August 2026</strong></div>
+        
       </div>
       <div style="background:var(--surface-card,#1e293b);padding:20px;border-radius:12px;border:1px solid var(--border-color,#334155);">
         <div style="font-size:12px;color:var(--text-muted,#94a3b8);font-weight:700;text-transform:uppercase;">Competent Personnel</div>

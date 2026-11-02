@@ -1,3 +1,4 @@
+import { askText } from "../utils/dialogs.js";
 import { apiGet, apiPost, apiPatch } from "../apiClient.js";
 import { state } from "../state.js";
 import { showToast, openModal, closeModal, renderCafeContextStrip, renderModuleErrorState } from "../components.js";
@@ -11,7 +12,7 @@ let cachedOrders = [];
 let cachedTokens = [];
 let cachedConfig = null;
 let cachedAggregatorStatus = { zomato: { isPaused: false }, swiggy: { isPaused: false } };
-let cachedCafeId = "ZC-0001";
+let cachedCafeId = "";
 
 export function setChannelsActiveTab(tab) {
   activeSubTab = tab || "tables";
@@ -21,8 +22,8 @@ export function renderChannelsFrontService(subroute) {
   if (subroute) {
     activeSubTab = subroute;
   }
-  const isOwner = state.user?.role === ROLES.OWNER;
-  const isMaster = state.user?.role === ROLES.MASTER;
+  const isOwner = state.role === ROLES.OWNER || state.user?.role === "OWNER";
+  const isMaster = state.role === ROLES.MASTER || state.user?.role === "MASTER";
 
   return `
     <div class="page-enter" style="max-width:1440px; margin:0 auto; padding-bottom:60px;">
@@ -120,7 +121,7 @@ function renderActiveTabContent() {
 }
 
 function renderTablesTab() {
-  const isOwner = state.user?.role === ROLES.OWNER;
+  const isOwner = state.role === ROLES.OWNER || state.user?.role === "OWNER";
   return `
     <div>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
@@ -346,7 +347,7 @@ function renderAggregatorCard(provider, name, brandColor, statusObj = {}) {
 }
 
 function renderConfigTab() {
-  const isOwner = state.user?.role === ROLES.OWNER;
+  const isOwner = state.role === ROLES.OWNER || state.user?.role === "OWNER";
   return `
     <div style="display:flex; flex-direction:column; gap:20px; max-width:960px;">
       <!-- Direct Channels & Policies Card -->
@@ -416,7 +417,7 @@ function renderConfigTab() {
               <span style="background:rgba(16,185,129,0.12); color:#059669; font-size:10px; font-weight:800; padding:2px 8px; border-radius:12px;">STATUTORY GST SEC 52 AUDIT</span>
             </div>
             <p style="margin:0; font-size:12.5px; color:#64748B; max-width:640px;">
-              Line-by-line audit of Zomato & Swiggy weekly payout remittance CSVs. Detects overcharged commissions, TDS/TCS miscalculations, and unacknowledged cancellation penalties with 1-click legal dispute ticket generation.
+              Line-by-line audit of Zomato & Swiggy weekly payout remittance statements. Detects overcharged commissions, TDS/TCS miscalculations, and unacknowledged cancellation penalties with 1-click legal dispute ticket generation.
             </p>
           </div>
           <button class="btn" id="btn-launch-statement-reconciler" style="background:#D4AF37; color:#16223F; border:none; padding:10px 16px; font-size:12.5px; font-weight:800; border-radius:8px; cursor:pointer; display:flex; align-items:center; gap:6px;">
@@ -429,7 +430,7 @@ function renderConfigTab() {
 }
 
 export function wireChannelsFrontService() {
-  cachedCafeId = state.cafeContext?.cafeId || state.user?.primaryCafeId || "ZC-0001";
+  cachedCafeId = state.cafeContext?.cafeId || state.user?.primaryCafeId || state.selectedCafeId || "";
 
   // Tab switching
   const tabBtns = document.querySelectorAll(".channel-tab-btn");
@@ -534,7 +535,7 @@ function renderTablesGrid(tables) {
     return;
   }
 
-  const isOwner = state.user?.role === ROLES.OWNER;
+  const isOwner = state.role === ROLES.OWNER || state.user?.role === "OWNER";
 
   container.innerHTML = tables.map((t) => {
     const isOccupied = t.status === "OCCUPIED";
@@ -669,7 +670,7 @@ function renderReservationsList(reservations) {
     return;
   }
 
-  const isOwner = state.user?.role === ROLES.OWNER;
+  const isOwner = state.role === ROLES.OWNER || state.user?.role === "OWNER";
 
   container.innerHTML = reservations.map((r) => {
     const timeStr = new Date(r.bookingTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -713,7 +714,7 @@ function renderReservationsList(reservations) {
   document.querySelectorAll(".btn-deposit-res").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const reservationId = btn.getAttribute("data-id");
-      const val = prompt("Enter advance booking deposit amount in ₹ (e.g. 500 per cover):", "1000");
+      const val = await askText({ title: "Advance deposit", label: "Deposit amount in ₹", type: "number", min: "1", step: "any", validate: (v) => (Number(v) > 0 ? "" : "Enter an amount above zero.") });
       if (!val || isNaN(Number(val))) return;
       try {
         const res = await apiPost("/api/v1/channels/reservations/deposit", {
@@ -756,7 +757,7 @@ function renderWaitlistQueue(queue) {
     return;
   }
 
-  const isOwner = state.user?.role === ROLES.OWNER;
+  const isOwner = state.role === ROLES.OWNER || state.user?.role === "OWNER";
 
   container.innerHTML = queue.map((q) => {
     return `
@@ -800,7 +801,7 @@ function renderWaitlistQueue(queue) {
       const waitlistId = btn.getAttribute("data-id");
       try {
         const res = await apiPost(`/api/v1/channels/waitlist/${waitlistId}/notify`, { cafeId: cachedCafeId });
-        showToast(`📲 SMS table-ready alert dispatched to ${res.data.guestName}!`, "success");
+        showToast(`${res.data?.guestName || "Guest"} marked as notified. No SMS is sent — call the guest or use the token board.`, "success");
         fetchReservationsAndWaitlist();
       } catch (err) {
         showToast(err.message, "error");
@@ -811,7 +812,7 @@ function renderWaitlistQueue(queue) {
   document.querySelectorAll(".btn-preorder-waitlist").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const waitlistId = btn.getAttribute("data-id");
-      const dish = prompt("Enter pre-ordered dishes (e.g. '1x Cold Brew, 1x Paneer Wrap'):", "1x Malabar Cold Brew, 1x Pepper Paneer Wrap");
+      const dish = await askText({ title: "Pre-order while waiting", label: "Dishes, e.g. 1x Cold Brew, 1x Paneer Wrap", placeholder: "1x Cold Brew" });
       if (!dish) return;
       try {
         await apiPost(`/api/v1/channels/waitlist/${waitlistId}/pre-order`, {
@@ -856,7 +857,7 @@ function renderOrdersFeed(orders) {
     return;
   }
 
-  const isOwner = state.user?.role === ROLES.OWNER;
+  const isOwner = state.role === ROLES.OWNER || state.user?.role === "OWNER";
 
   container.innerHTML = `
     <table style="width:100%; border-collapse:collapse; font-size:12px; text-align:left;">
@@ -1062,13 +1063,7 @@ function wireConfigTab() {
 }
 
 function openAggregatorStatementModal() {
-  let sampleStatement = [
-    { channelOrderId: "ZOM-7801", orderDate: "2026-10-05", grossAmountPaisa: 65000, commissionPaisa: 11700, tcsPaisa: 650, tdsPaisa: 650, netPayoutPaisa: 52000 },
-    { channelOrderId: "ZOM-7802", orderDate: "2026-10-06", grossAmountPaisa: 120000, commissionPaisa: 21600, tcsPaisa: 1200, tdsPaisa: 1200, netPayoutPaisa: 96000 },
-    { channelOrderId: "ZOM-7803", orderDate: "2026-10-07", grossAmountPaisa: 85000, commissionPaisa: 21250, tcsPaisa: 1275, tdsPaisa: 850, netPayoutPaisa: 61625 },
-    { channelOrderId: "ZOM-7804", orderDate: "2026-10-08", grossAmountPaisa: 45000, commissionPaisa: 8100, tcsPaisa: 450, tdsPaisa: 450, netPayoutPaisa: 36000 },
-    { channelOrderId: "ZOM-7805", orderDate: "2026-10-09", grossAmountPaisa: 98000, commissionPaisa: 17640, tcsPaisa: 980, tdsPaisa: 980, netPayoutPaisa: 78400 },
-  ];
+  const statementLines = [];
 
   openModal({
     title: "Aggregator Payout Reconciler & Statutory Audit (F100–F106)",
@@ -1093,16 +1088,23 @@ function openAggregatorStatementModal() {
           </div>
           <div>
             <label style="font-weight:700; color:#16223F; display:block; margin-bottom:3px;">Statement Reference</label>
-            <input type="text" id="modal-stmt-ref" class="input" value="STMT-ZOM-2026-W41" style="width:100%; font-size:12px;" />
+            <input type="text" id="modal-stmt-ref" class="input" value="" placeholder="e.g. weekly statement number" style="width:100%; font-size:12px;" />
           </div>
         </div>
 
         <div>
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-            <label style="font-weight:700; color:#16223F;">Statement Line Items (<span id="stmt-line-count">${sampleStatement.length}</span> orders)</label>
-            <button class="btn btn-sm btn-secondary" id="modal-stmt-load-demo-btn" type="button" style="font-size:11px; padding:2px 8px; font-weight:700;">
-              📥 Reload Sample Remittance
-            </button>
+            <label style="font-weight:700; color:#16223F;">Statement Line Items (<span id="stmt-line-count">${statementLines.length}</span> orders)</label>
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(7,1fr) auto; gap:4px; margin-bottom:6px;">
+            <input class="input" id="stmt-add-ref" placeholder="Order ref" style="font-size:11px;" />
+            <input class="input" id="stmt-add-date" type="date" style="font-size:11px;" />
+            <input class="input" id="stmt-add-gross" type="number" min="0" step="0.01" placeholder="Gross ₹" style="font-size:11px;" />
+            <input class="input" id="stmt-add-comm" type="number" min="0" step="0.01" placeholder="Commission ₹" style="font-size:11px;" />
+            <input class="input" id="stmt-add-tcs" type="number" min="0" step="0.01" placeholder="TCS ₹" style="font-size:11px;" />
+            <input class="input" id="stmt-add-tds" type="number" min="0" step="0.01" placeholder="TDS ₹" style="font-size:11px;" />
+            <input class="input" id="stmt-add-net" type="number" min="0" step="0.01" placeholder="Net ₹" style="font-size:11px;" />
+            <button class="btn btn-sm btn-secondary" id="stmt-add-btn" type="button">Add line</button>
           </div>
           <div id="modal-stmt-lines-table" style="max-height:160px; overflow-y:auto; border:1px solid #E2E8F0; border-radius:6px; background:#FFFFFF;">
           </div>
@@ -1133,7 +1135,7 @@ function openAggregatorStatementModal() {
           </tr>
         </thead>
         <tbody>
-          ${sampleStatement.map(s => `
+          ${statementLines.map(s => `
             <tr style="border-bottom:1px solid #F1F5F9;">
               <td style="padding:5px 8px; font-family:monospace; font-weight:700;">${s.channelOrderId}</td>
               <td style="padding:5px 8px; text-align:right;">₹${(s.grossAmountPaisa / 100).toFixed(2)}</td>
@@ -1150,15 +1152,40 @@ function openAggregatorStatementModal() {
   setTimeout(() => {
     renderTable();
 
-    document.getElementById("modal-stmt-load-demo-btn")?.addEventListener("click", () => {
+    document.getElementById("stmt-add-btn")?.addEventListener("click", () => {
+      const v = (id) => document.getElementById(id)?.value?.trim() || "";
+      const paise = (id) => Math.round(Number(v(id) || 0) * 100);
+      if (!v("stmt-add-ref") || !v("stmt-add-date") || !v("stmt-add-gross") || !v("stmt-add-net")) {
+        showToast("Order ref, date, gross and net remittance are required for each line.", "error");
+        return;
+      }
+      statementLines.push({
+        channelOrderId: v("stmt-add-ref"),
+        orderDate: v("stmt-add-date"),
+        grossAmountPaisa: paise("stmt-add-gross"),
+        commissionPaisa: paise("stmt-add-comm"),
+        tcsPaisa: paise("stmt-add-tcs"),
+        tdsPaisa: paise("stmt-add-tds"),
+        netPayoutPaisa: paise("stmt-add-net"),
+      });
+      ["ref", "gross", "comm", "tcs", "tds", "net"].forEach((k) => { const el = document.getElementById("stmt-add-" + k); if (el) el.value = ""; });
+      const c = document.getElementById("stmt-line-count");
+      if (c) c.textContent = String(statementLines.length);
       renderTable();
-      showToast("Sample weekly remittance statement reloaded.", "info");
     });
 
     document.getElementById("modal-stmt-run-audit-btn")?.addEventListener("click", async () => {
       const provider = document.getElementById("modal-stmt-provider")?.value || "ZOMATO";
       const commRate = Number(document.getElementById("modal-stmt-comm")?.value) || 18;
-      const ref = document.getElementById("modal-stmt-ref")?.value || "STMT-ZOM-2026-W41";
+      const ref = document.getElementById("modal-stmt-ref")?.value?.trim() || "";
+      if (!statementLines.length) {
+        showToast("Add at least one statement line from the aggregator's remittance first.", "error");
+        return;
+      }
+      if (!ref) {
+        showToast("Enter the statement reference.", "error");
+        return;
+      }
       const resultsContainer = document.getElementById("modal-stmt-audit-results");
 
       if (resultsContainer) {
@@ -1167,15 +1194,15 @@ function openAggregatorStatementModal() {
       }
 
       try {
-        const res = await apiPost("/api/v1/channels/aggregators/statement-audit", {
+        const res = await apiPost("/channels/aggregators/statement-audit", {
           cafeId: cachedCafeId,
           provider,
           statementReference: ref,
-          statementPeriod: "2026-W41",
+          statementPeriod: statementLines[0].orderDate.slice(0, 7),
           agreedCommissionRatePercent: commRate,
           agreedTcsRatePercent: 1,
           agreedTdsRatePercent: 1,
-          lineItems: sampleStatement,
+          lineItems: statementLines,
         });
 
         const auditData = res?.data || res;

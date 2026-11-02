@@ -86,8 +86,12 @@ export async function initOwnerCustomerLoyalty() {
     btnExport.addEventListener('click', runGovernedExport);
   }
 
+  window.__loyaltyLoadError = "";
   await loadData();
   renderSection();
+  if (window.__loyaltyLoadError) {
+    document.getElementById('ocl-content-area')?.insertAdjacentHTML('afterbegin', `<div role="alert" style="margin-bottom:12px;padding:10px 12px;border:1px solid var(--err);border-radius:8px;color:var(--err);font-size:13px;">This page could not load its data (${String(window.__loyaltyLoadError).replace(/[<>&]/g, '')}). The figures below are not real.</div>`);
+  }
 }
 
 async function loadData() {
@@ -102,6 +106,7 @@ async function loadData() {
     if (exposureRes && exposureRes.success) cachedLiability = exposureRes.data;
   } catch (err) {
     console.warn('Customer loyalty load notice:', err.message);
+    window.__loyaltyLoadError = err.message || 'This data could not be loaded.';
   }
 }
 

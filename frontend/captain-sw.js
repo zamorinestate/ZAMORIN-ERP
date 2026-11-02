@@ -4,13 +4,13 @@
 // Registered by: waiterCaptainApp.js (navigator.serviceWorker.register)
 // =============================================================================
 
-const CAPTAIN_CACHE = 'zamorin-captain-v1.0';
+const CAPTAIN_CACHE = 'zamorin-captain-v4.0.0';
 const CAPTAIN_SHELL = [
   './',
   './index.html',
   './manifest.json',
-  './src/styles/tokens.css',
-  './src/styles/zamorin.css',
+  './app.css',
+  './src/styles/tailwind.build.css',
 ];
 
 // ── Install ───────────────────────────────────────────────────────────────────

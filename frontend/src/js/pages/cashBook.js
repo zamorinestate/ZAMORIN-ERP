@@ -15,6 +15,7 @@
 //   9. Full Workflow Modals: Open Session, Close Session, Record Movement, Reverse
 // =============================================================================
 
+import { exportDomTable } from "../utils/exportFile.js";
 import { showToast, skeleton } from "../components.js";
 import { apiGet, apiPost } from "../apiClient.js";
 import { state } from "../state.js";
@@ -1378,7 +1379,8 @@ function attachTabEvents(root) {
   const btnExpHistory = root.querySelector("#btn-export-history");
   if (btnExpHistory) {
     btnExpHistory.onclick = () => {
-      showToast("Exporting past session audit history CSV...", "mint");
+      const ok = exportDomTable(root, { title: "Cash Session Audit History" });
+      showToast(ok ? "Session audit history exported (XLSX)." : "No session history rows to export.", ok ? "mint" : "info");
     };
   }
 

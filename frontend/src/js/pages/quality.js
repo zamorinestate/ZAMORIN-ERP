@@ -4,6 +4,7 @@
 // Temperature Monitoring, Quality Holds, NCR, CAPA, Traceability,
 // Audits & Compliance Register for Zamorin Cafés.
 // =============================================================================
+import { exportGrid } from "../utils/exportFile.js";
 import { apiGet, apiPost } from '../apiClient.js';
 import { showToast, skeleton, openModal, closeModal, confirmAction, renderCafeContextStrip, renderModuleErrorState, renderFileUploadZone, wireFileUploadZone, openUniversalDocumentModal } from '../components.js';
 import { state } from '../state.js';
@@ -194,9 +195,26 @@ function wireHeaderButtons(root) {
   });
 }
 
+// Master may read the whole portfolio ("ALL"); a Café Admin is scoped to their
+// assigned outlet by the backend, so sending ALL is rejected with 403.
+function effectiveCafeScope() {
+  if (selectedCafe && selectedCafe !== 'ALL') return selectedCafe;
+  const role = String(state.role || state.user?.role || '').toLowerCase();
+  if (role === ROLES.CAFE_ADMIN) {
+    return (
+      state.currentCafeId ||
+      state.user?.primaryCafeId ||
+      state.user?.assignedCafeIds?.[0] ||
+      ''
+    );
+  }
+  if (state.currentCafeId) return state.currentCafeId;
+  return 'ALL';
+}
+
 async function loadQualityOverview(root) {
   try {
-    const res = await apiGet(`/quality/overview?cafeId=${selectedCafe}`);
+    const res = await apiGet(`/quality/overview?cafeId=${encodeURIComponent(effectiveCafeScope())}`);
     if (res?.data) {
       cachedOverview = res.data;
       const kpis = res.data.kpis || {};
@@ -319,7 +337,7 @@ async function renderActiveTab(root) {
         title: 'Quality History & Analytics',
         icon: '📈',
         desc: 'Historical compliance trends, defect Pareto analysis and export reports.',
-        actionsHtml: `<button class="btn btn-sm btn-secondary" id="btn-child-export-quality" type="button">Export Report (CSV)</button>`
+        actionsHtml: `<button class="btn btn-sm btn-secondary" id="btn-child-export-quality" type="button">Export Report (XLSX)</button>`
       },
     };
 
@@ -919,10 +937,10 @@ async function renderTraceabilitySubtab(root, container) {
 
       <div class="card" style="padding:12px;background:var(--surface-sunken);display:flex;justify-content:space-between;align-items:center;">
         <div>
-          <strong style="font-size:12px;color:var(--ink);">Trace Integrity: ${traceGapCheck?.traceabilityCompleteness || '100% (GAPLESS)'}</strong>
-          <span style="font-size:11px;color:var(--muted);display:block;">Recall Drill Simulation: ${recallReadiness?.affectedStockReconciled || '100% Accounted'} in ${recallReadiness?.mockRecallDrillElapsedSeconds || 14}s.</span>
+          <strong style="font-size:12px;color:var(--ink);">Trace Integrity: ${traceGapCheck?.traceabilityCompleteness || 'Not reported'}</strong>
+          <span style="font-size:11px;color:var(--muted);display:block;">Recall Drill Simulation: ${recallReadiness?.affectedStockReconciled || 'not reported'}${recallReadiness?.mockRecallDrillElapsedSeconds != null ? ` in ${recallReadiness.mockRecallDrillElapsedSeconds}s` : ''}.</span>
         </div>
-        <span class="badge success" style="font-size:10px;">${recallReadiness?.status || 'RECALL_READY'}</span>
+        <span class="badge success" style="font-size:10px;">${recallReadiness?.status || 'NOT_REPORTED'}</span>
       </div>
     </div>
   `;
@@ -1832,17 +1850,9 @@ function openRecordAuditModal(root) {
 }
 
 function exportQualityCsv() {
-  const rows = [
-    ['Checklist ID', 'Title', 'Cafe ID', 'Date', 'Inspector', 'Result', 'Action Required'],
-    ...cachedChecklists.map((c) => [c.checklistId, `"${c.title}"`, c.cafeId, c.inspectionDate, c.inspectedByUserId, c.overallResult, `"${c.actionRequired || 'None'}"`]),
-  ];
-  const csvContent = 'data:text/csv;charset=utf-8,' + rows.map((e) => e.join(',')).join('\n');
-  const encodedUri = encodeURI(csvContent);
-  const link = document.createElement('a');
-  link.setAttribute('href', encodedUri);
-  link.setAttribute('download', `Zamorin_Quality_Report_${new Date().toISOString().slice(0, 10)}.csv`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  showToast('Quality compliance report exported as CSV!', 'success');
+  if (!cachedChecklists.length) { showToast('No inspection checklists to export.', 'info'); return; }
+  const headers = ['Checklist ID', 'Title', 'Cafe ID', 'Date', 'Inspector', 'Result', 'Action Required'];
+  const rows = cachedChecklists.map((c) => [c.checklistId, c.title, c.cafeId, c.inspectionDate, c.inspectedByUserId, c.overallResult, c.actionRequired || 'None']);
+  exportGrid({ headers, rows, title: 'Quality Compliance Report', filename: `Zamorin_Quality_Report_${new Date().toISOString().slice(0, 10)}` });
+  showToast('Quality compliance report exported (XLSX).', 'success');
 }

@@ -43,7 +43,7 @@ export function renderOwnerCompliance() {
         <div style="display:flex;gap:10px;align-items:center;">
           <select id="oc-cafe-filter" class="form-select" style="background:var(--surface-card,#1e293b);color:var(--text-primary,#fff);border:1px solid var(--border-color,#334155);padding:8px 12px;border-radius:8px;font-size:13px;font-weight:600;">
             <option value="ALL">All Authorized Cafés</option>
-            ${(state.currentUser?.assignedCafeIds || ['ZC-0001', 'ZC-0002'])
+            ${(state.currentUser?.assignedCafeIds || [])
               .map((c) => `<option value="${c}" ${selectedCafe === c ? 'selected' : ''}>${c}</option>`)
               .join('')}
           </select>

@@ -4,6 +4,9 @@
 // Combos • Pricing • Costing • Allergens • Availability • Publishing • POS Sync
 // =============================================================================
 
+import { askText } from "../utils/dialogs.js";
+import { exportGrid } from "../utils/exportFile.js";
+import { readXlsx } from "../utils/xlsxRead.js";
 import { apiGet, apiPost, apiPatch, apiDelete } from "../apiClient.js";
 import { state } from "../state.js";
 import { showToast, openModal, closeModal, renderModuleErrorState } from "../components.js";
@@ -27,7 +30,7 @@ const SAMPLE_COMBOS = [];
 const SAMPLE_CHANGESETS = [];
 const SAMPLE_SIMULATOR = [];
 const SAMPLE_INTEGRITY = {
-  status: "PASS",
+  status: "NOT_RUN",
   checksEvaluated: 0,
   issuesFound: 0,
   issues: [],
@@ -232,7 +235,7 @@ function renderCurrentWorkspace(wrap) {
       title: "Menu Engineering",
       icon: "📈",
       desc: "Stars, Plowhorses, Puzzles and Dogs profitability matrix and volume analytics.",
-      actionsHtml: `<button class="btn btn-sm btn-secondary" id="btn-child-export-matrix" type="button">Export Matrix (CSV)</button>`
+      actionsHtml: `<button class="btn btn-sm btn-secondary" id="btn-child-export-matrix" type="button">Export Matrix (XLSX)</button>`
     },
   };
 
@@ -735,45 +738,11 @@ async function renderRecipesTab(wrap) {
     openBulkIngredientSubstitutionModal(wrap);
   });
 
-  wrap.querySelector("#btn-export-recipe-workbook")?.addEventListener("click", async () => {
-    try {
-      const res = await apiGet("/api/v1/menu/recipes/export-workbook");
-      const rows = res.data?.rows || res.rows || [];
-      if (!rows.length) {
-        showToast("No recipe BOM rows to export.", "info");
-        return;
-      }
-      const headers = "menuItemId,itemCode,itemName,recipeId,recipeName,ingredientName,inventoryItemId,quantity,uom,lossFactorPercent,costPaisa\n";
-      const csv = headers + rows.map((r) => `${r.menuItemId},${r.itemCode},"${(r.itemName||'').replace(/"/g, '""')}",${r.recipeId},"${(r.recipeName||'').replace(/"/g, '""')}","${(r.ingredientName||'').replace(/"/g, '""')}",${r.inventoryItemId},${r.quantity},${r.uom},${r.lossFactorPercent},${r.costPaisa}`).join("\n");
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.setAttribute("href", url);
-      link.setAttribute("download", `zamorin_recipe_bom_master_${new Date().toISOString().slice(0, 10)}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      showToast(`Exported ${rows.length} recipe BOM rows to CSV!`, "success");
-    } catch (err) {
-      showToast(err.message, "error");
-    }
-  });
-
-  wrap.querySelector("#btn-import-recipe-workbook")?.addEventListener("click", async () => {
-    const raw = prompt("Paste recipe workbook rows (JSON format):", `[{"menuItemId":"MENU-01","ingredientName":"Espresso Beans","quantity":18,"uom":"GRAM","costPaisa":2800}]`);
-    if (!raw) return;
-    try {
-      const rows = JSON.parse(raw);
-      const res = await apiPost("/api/v1/menu/recipes/import-workbook", { rows });
-      showToast(`Imported! ${res.data?.updatedCount || res.updatedCount} recipes updated.`, "success");
-      renderRecipesTab(wrap);
-    } catch (err) {
-      showToast("Invalid JSON or import error: " + err.message, "error");
-    }
-  });
+  wrap.querySelector("#btn-export-recipe-workbook")?.addEventListener("click", exportRecipeWorkbook);
+  wrap.querySelector("#btn-import-recipe-workbook")?.addEventListener("click", () => importRecipeWorkbook(() => renderRecipesTab(wrap)));
 
   wrap.querySelector("#btn-ai-recipe-helper")?.addEventListener("click", async () => {
-    const dish = prompt("Enter dish name for AI recipe formulation:", "Iced Vanilla Cold Brew");
+    const dish = await askText({ title: "AI recipe helper", label: "Dish name", placeholder: "e.g. Iced vanilla cold brew", okLabel: "Suggest recipe" });
     if (!dish) return;
     try {
       const res = await apiPost("/api/v1/menu/recipes/ai-suggest", { itemName: dish });
@@ -1056,9 +1025,8 @@ async function renderPublishingTab(wrap) {
         showToast("Change set successfully published to POS outlets.", "success");
         renderPublishingTab(wrap);
       } catch (err) {
-        showToast("Change set published to POS outlets (Preview Mode)", "mint");
-        s.status = "PUBLISHED";
-        renderPublishingTab(wrap);
+        showToast(err?.message || "The server did not accept this change. Nothing was saved.", "error");
+        return;
       }
     });
   });
@@ -1160,14 +1128,16 @@ async function renderIntegrityTab(wrap) {
 // ── 13. Analytics Workspace ──────────────────────────────────────────────────
 async function renderAnalyticsTab(wrap) {
   wrap.innerHTML = `<div style="text-align:center; padding:30px;"><div class="spinner"></div></div>`;
-  let res = SAMPLE_ANALYTICS;
+  let res = { salesMix: [] };
   try {
-    const apiRes = await apiGet("/menu/analytics");
-    if (apiRes) res = apiRes;
+    const apiRes = await apiGet("/menu/analytics", { bypassCache: true });
+    res = apiRes?.data || apiRes || res;
   } catch (err) {
-    res = SAMPLE_ANALYTICS;
+    wrap.innerHTML = `<div class="glass-card" style="padding:18px;" role="alert"><strong>Menu analytics could not be loaded.</strong><p style="margin:6px 0 0;color:var(--muted);">${String(err?.message || "Request failed.").replace(/[<>&]/g, "")}</p></div>`;
+    return;
   }
-  const mix = res.salesMix || [];
+  menuMixRows = res.salesMix || [];
+  const mix = menuMixRows;
 
   wrap.innerHTML = `
     <div class="glass-card" style="padding:18px;">
@@ -1176,7 +1146,7 @@ async function renderAnalyticsTab(wrap) {
           <h3 style="font-size:15.5px; font-weight:700; margin:0; color:var(--ink);">Menu Engineering &amp; Sales Mix</h3>
           <p style="font-size:12.5px; color:var(--muted); margin:2px 0 0;">Real-time popularity vs standard recipe contribution margin matrix.</p>
         </div>
-        <button id="btn-export-matrix" class="btn btn-sm btn-secondary">Export Matrix (CSV)</button>
+        <button id="btn-export-matrix" class="btn btn-sm btn-secondary">Export Matrix (XLSX)</button>
       </div>
 
       <div style="overflow-x:auto;">
@@ -1306,8 +1276,8 @@ function openAddItemModal(wrap) {
         await apiPost("/menu/items", newItem);
         showToast("Menu item created successfully.", "success");
       } catch (err) {
-        SAMPLE_MENU.push(newItem);
-        showToast("Menu item created (Preview Mode).", "success");
+        showToast(err?.message || "The server did not accept this change. Nothing was saved.", "error");
+        return;
       }
       closeModal();
       activeTab = "items";
@@ -1336,6 +1306,7 @@ async function openEditItemModal(menuItemId, wrap) {
   const modalHtml = `
     <div style="padding:6px;">
       <h3 style="font-size:18px; font-weight:800; margin:0 0 16px; color:var(--ink);">Edit Menu Item — ${item.name}</h3>
+      ${(item.variants || []).length ? `<div style="margin-bottom:14px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">Variants</div>${item.variants.map((v) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px;"><span>${v.name} · ₹${((v.pricePaisa || 0) / 100).toFixed(2)}</span>${(state.auth?.user || state.user || {}).role === "MASTER" ? `<button type="button" class="btn btn-sm btn-ghost btn-rm-variant" data-vid="${v.variantId || v.name}" data-vname="${v.name}">Remove</button>` : ""}</div>`).join("")}</div>` : ""}
       <form id="form-edit-menu-item">
         <div style="margin-bottom:12px;">
           <label class="form-label" style="font-size:12px; font-weight:600;">Item Name</label>
@@ -1374,6 +1345,16 @@ async function openEditItemModal(menuItemId, wrap) {
 
   openModal(modalHtml);
 
+  document.querySelectorAll(".btn-rm-variant").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm(`Remove variant "${b.dataset.vname}" from ${item.name}?`)) return;
+    b.disabled = true;
+    try {
+      await apiDelete(`/menu/items/${encodeURIComponent(menuItemId)}/variants/${encodeURIComponent(b.dataset.vid)}`);
+      showToast("Variant removed.", "success");
+      b.closest("div").remove();
+    } catch (err) { b.disabled = false; showToast(err.message || "Could not remove the variant.", "error"); }
+  }));
+
   const form = document.querySelector("#form-edit-menu-item");
   if (form) {
     form.addEventListener("submit", async (e) => {
@@ -1392,10 +1373,8 @@ async function openEditItemModal(menuItemId, wrap) {
         });
         showToast("Menu item updated successfully.", "success");
       } catch (err) {
-        item.name = updatedName;
-        item.category = updatedCat;
-        item.price = updatedPrice;
-        showToast("Menu item updated (Preview Mode).", "success");
+        showToast(err?.message || "The server did not accept this change. Nothing was saved.", "error");
+        return;
       }
       closeModal();
       renderCurrentWorkspace(wrap);
@@ -1590,8 +1569,8 @@ function openCreateRecipeModal(wrap) {
         });
         showToast("Recipe created successfully.", "success");
       } catch (err) {
-        SAMPLE_RECIPES.push(newRec);
-        showToast("Recipe created (Preview Mode).", "success");
+        showToast(err?.message || "The server did not accept this change. Nothing was saved.", "error");
+        return;
       }
       closeModal();
       activeTab = "recipes";
@@ -1719,8 +1698,8 @@ function openCreateModifierModal(wrap) {
         });
         showToast("Modifier group created.", "success");
       } catch (err) {
-        SAMPLE_MODIFIER_GROUPS.push(newMod);
-        showToast("Modifier group created (Preview Mode).", "success");
+        showToast(err?.message || "The server did not accept this change. Nothing was saved.", "error");
+        return;
       }
       closeModal();
       activeTab = "modifiers";
@@ -1778,35 +1757,35 @@ function openCreateComboModal(wrap) {
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const fd = new FormData(form);
-      const groups = [
-        {
-          groupName: fd.get("slot1_name") || "Main Course",
-          requiredCount: 1,
-          choices: (fd.get("slot1_options") || "").split(",").map((s) => ({
-            choiceName: s.trim(),
-            menuItemId: "ITEM-" + Math.floor(10 + Math.random() * 90),
-            surchargePaisa: 0,
-          })),
-        },
-        {
-          groupName: fd.get("slot2_name") || "Sides",
-          requiredCount: 1,
-          choices: (fd.get("slot2_options") || "").split(",").map((s) => ({
-            choiceName: s.trim(),
-            menuItemId: "ITEM-" + Math.floor(10 + Math.random() * 90),
-            surchargePaisa: 0,
-          })),
-        },
-        {
-          groupName: fd.get("slot3_name") || "Beverage",
-          requiredCount: 1,
-          choices: (fd.get("slot3_options") || "").split(",").map((s) => ({
-            choiceName: s.trim(),
-            menuItemId: "ITEM-" + Math.floor(10 + Math.random() * 90),
-            surchargePaisa: s.includes("+₹30") ? 3000 : 0,
-          })),
-        },
-      ];
+      let catalogue = [];
+      try {
+        const r = await apiGet("/menu/items");
+        catalogue = r?.data?.items || r?.data?.menuItems || (Array.isArray(r?.data) ? r.data : []);
+      } catch (err) {
+        showToast(err?.message || "Could not load the menu items to build this combo. Nothing was saved.", "error");
+        return;
+      }
+      const missing = [];
+      const buildChoices = (raw) => String(raw || "").split(",").map((x) => x.trim()).filter(Boolean).map((label) => {
+        const surcharge = /\+\s*₹\s*(\d+)/.exec(label);
+        const clean = label.replace(/\+\s*₹\s*\d+/, "").trim();
+        const hit = catalogue.find((m) => String(m.name || "").trim().toLowerCase() === clean.toLowerCase());
+        if (!hit) missing.push(clean);
+        return { choiceName: clean, menuItemId: hit ? (hit.menuItemId || hit.id) : "", surchargePaisa: surcharge ? Number(surcharge[1]) * 100 : 0 };
+      });
+      const groups = [1, 2, 3].map((n) => ({
+        groupName: fd.get(`slot${n}_name`) || ["Main Course", "Sides", "Beverage"][n - 1],
+        requiredCount: 1,
+        choices: buildChoices(fd.get(`slot${n}_options`)),
+      })).filter((g) => g.choices.length);
+      if (missing.length) {
+        showToast(`These names are not menu items: ${[...new Set(missing)].join(", ")}. Type the exact item names. Nothing was saved.`, "error");
+        return;
+      }
+      if (!groups.length) {
+        showToast("Add at least one choice to the combo.", "warning");
+        return;
+      }
 
       try {
         await apiPost("/menu/combos", {
@@ -1817,14 +1796,8 @@ function openCreateComboModal(wrap) {
         });
         showToast("Combo bundle created successfully!", "success");
       } catch (err) {
-        SAMPLE_COMBOS.push({
-          comboId: "CMB-" + Math.floor(1000 + Math.random() * 9000),
-          name: fd.get("name"),
-          pricingType: "FIXED_PRICE",
-          groups,
-          status: "ACTIVE",
-        });
-        showToast("Combo bundle created (Preview Mode).", "success");
+        showToast(err?.message || "The server did not accept this change. Nothing was saved.", "error");
+        return;
       }
       closeModal();
       activeTab = "combos";
@@ -1901,8 +1874,8 @@ function openCreateMenuModal(wrap) {
         });
         showToast("Menu created.", "success");
       } catch (err) {
-        SAMPLE_MENUS.push(newMenu);
-        showToast("Menu created (Preview Mode).", "success");
+        showToast(err?.message || "The server did not accept this change. Nothing was saved.", "error");
+        return;
       }
       closeModal();
       activeTab = "menus";
@@ -1956,8 +1929,8 @@ function openCreateChangeSetModal(wrap) {
         });
         showToast("Change set staged.", "success");
       } catch (err) {
-        SAMPLE_CHANGESETS.push(newSet);
-        showToast("Change set staged (Preview Mode).", "success");
+        showToast(err?.message || "The server did not accept this change. Nothing was saved.", "error");
+        return;
       }
       closeModal();
       activeTab = "publishing";
@@ -1997,23 +1970,44 @@ function openAssignPackagingModal(wrap) {
   });
 }
 
+
+const RECIPE_WB_KEYS = ["menuItemId", "itemCode", "itemName", "recipeId", "recipeName", "ingredientName", "inventoryItemId", "quantity", "uom", "lossFactorPercent", "costPaisa"];
+async function exportRecipeWorkbook() {
+  try {
+    const res = await apiGet("/menu/recipes/export-workbook", { bypassCache: true });
+    const rows = res.data?.rows || res.rows || [];
+    if (!rows.length) { showToast("No recipe BOM rows to export.", "info"); return; }
+    exportGrid({ headers: RECIPE_WB_KEYS, rows: rows.map((r) => RECIPE_WB_KEYS.map((k) => r[k] ?? "")), title: "Recipe BOM Master", filename: `zamorin_recipe_bom_master_${new Date().toISOString().slice(0, 10)}` });
+    showToast(`Exported ${rows.length} recipe rows (XLSX).`, "success");
+  } catch (err) { showToast(err.message, "error"); }
+}
+function pickXlsx() {
+  return new Promise((resolve) => {
+    const i = document.createElement("input"); i.type = "file"; i.accept = ".xlsx";
+    i.onchange = () => resolve(i.files[0] || null); i.click();
+  });
+}
+async function importRecipeWorkbook(onDone) {
+  const f = await pickXlsx(); if (!f) return;
+  try {
+    const { headers, rows } = await readXlsx(f);
+    const missing = ["menuItemId", "ingredientName", "quantity"].filter((k) => !headers.includes(k));
+    if (missing.length) { showToast(`Workbook is missing columns: ${missing.join(", ")}.`, "error"); return; }
+    if (!rows.length) { showToast("The workbook has no rows.", "error"); return; }
+    if (!confirm(`Apply ${rows.length} recipe rows from ${f.name}? This updates live recipes.`)) return;
+    const res = await apiPost("/menu/recipes/import-workbook", { rows });
+    showToast(`Import finished. ${res.data?.updatedCount ?? res.updatedCount ?? 0} recipes updated.`, "success");
+    onDone?.();
+  } catch (err) { showToast("Import failed: " + (err.message || "unknown error"), "error"); }
+}
+
+let menuMixRows = [];
 function exportMenuMatrixCsv() {
-  const headers = ["Item Code", "Item Name", "Category", "Selling Price", "Food Cost", "Gross Margin %", "Volume (30D)", "Matrix Classification"];
-  const rows = [
-    ["ITM-001", "Zamorin Special Filter Coffee", "Beverages", "80.00", "18.50", "76.8%", "1420", "STAR"],
-    ["ITM-002", "Malabar Banana Fritters (Pazham Pori)", "Bakery", "65.00", "14.20", "78.1%", "980", "STAR"],
-    ["ITM-003", "Cold Brew Tonic", "Beverages", "140.00", "32.00", "77.1%", "410", "PLOWHORSE"],
-    ["ITM-004", "Avocado Sourdough Toast", "Breakfast", "220.00", "78.00", "64.5%", "190", "PUZZLE"],
-  ];
-  let csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
-  const encodedUri = encodeURI(csvContent);
-  const link = document.createElement("a");
-  link.setAttribute("href", encodedUri);
-  link.setAttribute("download", `menu_engineering_matrix_${new Date().toISOString().split("T")[0]}.csv`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  showToast("Menu engineering matrix exported to CSV.", "info");
+  if (!menuMixRows.length) { showToast("No analytics rows to export.", "info"); return; }
+  const headers = ["Item", "Category", "Units sold (30 days)", "Net sales (INR)", "Gross margin %"];
+  const rows = menuMixRows.map((m) => [m.name, m.category, m.unitsSold, (m.netSalesPaisa || 0) / 100, m.contributionMarginPercent]);
+  exportGrid({ headers, rows, title: "Menu engineering matrix", filename: `menu_engineering_matrix_${new Date().toISOString().split("T")[0]}` });
+  showToast("Menu engineering matrix exported (XLSX).", "success");
 }
 
 function openRecipeWorkbookModal(wrap) {
@@ -2044,7 +2038,7 @@ function openRecipeWorkbookModal(wrap) {
         <div style="padding:12px;background:var(--surface-sunken);border:1px solid var(--line);border-radius:6px;">
           <div style="font-weight:700;font-size:12px;color:var(--ink);margin-bottom:4px;">2. Upload Edited Workbook</div>
           <div style="font-size:11.5px;color:var(--muted);margin-bottom:8px;">Validated against ingredient masters with batch atomic commits.</div>
-          <input type="file" id="file-recipe-wb" accept=".xlsx,.csv" style="font-size:12px;margin-bottom:8px;display:block;" />
+          <input type="file" id="file-recipe-wb" accept=".xlsx" style="font-size:12px;margin-bottom:8px;display:block;" />
           <button id="btn-upload-recipe-wb" class="btn btn-sm btn-secondary" type="button">📤 Import Workbook Changes</button>
         </div>
       </div>
@@ -2057,13 +2051,11 @@ function openRecipeWorkbookModal(wrap) {
   openModal(modalHtml);
 
   document.querySelector("#btn-download-recipe-wb")?.addEventListener("click", () => {
-    window.open("/api/v1/menu/recipes/export-workbook", "_blank");
-    showToast("Recipe & area availability workbook downloaded.", "mint");
+    exportRecipeWorkbook();
   });
 
   document.querySelector("#btn-upload-recipe-wb")?.addEventListener("click", () => {
-    showToast("Recipe workbook verified and staged for atomic update (A101).", "mint");
-    closeModal();
+    importRecipeWorkbook(() => { closeModal(); renderRecipesTab(wrap); });
   });
 }
 
@@ -2083,7 +2075,7 @@ function openAddonMappingModal(wrap) {
 
         <div style="padding:12px;background:var(--surface-sunken);border:1px solid var(--line);border-radius:6px;">
           <div style="font-weight:700;font-size:12px;margin-bottom:4px;">Step 2: Upload Updated Mappings</div>
-          <input type="file" id="file-addon-map" accept=".xlsx,.csv" style="font-size:12px;margin-bottom:8px;display:block;" />
+          <input type="file" id="file-addon-map" accept=".xlsx" style="font-size:12px;margin-bottom:8px;display:block;" />
           <button id="btn-up-addon-map" class="btn btn-sm btn-primary" type="button">⚡ Upload &amp; Apply Mappings</button>
         </div>
       </div>
@@ -2096,12 +2088,10 @@ function openAddonMappingModal(wrap) {
   openModal(modalHtml);
 
   document.querySelector("#btn-dl-addon-map")?.addEventListener("click", () => {
-    window.open("/api/v1/menu/bulk-modifiers/export", "_blank");
-    showToast("Add-on mapping template downloaded.", "mint");
+    showToast("Not connected: the add-on mapping sheet has no confirmed server contract yet.", "info");
   });
 
   document.querySelector("#btn-up-addon-map")?.addEventListener("click", () => {
-    showToast("Add-on mappings validated and applied to menu items (A040).", "mint");
-    closeModal();
+    showToast("Not connected: add-on mappings were NOT applied. The server contract is not confirmed.", "error");
   });
 }

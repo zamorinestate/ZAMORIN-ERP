@@ -823,6 +823,7 @@ async function fetchTasksFromServer() {
       if (res.value.data.summary) summaryMetrics = res.value.data.summary;
     } else {
       liveTasks = [...SAMPLE_TASKS];
+      showToast("Tasks could not be loaded from the server.", "error");
     }
     if (cafeRes.status === "fulfilled" && cafeRes.value?.data?.cafes) {
       availableCafes = cafeRes.value.data.cafes;
@@ -1843,7 +1844,7 @@ function openShiftSopChecklistModal(root) {
       }
 
       const notes = modalEl.querySelector("#shift-supervisor-notes")?.value?.trim() || "";
-      const cafeId = selectedCafeFilter !== "ALL" ? selectedCafeFilter : (state.currentCafeId || state.user?.primaryCafeId || "ZC-0001");
+      const cafeId = selectedCafeFilter !== "ALL" ? selectedCafeFilter : (state.currentCafeId || state.user?.primaryCafeId || "");
 
       try {
         const res = await apiPost("/hardware/shift-checklist", {

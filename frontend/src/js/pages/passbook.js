@@ -3,6 +3,7 @@
 // PRIMARY MASTER + OWNER ONLY · ENTERPRISE UNIVERSAL BUTTON ARCHITECTURE
 // =============================================================================
 
+import { exportDomTable } from "../utils/exportFile.js";
 import { state } from "../state.js";
 import { icon } from "../icons.js";
 import { apiGet, apiPost } from "../apiClient.js";
@@ -275,7 +276,7 @@ function renderOverview() {
               </a>
               <a href="#passbook/statements" class="btn btn-secondary" style="display: flex; flex-direction: column; align-items: flex-start; padding: 10px 12px; text-decoration: none; text-align: left; height: auto;">
                 <strong style="font-size: 12.5px; color: var(--ink);">Statement Imports</strong>
-                <span style="font-size: 11px; color: var(--muted);">CSV / XLSX Upload</span>
+                <span style="font-size: 11px; color: var(--muted);">XLSX Upload</span>
               </a>
               <a href="#passbook/adjustments" class="btn btn-secondary" style="display: flex; flex-direction: column; align-items: flex-start; padding: 10px 12px; text-decoration: none; text-align: left; height: auto;">
                 <strong style="font-size: 12.5px; color: var(--ink);">Balance Adjustments</strong>
@@ -325,7 +326,7 @@ function renderOverview() {
               </a>
               <a href="#passbook/exports" class="btn btn-secondary" style="display: flex; flex-direction: column; align-items: flex-start; padding: 10px 12px; text-decoration: none; text-align: left; height: auto;">
                 <strong style="font-size: 12.5px; color: var(--ink);">ZURF Exports</strong>
-                <span style="font-size: 11px; color: var(--muted);">PDF / CSV Statements</span>
+                <span style="font-size: 11px; color: var(--muted);">PDF / XLSX Statements</span>
               </a>
               <a href="#passbook/unallocated" class="btn btn-secondary" style="display: flex; flex-direction: column; align-items: flex-start; padding: 10px 12px; text-decoration: none; text-align: left; height: auto;">
                 <strong style="font-size: 12.5px; color: var(--ink);">Unallocated Queue</strong>
@@ -851,7 +852,7 @@ function renderStatementImports() {
   return `
     <div class="card" style="padding: 24px; max-width:760px; margin:0 auto;">
       <a href="#passbook" class="btn btn-secondary btn-xs" style="text-decoration: none; margin-bottom: 6px;">← Back to Control Centre</a>
-      <h3 style="font-size:18px; font-weight:700; margin:4px 0 0; color:var(--ink);">Statement Imports (CSV / XLSX / PDF)</h3>
+      <h3 style="font-size:18px; font-weight:700; margin:4px 0 0; color:var(--ink);">Statement Imports (XLSX / PDF)</h3>
       <p style="color:var(--muted); font-size:12.5px; margin:2px 0 16px;">Bank statement parser with automated SHA-256 deduplication and line matching.</p>
 
       <div style="border: 2px dashed var(--border); border-radius: 12px; padding: 36px 20px; text-align: center; background: var(--surface-sunken); cursor: pointer;" id="pbk-dropzone">
@@ -1030,10 +1031,10 @@ function renderCorporateExports() {
         </div>
         <div style="display:flex; justify-content:space-between; align-items:center; padding:14px; border:1px solid var(--border); border-radius:8px;">
           <div>
-            <div style="font-weight:700; font-size:14px;">Transaction Ledger Feed (CSV / Excel)</div>
+            <div style="font-weight:700; font-size:14px;">Transaction Ledger Feed (XLSX / PDF)</div>
             <div style="font-size:12px; color:var(--muted);">Detailed chronological journal with UTR tags and tax breakdowns.</div>
           </div>
-          <button class="btn btn-secondary btn-sm" id="pbk-btn-download-csv">Export CSV</button>
+          <button class="btn btn-secondary btn-sm" id="pbk-btn-download-csv">Export XLSX</button>
         </div>
       </div>
     </div>
@@ -1180,27 +1181,8 @@ function openCreateAccountModal() {
         return false;
       }
 
-      const newAcc = {
-        accountId: `ACC-${Math.floor(1000 + Math.random() * 9000)}`,
-        accountName: name,
-        accountType: type,
-        maskedAccountNumber: `••••${num.slice(-4)}`,
-        institutionName: inst || "Bank",
-        bookBalancePaisa: Math.round(bal * 100),
-        verifiedStatementBalancePaisa: Math.round(bal * 100),
-        reservedPaisa: 0,
-        freeBalancePaisa: Math.round(bal * 100),
-        scopeType: "ORGANISATION_GLOBAL",
-        lastReconciledDate: new Date().toISOString().split("T")[0],
-        status: "ACTIVE",
-      };
-
-      if (passbookData) {
-        passbookData.accounts = [newAcc, ...passbookData.accounts];
-      }
-      showToast("Treasury account created successfully!", "success");
-      window.location.hash = "#passbook/accounts";
-      return true;
+      showToast("Not saved: the server does not provide this action yet, so nothing was recorded.", "warning");
+      return false;
     },
   });
 }
@@ -1247,24 +1229,8 @@ function openPostManualEntryModal() {
         return false;
       }
 
-      const newTxn = {
-        transactionId: `PBK-${new Date().toISOString().replace(/\D/g, "").slice(0, 6)}-${Math.floor(1000 + Math.random() * 9000)}`,
-        postingDate: new Date().toISOString().split("T")[0],
-        narration: desc,
-        type: "MANUAL_POSTING",
-        direction: dir,
-        amountPaisa: Math.round(amt * 100),
-        runningBalancePaisa: 284500000 + (dir === "CREDIT" ? Math.round(amt * 100) : -Math.round(amt * 100)),
-        externalReference: ref || "MANUAL",
-        accountName: "HDFC Main Treasury",
-      };
-
-      if (passbookData) {
-        passbookData.recentActivity = [newTxn, ...passbookData.recentActivity];
-      }
-      showToast("Manual treasury entry posted!", "success");
-      window.location.hash = "#passbook/transactions";
-      return true;
+      showToast("Not saved: the server does not provide this action yet, so nothing was recorded.", "warning");
+      return false;
     },
   });
 }
@@ -1334,13 +1300,13 @@ export async function wirePassbook() {
   });
 
   document.getElementById("pbk-btn-download-csv")?.addEventListener("click", () => {
-    showToast("Exporting Treasury CSV ledger...", "info");
-    setTimeout(() => showToast("CSV Ledger downloaded.", "success"), 500);
+    const ok = exportDomTable("#app", { title: "Treasury Ledger" });
+    showToast(ok ? "Treasury ledger exported (XLSX)." : "No ledger rows on screen to export.", ok ? "success" : "info");
   });
 
   document.getElementById("pbk-btn-export-daybook")?.addEventListener("click", () => {
-    showToast("Exporting Day Book CSV...", "info");
-    setTimeout(() => showToast("Day Book CSV downloaded.", "success"), 500);
+    const ok = exportDomTable("#app", { title: "Day Book" });
+    showToast(ok ? "Day Book exported (XLSX)." : "No Day Book rows on screen to export.", ok ? "success" : "info");
   });
 
   document.getElementById("pbk-btn-save-cash-count")?.addEventListener("click", () => {
@@ -1369,21 +1335,21 @@ export async function wirePassbook() {
   });
 
   document.getElementById("pbk-btn-replenish-float")?.addEventListener("click", () => {
-    showToast("Store petty cash float replenishment scheduled.", "success");
+    showToast("Not saved: the server does not provide this action yet, so nothing was recorded.", "warning");
   });
 
   document.getElementById("pbk-btn-add-earmark")?.addEventListener("click", () => {
-    showToast("Liquidity earmark registered and committed.", "success");
+    showToast("Not saved: the server does not provide this action yet, so nothing was recorded.", "warning");
   });
 
   const handleBankUpload = () => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".csv,.xlsx,.pdf";
+    input.accept = ".xlsx,.pdf";
     input.onchange = (e) => {
       const file = e.target.files?.[0];
       if (file) {
-        showToast(`Bank statement "${file.name}" imported and parsed successfully.`, "success");
+        showToast(`"${file.name}" was not imported: statement import is not connected to the server yet.`, "warning");
       }
     };
     input.click();
@@ -1413,8 +1379,7 @@ export async function wirePassbook() {
         showToast("Direct balance adjustment applied successfully.", "success");
         window.location.hash = "#passbook/accounts";
       } catch (err) {
-        showToast("Direct balance adjustment applied (Preview Mode).", "success");
-        window.location.hash = "#passbook/accounts";
+        showToast(err?.message || "The balance adjustment was not applied.", "error");
       } finally {
         setButtonBusy(submitBtn, false);
       }

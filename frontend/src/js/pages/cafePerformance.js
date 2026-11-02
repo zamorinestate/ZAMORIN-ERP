@@ -5,6 +5,7 @@
 // Exceptions & Attention · Weighted Aggregations · ZURF Corporate Exports
 // =============================================================================
 
+import { exportGrid } from "../utils/exportFile.js";
 import { apiGet, apiPost } from '../apiClient.js';
 import { skeleton, showToast, openModal, closeModal, renderCafeContextStrip } from '../components.js';
 import { state } from '../state.js';
@@ -136,7 +137,7 @@ export function renderPerformance() {
           ` : ''}
           ${canExport ? `
             <button class="btn btn-secondary" id="perf-download-csv-btn" style="font-weight:700;" type="button">
-              📥 Export CSV
+              📥 Export XLSX
             </button>
             <button class="btn btn-secondary" id="perf-open-export-btn" style="font-weight:700;" type="button">
               📑 ZURF Pack
@@ -241,7 +242,7 @@ export function renderPerformance() {
           <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:20px;">
             <label class="form-label" style="font-size:12px;font-weight:700;color:var(--ink);">Export Format</label>
             <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:8px;" id="perf-export-format-group">
-              <button class="btn btn-sm btn-outline active" data-export-format="CSV" style="font-weight:700;" type="button">CSV Dataset</button>
+              <button class="btn btn-sm btn-outline active" data-export-format="XLSX" style="font-weight:700;" type="button">Excel Workbook</button>
               <button class="btn btn-sm btn-outline" data-export-format="PDF" style="font-weight:700;" type="button">PDF Report</button>
               <button class="btn btn-sm btn-outline" data-export-format="XLSX" style="font-weight:700;" type="button">Excel Workbook</button>
             </div>
@@ -442,10 +443,10 @@ export async function wirePerformance(root) {
   if (cancelExport) cancelExport.addEventListener('click', hideExportModal);
   if (confirmExport) {
     confirmExport.addEventListener('click', async () => {
-      const activeFormatBtn = exportModal.querySelector('#perf-export-format-group button.active') || exportModal.querySelector('[data-export-format="CSV"]');
-      const format = activeFormatBtn?.dataset.exportFormat || 'CSV';
+      const activeFormatBtn = exportModal.querySelector('#perf-export-format-group button.active') || exportModal.querySelector('[data-export-format="XLSX"]');
+      const format = activeFormatBtn?.dataset.exportFormat || 'XLSX';
 
-      if (format === 'CSV') {
+      if (format === 'XLSX') {
         const cafes = getResolvedCafes();
         const totalSales = cafes.reduce((sum, c) => sum + Number(c.totalSalesPaisa ?? c.salesTodayPaisa ?? 0), 0);
         downloadPerformanceCsv(cafes, totalSales);
@@ -1297,22 +1298,8 @@ function downloadPerformanceCsv(cafes, totalSalesPaisa) {
     ];
   });
 
-  const csvContent = [
-    headers.join(','),
-    ...rows.map(r => r.join(','))
-  ].join('\r\n');
-
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  const today = new Date().toISOString().slice(0, 10);
-  link.download = `zamorin_cafe_performance_${today}.csv`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-  showToast('Performance CSV downloaded successfully.', 'success');
+  exportGrid({ headers, rows, title: "zamorin_cafe_performance", filename: `zamorin_cafe_performance_${new Date().toISOString().slice(0, 10)}` });
+  showToast('Performance workbook downloaded (XLSX).', 'success');
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

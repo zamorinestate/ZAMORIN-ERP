@@ -8,9 +8,13 @@
 import { apiGet, apiPost } from '../apiClient.js';
 import { showToast } from '../components.js';
 import { openCafeCreateModal } from './cafeCreateModal.js';
+import { readXlsx } from '../utils/xlsxRead.js';
+import { exportTable } from '../utils/exportFile.js';
 
+const MIGRATION_TEMPLATE_COLUMNS = {"SUPPLIER_MAPPING": ["supplierId", "supplierName", "materialId", "materialName", "uom", "contractedRatePaisa", "minimumOrderQuantity", "isPreferred"], "OPENING_STOCK_BATCH": ["itemId", "itemName", "batchNumber", "quantity", "uom", "unitCostPaisa", "expiryDate", "storageLocation"], "CUSTOMER_CRM": ["name", "phone", "email", "openingPoints", "openingDuesPaisa", "marketingConsent"]};
+let migrationSourceFile = 'batch_upload.json';
 let activeTab = 'onboarding'; // 'onboarding' | 'templates' | 'migration' | 'audit'
-let selectedCafeId = 'ZC-0001';
+let selectedCafeId = '';
 let currentOnboardingData = null;
 let currentDiffData = null;
 let currentMigrationDraft = null;
@@ -73,7 +77,7 @@ export function renderOnboardingMigration() {
         <div class="card" style="padding:14px;background:var(--surface-raised,#242220);border:1px solid var(--line,#33302c);border-radius:8px;">
           <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;">Security Invariant</div>
           <div style="font-size:20px;font-weight:800;color:#34d399;margin-top:4px;">CWE-1236 Clean</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px;">CSV Formula Sanitized</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px;">Formula Sanitized</div>
         </div>
       </div>
 
@@ -126,10 +130,7 @@ function renderOnboardingTab() {
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;">Select Outlet to Inspect:</span>
           <select id="sel-onboard-cafe" style="background:var(--surface-raised,#242220);color:var(--ink,#ede8e1);border:1px solid var(--line,#33302c);padding:4px 10px;border-radius:6px;font-size:13px;font-weight:600;">
-            <option value="ZC-0001" ${selectedCafeId === 'ZC-0001' ? 'selected' : ''}>ZC-0001 · Zamorin Flagship Calicut (Active)</option>
-            <option value="ZC-0002" ${selectedCafeId === 'ZC-0002' ? 'selected' : ''}>ZC-0002 · Zamorin Express Beach Road (Configuring)</option>
-            <option value="ZC-0003" ${selectedCafeId === 'ZC-0003' ? 'selected' : ''}>ZC-0003 · Zamorin Roastery Cyberpark (Ready for Testing)</option>
-          </select>
+            </select>
         </div>
         <div style="font-size:12px;color:var(--muted);">
           Current State: <strong style="color:#10b981;" id="lbl-cafe-state">ACTIVE · OPERATIONAL</strong>
@@ -207,7 +208,7 @@ function renderTemplatesTab() {
           </div>
           <h3 style="font-size:15px;font-weight:800;margin:8px 0 4px;color:var(--ink);">Standard Café Baseline</h3>
           <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">Full dine-in service, ₹5,000 PO approval threshold, standard receipt footer, 07:00-23:00 hours.</p>
-          <div style="font-size:11px;color:var(--bronze-400);font-weight:600;">Applied to: ZC-0001, ZC-0003</div>
+          
         </div>
 
         <div class="card" style="padding:16px;background:var(--surface-raised,#242220);border:1px solid var(--line,#33302c);border-radius:8px;">
@@ -217,7 +218,7 @@ function renderTemplatesTab() {
           </div>
           <h3 style="font-size:15px;font-weight:800;margin:8px 0 4px;color:var(--ink);">Express Counter &amp; Kiosk</h3>
           <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">Takeaway-only packaging BOM, ₹2,500 PO threshold, rapid counter bill format, 08:00-22:00 hours.</p>
-          <div style="font-size:11px;color:var(--bronze-400);font-weight:600;">Applied to: ZC-0002</div>
+          
         </div>
 
         <div class="card" style="padding:16px;background:var(--surface-raised,#242220);border:1px solid var(--line,#33302c);border-radius:8px;">
@@ -247,15 +248,11 @@ function renderTemplatesTab() {
           <div>
             <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px;">Source Outlet (Copy From):</label>
             <select id="copy-src-cafe" style="width:100%;background:var(--surface,#1b1a18);color:var(--ink);border:1px solid var(--line,#33302c);padding:6px 10px;border-radius:6px;font-size:13px;">
-              <option value="ZC-0001">ZC-0001 · Zamorin Flagship Calicut (Standard Café)</option>
-              <option value="ZC-0003">ZC-0003 · Zamorin Roastery Cyberpark (Specialty)</option>
             </select>
           </div>
           <div>
             <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px;">Destination Outlet (Apply To):</label>
             <select id="copy-dst-cafe" style="width:100%;background:var(--surface,#1b1a18);color:var(--ink);border:1px solid var(--line,#33302c);padding:6px 10px;border-radius:6px;font-size:13px;">
-              <option value="ZC-0002">ZC-0002 · Zamorin Express Beach Road</option>
-              <option value="ZC-0003">ZC-0003 · Zamorin Roastery Cyberpark</option>
             </select>
           </div>
         </div>
@@ -329,16 +326,18 @@ function renderMigrationTab() {
           <div>
             <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px;">Target Outlet Scope:</label>
             <select id="sel-migration-cafe" style="width:100%;background:var(--surface,#1b1a18);color:var(--ink);border:1px solid var(--line,#33302c);padding:6px 10px;border-radius:6px;font-size:13px;">
-              <option value="ZC-0001">ZC-0001 · Zamorin Flagship Calicut</option>
-              <option value="ZC-0002">ZC-0002 · Zamorin Express Beach Road</option>
-              <option value="ZC-0003">ZC-0003 · Zamorin Roastery Cyberpark</option>
             </select>
           </div>
         </div>
 
         <!-- Raw Ingestion Payload Box -->
         <div style="margin-bottom:14px;">
-          <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px;">Batch Payload Data (JSON or CSV Record List):</label>
+          <div class="dropzone" style="margin-bottom:10px;">
+            <div>Upload an Excel workbook (.xlsx, first sheet, header row, up to 5,000 rows, 10 MB).</div>
+            <input type="file" id="mig-xlsx-file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-label="Upload migration workbook (.xlsx)">
+            <div class="hint" id="mig-xlsx-status" role="status">No file chosen. You can also paste JSON rows below.</div>
+          </div>
+          <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px;">Batch Payload Data (JSON Record List):</label>
           <textarea id="txt-migration-records" rows="8" style="width:100%;font-family:var(--font-mono,monospace);font-size:12px;background:var(--surface,#1b1a18);color:var(--ink);border:1px solid var(--line,#33302c);border-radius:6px;padding:10px;resize:vertical;" placeholder='[{"supplierId":"VEND-0001","supplierName":"Malabar Roasters","materialId":"ING-0001","materialName":"Arabica Beans","uom":"kg","contractedRatePaisa":85000,"minimumOrderQuantity":5}]'></textarea>
         </div>
 
@@ -384,31 +383,33 @@ function renderAuditTab() {
           </tr>
         </thead>
         <tbody id="tbl-audit-runs-body">
-          <tr style="border-bottom:1px solid var(--line,#33302c);">
-            <td style="padding:8px 6px;font-family:monospace;font-weight:700;color:var(--bronze-400);">MIG-20261011-8492</td>
-            <td style="padding:8px 6px;">OPENING_STOCK_BATCH</td>
-            <td style="padding:8px 6px;">ZC-0001</td>
-            <td style="padding:8px 6px;"><span class="badge-tag" style="background:#10b981;color:#fff;">COMPLETED</span></td>
-            <td style="padding:8px 6px;">12 Lots</td>
-            <td style="padding:8px 6px;color:#10b981;">Persisted 12 Lots (₹1,45,000 valuation)</td>
-            <td style="padding:8px 6px;color:var(--muted);">Today, 12:45 PM</td>
-          </tr>
-          <tr style="border-bottom:1px solid var(--line,#33302c);">
-            <td style="padding:8px 6px;font-family:monospace;font-weight:700;color:var(--bronze-400);">MIG-20261011-4120</td>
-            <td style="padding:8px 6px;">SUPPLIER_MAPPING</td>
-            <td style="padding:8px 6px;">ZC-0002</td>
-            <td style="padding:8px 6px;"><span class="badge-tag" style="background:#10b981;color:#fff;">COMPLETED</span></td>
-            <td style="padding:8px 6px;">8 Mappings</td>
-            <td style="padding:8px 6px;color:#10b981;">Persisted 8 Contract Rates</td>
-            <td style="padding:8px 6px;color:var(--muted);">Today, 11:15 AM</td>
-          </tr>
+          <tr><td colspan="7" style="padding:16px 6px;color:var(--muted);">Migration runs committed from this screen appear here after you run one.</td></tr>
         </tbody>
       </table>
     </div>
   `;
 }
 
+async function populateCafeSelects() {
+  let cafes = [];
+  try {
+    const res = await apiGet('/cafes');
+    cafes = res?.data?.cafes || (Array.isArray(res?.data) ? res.data : []) || [];
+  } catch (_e) { cafes = []; }
+  const opts = cafes.map((c) => `<option value="${c.cafeId}">${c.cafeId} · ${(c.name || c.displayName || '').replace(/[<>&"]/g, '')}</option>`).join('');
+  ['sel-onboard-cafe', 'copy-src-cafe', 'copy-dst-cafe', 'sel-migration-cafe'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = opts || '<option value="">No cafés available</option>';
+    if (id === 'sel-onboard-cafe') {
+      if (!selectedCafeId && cafes[0]) selectedCafeId = cafes[0].cafeId;
+      el.value = selectedCafeId;
+    }
+  });
+}
+
 export function initOnboardingMigration() {
+  populateCafeSelects();
   const container = document.getElementById('p19-tab-mount');
 
   // Tab switcher buttons
@@ -428,10 +429,33 @@ export function initOnboardingMigration() {
     openCafeCreateModal();
   });
 
-  // Download template CSV
+  // Download migration template (genuine .xlsx, built in the browser)
   document.getElementById('btn-export-template-csv')?.addEventListener('click', () => {
     const domain = document.getElementById('sel-migration-domain')?.value || 'SUPPLIER_MAPPING';
-    window.open(`/api/v1/onboarding-migration/migration/export/${domain}?cafeId=${selectedCafeId}`, '_blank');
+    const cols = MIGRATION_TEMPLATE_COLUMNS[domain];
+    if (!cols) { showToast('No template is available for this domain yet.', 'info'); return; }
+    exportTable({ format: 'xlsx', title: domain, filename: `${domain}_template`, columns: cols.map((c) => ({ key: c, label: c })), rows: [] });
+    showToast('Template downloaded (.xlsx).', 'success');
+  });
+
+  document.getElementById('txt-migration-records')?.addEventListener('input', () => { migrationSourceFile = 'batch_upload.json'; });
+
+  // Read an uploaded workbook into the JSON payload box (dry-run still validates on the server)
+  document.getElementById('mig-xlsx-file')?.addEventListener('change', async (e) => {
+    const f = e.target.files?.[0];
+    const status = document.getElementById('mig-xlsx-status');
+    if (!f) return;
+    if (!/\.xlsx$/i.test(f.name)) { if (status) status.textContent = 'Only .xlsx workbooks are accepted.'; showToast('Only .xlsx workbooks are accepted.', 'error'); e.target.value = ''; return; }
+    try {
+      const { rows } = await readXlsx(f);
+      const txt = document.getElementById('txt-migration-records');
+      if (txt) txt.value = JSON.stringify(rows, null, 2);
+      migrationSourceFile = f.name;
+      if (status) status.textContent = `${f.name}: ${rows.length} rows read. Run the dry-run to validate.`;
+    } catch (err) {
+      if (status) status.textContent = err.message || 'The workbook could not be read.';
+      showToast(err.message || 'The workbook could not be read.', 'error');
+    }
   });
 
   // Outlet selection change in tab 1
@@ -452,8 +476,8 @@ export function initOnboardingMigration() {
 
   // Preview Copy Diff in Tab 2
   document.getElementById('btn-preview-copy-diff')?.addEventListener('click', async () => {
-    const src = document.getElementById('copy-src-cafe')?.value || 'ZC-0001';
-    const dst = document.getElementById('copy-dst-cafe')?.value || 'ZC-0002';
+    const src = document.getElementById('copy-src-cafe')?.value || '';
+    const dst = document.getElementById('copy-dst-cafe')?.value || '';
     const mount = document.getElementById('copy-diff-mount');
     if (!mount) return;
 
@@ -500,8 +524,8 @@ export function initOnboardingMigration() {
 
   // Execute Copy in Tab 2
   document.getElementById('btn-execute-copy-apply')?.addEventListener('click', async () => {
-    const src = document.getElementById('copy-src-cafe')?.value || 'ZC-0001';
-    const dst = document.getElementById('copy-dst-cafe')?.value || 'ZC-0002';
+    const src = document.getElementById('copy-src-cafe')?.value || '';
+    const dst = document.getElementById('copy-dst-cafe')?.value || '';
 
     try {
       const res = await apiPost('/onboarding-migration/outlet-copy/execute', {
@@ -569,7 +593,8 @@ export function initOnboardingMigration() {
         body: {
           domain,
           cafeId,
-          sourceFileName: 'batch_upload.json',
+          sourceFileName: migrationSourceFile,
+          sourceFormat: /\.xlsx$/i.test(migrationSourceFile) ? 'XLSX' : 'JSON',
           records,
         },
       });

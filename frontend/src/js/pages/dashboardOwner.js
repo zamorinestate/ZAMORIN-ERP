@@ -1,3 +1,4 @@
+import { showDataError } from "../utils/dialogs.js";
 // =============================================================================
 // ZAMORIN CAFE ERP — OWN-SCR-001: OWNER DASHBOARD / ZAMORIN COMMAND CENTRE
 // Design System v2 (Ledger & Roastery Dark / Porcelain Light Theme)
@@ -733,6 +734,7 @@ async function loadDashboardData(isBackground = false) {
       ownerDashboardState.data = fallback;
       updateHealthStrip(fallback);
       renderDashboardBody(contentEl, fallback);
+      showDataError(contentEl, "empty response");
     }
   } catch (err) {
     console.warn("Owner Dashboard live fetch unavailable, using baseline:", err.message);
@@ -740,6 +742,7 @@ async function loadDashboardData(isBackground = false) {
     ownerDashboardState.data = fallback;
     updateHealthStrip(fallback);
     renderDashboardBody(contentEl, fallback);
+    showDataError(contentEl, err.message);
   }
 }
 
@@ -1596,10 +1599,10 @@ async function openDailyClosePacksModal() {
 
     // Wire Return Buttons
     content.querySelectorAll(".occ-btn-return-pack").forEach(btn => {
-      btn.addEventListener("click", () => {
+      btn.addEventListener("click", async () => {
         const packId = btn.dataset.packId;
         if (!packId) return;
-        const notes = prompt(`Please enter notes explaining why Pack ${packId} is being returned:`, "Please re-verify cash count and attach deposit challan.");
+        const notes = await askText({ title: `Return pack ${packId}`, label: "Why is this pack being returned?", value: "Please re-verify cash count and attach deposit challan." });
         if (notes === null) return;
         if (!notes.trim()) {
           showToast("Notes are required to return a close pack.", "error");

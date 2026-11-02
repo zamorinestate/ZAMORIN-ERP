@@ -6,9 +6,10 @@
  * synthesis via Web Audio API whenever an order status transitions to ready.
  */
 
+import { state } from "../state.js";
 import { apiGet } from "../apiClient.js";
 
-let displayCafeId = "ZC-0001";
+let displayCafeId = "";
 let refreshIntervalTimer = null;
 let lastKnownReadyTokens = new Set();
 
@@ -49,7 +50,7 @@ function playTokenReadyChime() {
 }
 
 export function renderTakeawayTokenDisplay(subroute) {
-  if (subroute) displayCafeId = subroute;
+  displayCafeId = subroute || displayCafeId || state.selectedCafeId || "";
 
   return `
     <div class="tv-token-display-root" style="min-height:100vh; background:#0B0F19; color:#F8FAFC; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display:flex; flex-direction:column; padding:0; margin:0; overflow:hidden;">
@@ -146,24 +147,30 @@ async function fetchTokens(root) {
     let preparing = [];
     let ready = [];
 
+    let loadFailed = false;
     try {
-      const res = await apiGet(`/api/v1/channels/public/pickup-display/${displayCafeId}`);
-      preparing = res.data?.preparing || [];
-      ready = res.data?.ready || [];
+      const res = await apiGet(`/channels/public/pickup-display/${displayCafeId}`, { bypassCache: true });
+      const body = res?.data && !Array.isArray(res.data) && (res.data.preparing || res.data.readyForPickup) ? res.data : res;
+      preparing = body?.preparing || [];
+      ready = body?.readyForPickup || body?.ready || [];
     } catch (e) {
-      // Mock demonstration tokens if server endpoint empty
-      preparing = [
-        { tokenNumber: "101", channel: "POS" },
-        { tokenNumber: "104", channel: "SWIGGY" },
-        { tokenNumber: "105", channel: "ZOMATO" },
-        { tokenNumber: "107", channel: "WEB" },
-      ];
-      ready = [
-        { tokenNumber: "098", channel: "POS" },
-        { tokenNumber: "099", channel: "SWIGGY" },
-        { tokenNumber: "102", channel: "POS" },
-      ];
+      // Never show sample tokens: keep the last real board and flag that it is stale.
+      loadFailed = true;
     }
+    const staleEl = root.querySelector("#tv-clock");
+    if (staleEl) staleEl.title = loadFailed ? "Connection lost — showing the last known board" : "";
+    if (loadFailed) {
+      let note = root.querySelector("#tv-stale-note");
+      if (!note) {
+        note = document.createElement("div");
+        note.id = "tv-stale-note";
+        note.style.cssText = "position:fixed;bottom:8px;left:50%;transform:translateX(-50%);background:#7f1d1d;color:#fff;padding:6px 14px;border-radius:8px;font-size:13px;z-index:50;";
+        note.textContent = "Connection lost — the board may be out of date.";
+        root.appendChild(note);
+      }
+      return;
+    }
+    root.querySelector("#tv-stale-note")?.remove();
 
     // Check for newly ready tokens and trigger audio chime
     const currentReadySet = new Set(ready.map((t) => t.tokenNumber));
@@ -187,7 +194,7 @@ async function fetchTokens(root) {
       prepGrid.innerHTML = preparing.length ? preparing.map((t) => `
         <div style="background:#1E293B; border:1.5px solid #F59E0B; border-radius:14px; padding:16px 12px; text-align:center; box-shadow:0 4px 12px rgba(0,0,0,0.3);">
           <div style="font-size:32px; font-weight:900; color:#FBBF24; font-family:monospace; line-height:1;">${t.tokenNumber}</div>
-          <div style="font-size:11px; font-weight:700; color:#94A3B8; margin-top:6px; text-transform:uppercase;">${t.channel || 'COUNTER'}</div>
+          <div style="font-size:11px; font-weight:700; color:#94A3B8; margin-top:6px; text-transform:uppercase;">${t.counter || t.channel || 'COUNTER'}</div>
         </div>
       `).join("") : `<div style="grid-column:1/-1; text-align:center; padding:40px; color:#64748B; font-size:16px;">All pending orders prepared!</div>`;
     }
@@ -200,7 +207,7 @@ async function fetchTokens(root) {
       readyGrid.innerHTML = ready.length ? ready.map((t, idx) => `
         <div style="background:#064E3B; border:2px solid #10B981; border-radius:14px; padding:16px 12px; text-align:center; box-shadow:0 6px 18px rgba(16,185,129,0.3); ${idx === 0 ? 'animation:pulse 2s infinite;' : ''}">
           <div style="font-size:36px; font-weight:900; color:#34D399; font-family:monospace; line-height:1;">${t.tokenNumber}</div>
-          <div style="font-size:11px; font-weight:800; color:#A7F3D0; margin-top:6px; text-transform:uppercase;">${t.channel || 'COUNTER'}</div>
+          <div style="font-size:11px; font-weight:800; color:#A7F3D0; margin-top:6px; text-transform:uppercase;">${t.counter || t.channel || 'COUNTER'}</div>
         </div>
       `).join("") : `<div style="grid-column:1/-1; text-align:center; padding:40px; color:#64748B; font-size:16px;">No orders currently awaiting pickup.</div>`;
     }

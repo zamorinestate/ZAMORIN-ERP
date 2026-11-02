@@ -1,4 +1,5 @@
 import { ROLES } from "../navigation.js";
+import { exportDomTable } from "../utils/exportFile.js";
 import { state } from "../state.js";
 import { showToast, openModal, renderCafeContextStrip, renderFileUploadZone, wireFileUploadZone, openUniversalDocumentModal } from "../components.js";
 import { apiGet, apiPost } from "../apiClient.js";
@@ -1280,7 +1281,8 @@ export function wireExpenses(container, subroute) {
   });
 
   root.querySelector("#btn-export-ap-batch")?.addEventListener("click", () => {
-    showToast("Generating Accounts Payable handoff batch (CSV/XML)...", "success");
+    const ok = exportDomTable(root, { title: "Accounts Payable Handoff" });
+    showToast(ok ? "Accounts Payable handoff exported (XLSX)." : "No payable rows on screen to export.", ok ? "success" : "info");
   });
 }
 

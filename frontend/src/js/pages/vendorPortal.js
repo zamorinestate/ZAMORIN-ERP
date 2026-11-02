@@ -12,7 +12,8 @@
 //   - API base: /api/v1/vendor-portal/*
 // =============================================================================
 
-import { apiGet } from "../apiClient.js";
+import { apiGet, apiBlob } from "../apiClient.js";
+import { showToast } from "../components.js";
 import { state } from "../state.js";
 import { debounce } from "../utils/debounce.js";
 
@@ -1158,8 +1159,13 @@ async function _openOrderModal(container, purchaseOrderId) {
 }
 
 function _printOrder(purchaseOrderId) {
-  const apiBase = (typeof window !== "undefined" && window.ZAMORIN_API_BASE_URL) || "/api/v1";
-  window.open(`${apiBase}/vendor-portal/orders/${encodeURIComponent(purchaseOrderId)}/pdf`, "_blank");
+  apiBlob(`/vendor-portal/orders/${encodeURIComponent(purchaseOrderId)}/pdf`)
+    .then((blob) => {
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    })
+    .catch((err) => showToast(err?.message || "The order PDF could not be downloaded.", "error"));
 }
 
 async function _loadDeliveries(container) {

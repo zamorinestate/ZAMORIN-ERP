@@ -6,6 +6,7 @@
 // Primary Master Authority Model
 // =============================================================================
 
+import { exportGrid } from "../utils/exportFile.js";
 import { apiGet, apiPost, apiPatch } from "../apiClient.js";
 import { showToast, openModal, confirmAction, renderCafeContextStrip, renderModuleErrorState } from "../components.js";
 import { state } from "../state.js";
@@ -958,15 +959,8 @@ function exportAssetReliabilityCsv() {
     a.condition || "",
     a.criticality || ""
   ]);
-  let csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
-  const encodedUri = encodeURI(csvContent);
-  const link = document.createElement("a");
-  link.setAttribute("href", encodedUri);
-  link.setAttribute("download", `asset_reliability_report_${new Date().toISOString().split("T")[0]}.csv`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  showToast("Asset reliability report exported to CSV.", "info");
+  exportGrid({ headers, rows, title: "asset_reliability_report", filename: `asset_reliability_report_${new Date().toISOString().split("T")[0]}` });
+  showToast("Asset reliability report exported (XLSX).", "info");
 }
 
 function wireAssetsEventListeners(root) {
@@ -1255,31 +1249,21 @@ function openRegisterAssetWizard(root) {
     const submitBtn = modal.querySelector("#wiz-submit-btn");
     if (submitBtn) {
       submitBtn.addEventListener("click", async () => {
-        const newAssetId = `AST-00${cachedAssets.length + 1}`;
-        const newAsset = {
-          assetId: newAssetId,
-          name: formData.name || "Commercial Equipment",
-          category: formData.category || "BREWING_EQUIPMENT",
-          serialNumber: formData.serialNumber || `SN-${Math.floor(10000 + Math.random() * 90000)}`,
-          cafeId: formData.cafeId || state.selectedCafeId || "",
-          placementArea: formData.placementArea || "Main Counter",
-          operationalStatus: formData.operationalStatus || "IN_SERVICE",
-          condition: formData.condition || "GOOD",
-          criticality: formData.criticality || "MEDIUM",
-          nextMaintenanceDue: "2026-11-15",
-          warrantyExpiryDate: "2027-08-31",
-        };
-
         try {
           submitBtn.disabled = true;
           submitBtn.textContent = "Registering...";
-          await apiPost("/assets", formData);
+          const res = await apiPost("/assets", formData);
+          const created = res?.data?.asset || res?.data || res?.asset;
+          if (created && (created.assetId || created._id)) {
+            cachedAssets.unshift({ ...created, assetId: created.assetId || String(created._id) });
+          }
+          showToast(`Asset "${formData.name || created?.name || ""}" registered.`, "success");
         } catch (err) {
-          // ignore offline
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Register asset";
+          showToast(err?.message || "The asset could not be registered. Nothing was saved.", "error");
+          return;
         }
-
-        cachedAssets.unshift(newAsset);
-        showToast(`Asset "${newAsset.name}" (${newAssetId}) registered successfully.`, "success");
         modal.close();
         rerender(root);
       });
@@ -1482,26 +1466,18 @@ function openCreateWorkOrderModal(root, defaultAssetId = "") {
       return;
     }
 
-    const newWoId = `WO-000${cachedWorkOrders.length + 1}`;
-    const newWo = {
-      workOrderId: newWoId,
-      assetId,
-      title,
-      workType,
-      priority,
-      status: "OPEN",
-      blocker: "NONE",
-      cafeId: state.selectedCafeId || cachedCafes[0]?.cafeId || cachedCafes[0]?.id || "",
-      reportedByUserId: state.user?.userId || "SYSTEM",
-      createdAt: new Date().toISOString().split("T")[0],
-    };
-
+    let created;
     try {
-      await apiPost("/assets/work-orders", { assetId, title, workType, priority, description });
-    } catch (err) {}
-
-    cachedWorkOrders.unshift(newWo);
-    showToast(`Work order ${newWoId} ("${title}") created successfully.`, "success");
+      const res = await apiPost("/assets/work-orders", { assetId, title, workType, priority, description });
+      created = res?.data?.workOrder || res?.data || res?.workOrder;
+    } catch (err) {
+      showToast(err?.message || "The work order could not be created. Nothing was saved.", "error");
+      return;
+    }
+    if (created && (created.workOrderId || created._id)) {
+      cachedWorkOrders.unshift({ ...created, workOrderId: created.workOrderId || String(created._id) });
+    }
+    showToast(`Work order "${title}" created.`, "success");
     modal.close();
     rerender(root);
   });

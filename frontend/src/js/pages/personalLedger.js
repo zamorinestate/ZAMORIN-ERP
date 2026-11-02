@@ -3,6 +3,7 @@
 // Restricted Company ↔ Owner / Private Financial Sub-Ledger & Reconciliation Workspace
 // =============================================================================
 
+import { exportGrid } from "../utils/exportFile.js";
 import { showToast, openModal, confirmAction } from "../components.js";
 import { apiGet, apiPost } from "../apiClient.js";
 import { state } from "../state.js";
@@ -37,11 +38,11 @@ const SAMPLE_OVERVIEW = {
     financePostingFailuresCount: 0,
   },
   accountHealth: {
-    overall: "HEALTHY",
-    classificationState: "0 Pending Classification",
-    reconciliationState: "RECONCILED",
-    evidenceCompleteness: "All Evidence Verified",
-    auditTrailState: "HEALTHY",
+    overall: "NOT_LOADED",
+    classificationState: "Not loaded",
+    reconciliationState: "Not loaded",
+    evidenceCompleteness: "Not loaded",
+    auditTrailState: "Not loaded",
     financeGLDifferencePaisa: 0,
   },
   availableAccounts: [],
@@ -368,7 +369,7 @@ function renderJournalTab(entries, isPrimaryMaster, isOwner) {
         </div>
 
         <div style="display: flex; gap: 8px;">
-          <button class="btn btn-secondary btn-sm" id="pl-export-journal-btn" type="button">📥 Export CSV</button>
+          <button class="btn btn-secondary btn-sm" id="pl-export-journal-btn" type="button">📥 Export XLSX</button>
         </div>
       </div>
 
@@ -1121,7 +1122,7 @@ function openSettleModal(root) {
 
           <div>
             <label style="font-weight: 600; display: block; margin-bottom: 4px;">Bank Reference / UTR *</label>
-            <input type="text" id="pl-settle-ref" class="form-control" placeholder="e.g. UTR-2026-SETTLE-0912" value="UTR-${Math.floor(100000 + Math.random() * 900000)}" style="width: 100%; padding: 8px;" required>
+            <input type="text" id="pl-settle-ref" class="form-control" placeholder="e.g. UTR-2026-SETTLE-0912" value="" style="width: 100%; padding: 8px;" required>
           </div>
 
           <div>
@@ -1309,17 +1310,8 @@ function downloadJournalCsv(entries) {
     sanitizeCsvCell(e.status || "ACTIVE"),
   ]);
 
-  const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\r\n");
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.setAttribute("href", url);
-  link.setAttribute("download", `Zamorin_Personal_SubLedger_${new Date().toISOString().split("T")[0]}.csv`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-  showToast("Personal Sub-Ledger CSV downloaded successfully.", "success");
+  exportGrid({ headers, rows, title: "Zamorin_Personal_SubLedger", filename: `Zamorin_Personal_SubLedger_${new Date().toISOString().split("T")[0]}` });
+  showToast("Personal Sub-Ledger downloaded (XLSX) successfully.", "success");
 }
 
 function downloadDpt3Pack(entries) {
@@ -1352,16 +1344,7 @@ function downloadDpt3Pack(entries) {
     `"EXEMPTED DEPOSIT (Rule 2(1)(c)(viii))"`,
     sanitizeCsvCell(l.financeJournalRef || "Pending"),
   ]);
-  const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\r\n");
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.setAttribute("href", url);
-  link.setAttribute("download", `Zamorin_DPT3_Statutory_Disclosure_${new Date().toISOString().split("T")[0]}.csv`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  exportGrid({ headers, rows, title: "Zamorin_DPT3_Statutory_Disclosure", filename: `Zamorin_DPT3_Statutory_Disclosure_${new Date().toISOString().split("T")[0]}` });
   showToast("DPT-3 Statutory Disclosure Pack downloaded.", "success");
 }
 

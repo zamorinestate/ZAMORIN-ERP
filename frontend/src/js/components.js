@@ -3,6 +3,7 @@
 // =============================================================================
 
 import { NAVIGATION, ROLES, getGroupedNavItems } from "./navigation.js";
+import { getSidebarModel, groupIconSvg } from "./sidebarLayout.js";
 import { icon } from "./icons.js";
 import { state, setState } from "./state.js";
 import { navigate } from "./router.js";
@@ -44,7 +45,10 @@ export function setSidebarCollapsed(collapsed) {
 
   const shell = document.querySelector(".app-shell");
   const sidebar = document.getElementById("sidebar");
-  if (shell) shell.classList.toggle("sidebar-collapsed", collapsed);
+  if (shell) {
+    shell.classList.toggle("sidebar-collapsed", collapsed);
+    shell.classList.toggle("rail", collapsed);
+  }
   if (sidebar) sidebar.classList.toggle("collapsed", collapsed);
 
   const toggleBtn = document.getElementById("sidebar-collapse-btn");
@@ -57,113 +61,160 @@ export function setSidebarCollapsed(collapsed) {
 /* -------------------------------------------------------------------------
    Sidebar — Design System v2 Navigation (Grouped, Retractable & Accessible)
    ------------------------------------------------------------------------- */
-export function renderSidebar() {
-  const isPrimary = Boolean(
-    state.auth?.user?.isPrimaryMaster ||
-    state.user?.isPrimaryMaster
+function escNav(s) {
+  return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function isNavRouteActive(route, currentRoute) {
+  const baseRoute = currentRoute ? currentRoute.split("/")[0] : "";
+  return Boolean(
+    route === currentRoute ||
+    (route === "settings" && (baseRoute === "settings" || currentRoute === "profile" || currentRoute === "employment" || currentRoute === "my-profile" || currentRoute === "my-employment")) ||
+    (route === "cafe-ops-devices" && (baseRoute === "cafe-ops-devices" || baseRoute === "devices")) ||
+    (route === "devices" && (baseRoute === "cafe-ops-devices" || baseRoute === "devices")) ||
+    (route === "approvals" && (baseRoute === "approvals" || baseRoute === "tasks")) ||
+    (route === "tasks" && (baseRoute === "approvals" || baseRoute === "tasks")) ||
+    (route === "ledger" && (baseRoute === "ledger" || baseRoute === "personal-ledger")) ||
+    (route === baseRoute && baseRoute !== "dashboard" && baseRoute !== "")
   );
+}
+
+export function renderSidebar() {
+  const isPrimary = Boolean(state.auth?.user?.isPrimaryMaster || state.user?.isPrimaryMaster);
   const currentRole = state.role || ROLES.MASTER;
-  const grouped = getGroupedNavItems(currentRole, isPrimary);
-  const user = state.auth?.user || state.user || {};
-  const collapsed = isSidebarCollapsed();
+  const model = getSidebarModel(currentRole, isPrimary);
+  const current = state.route || "";
 
-  let rolePillLabel = ROLE_LABELS[currentRole] || "Workspace";
-  if (currentRole === ROLES.MASTER) {
-    rolePillLabel = isPrimary ? "Primary Master" : "Master (Operational)";
-  }
+  const subHtml = (it, extraClass = "") => {
+    const on = isNavRouteActive(it.route, current);
+    return `<a class="sub nav-link ${extraClass} ${on ? "on active" : ""}" href="#${escNav(it.route)}" data-route="${escNav(it.route)}" data-navid="${escNav(it.id)}" title="${escNav(it.label)}"${on ? ' aria-current="page"' : ""}><span class="nav-label">${escNav(it.label)}</span></a>`;
+  };
 
-  const sectionsHtml = Object.entries(grouped)
-    .map(([groupName, items]) => {
-      const itemsHtml = items
-        .map((item) => {
-          const active = state.route === item.route ? "active" : "";
-          return `
-            <button class="nav-link ${active}" data-route="${item.route}" data-navid="${item.id}" title="${item.label}" type="button">
-              <span class="nav-icon">${icon(item.icon)}</span>
-              <span class="nav-label">${item.label}</span>
-            </button>`;
-        })
-        .join("");
-
-      return `
-        <div class="nav-group-section" style="margin-bottom:12px;">
-          ${
-            !collapsed && groupName !== "COMMAND"
-              ? `<div class="nav-group-heading" style="font-size:10.5px;font-weight:700;letter-spacing:0.08em;color:var(--muted);text-transform:uppercase;padding:6px 12px 2px;opacity:0.75;">${groupName}</div>`
-              : ""
-          }
-          <div class="nav-list">${itemsHtml}</div>
-        </div>
-      `;
+  const groupsHtml = model
+    .map((g) => {
+      const pinned = g.pinned.map((it) => subHtml(it)).join("");
+      const moreActive = g.more.some((it) => isNavRouteActive(it.route, current));
+      const groupActive = moreActive || g.pinned.some((it) => isNavRouteActive(it.route, current));
+      const more = g.more.length
+        ? `<details class="mo"${moreActive ? " open" : ""}><summary class="more">More (${g.more.length})</summary>${g.more.map((it) => subHtml(it)).join("")}</details>`
+        : "";
+      return `<details class="zs-group"${groupActive ? " open" : ""} data-group="${escNav(g.title)}">
+        <summary class="gs" title="${escNav(g.title)}">${groupIconSvg(g.icon)}<span class="gs-label">${escNav(g.title)}</span><svg class="chev" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></summary>
+        ${pinned}${more}
+      </details>`;
     })
     .join("");
 
   return `
-    <div class="sidebar-brand">
-      <div class="brand-logo-wrap">
-        <div class="brand-badge">Z</div>
-        <div class="brand-text">
-          <span class="brand-title">Zamorin</span>
-          <span class="brand-subtitle">Estate Pvt. Ltd.</span>
-        </div>
-      </div>
-      <button class="sidebar-toggle-btn" id="sidebar-collapse-btn" type="button" title="${collapsed ? "Expand Sidebar" : "Collapse Sidebar"}" aria-label="Toggle Sidebar">
-        ${collapsed ? icon("chevronRight") : icon("chevronLeft")}
-      </button>
-    </div>
-
-    <div class="sidebar-scope">
-      <span class="scope-pill" style="font-size:11px;font-weight:700;letter-spacing:0.04em;">${rolePillLabel}</span>
-    </div>
-
-    <nav class="sidebar-nav" aria-label="Main Navigation" style="overflow-y:auto;">
-      ${sectionsHtml}
+    <label class="zs-menu-search">
+      <span class="sr-only">Search menu</span>
+      <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="search" id="sidebar-menu-search" placeholder="Search menu" autocomplete="off" />
+    </label>
+    <nav class="sidebar-nav sb-scroll" aria-label="Main">
+      ${groupsHtml}
+      <p class="zs-menu-empty" id="sidebar-menu-empty" hidden>No menu item matches.</p>
     </nav>
-
-    <div class="sidebar-footer">
-      <div class="footer-user">
-        <div class="user-avatar" title="${user.name || "Master"} (${rolePillLabel})">${ROLE_INITIALS[currentRole] || "ZU"}</div>
-        <div class="user-info">
-          <div class="user-name">${user.name || "Master Administrator"}</div>
-          <div class="user-role">${user.email || "master@zamorin.cafe"}</div>
-        </div>
-      </div>
-    </div>
   `;
 }
 
 export function updateSidebarActive(currentRoute) {
   const sb = document.getElementById("sidebar");
   if (!sb) return;
-  const baseRoute = currentRoute ? currentRoute.split("/")[0] : "";
-  sb.querySelectorAll(".nav-link").forEach((btn) => {
-    const route = btn.dataset.route;
-    const isActive =
-      route === currentRoute ||
-      (route === "settings" && (baseRoute === "settings" || currentRoute === "profile" || currentRoute === "employment" || currentRoute === "my-profile" || currentRoute === "my-employment")) ||
-      (route === "cafe-ops-devices" && (baseRoute === "cafe-ops-devices" || baseRoute === "devices")) ||
-      (route === "devices" && (baseRoute === "cafe-ops-devices" || baseRoute === "devices")) ||
-      (route === "approvals" && (baseRoute === "approvals" || baseRoute === "tasks")) ||
-      (route === "tasks" && (baseRoute === "approvals" || baseRoute === "tasks")) ||
-      (route === "ledger" && (baseRoute === "ledger" || baseRoute === "personal-ledger")) ||
-      (route === baseRoute && baseRoute !== "dashboard" && baseRoute !== "");
-    btn.classList.toggle("active", Boolean(isActive));
+  renderStaffBottomBar();
+  sb.querySelectorAll(".nav-link").forEach((a) => {
+    const on = isNavRouteActive(a.dataset.route, currentRoute);
+    a.classList.toggle("active", on);
+    a.classList.toggle("on", on);
+    if (on) {
+      a.setAttribute("aria-current", "page");
+      a.closest("details.mo")?.setAttribute("open", "");
+      a.closest("details.zs-group")?.setAttribute("open", "");
+    } else {
+      a.removeAttribute("aria-current");
+    }
   });
+}
+
+export function renderStaffBottomBar() {
+  const host = document.getElementById("staff-bottom-bar");
+  if (!host) return;
+  const ICON = (body) => `<svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+  const items = [
+    { route: "staff-home", label: "Home", svg: '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>' },
+    { route: "announcements", label: "Announce&shy;ments", svg: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>' },
+    { route: "staff-attendance", label: "My<br>Attendance", svg: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>' },
+    { route: "staff-leave", label: "My<br>Leave", svg: '<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>' },
+    { route: "staff-settings", label: "Settings", svg: groupIconSvg("admin", 22).replace(/^<svg[^>]*>|<\/svg>$/g, "") },
+  ];
+  const current = state.route || "";
+  host.innerHTML = `<div class="zs-bottom-grid">${items.map((it) => {
+    const on = isNavRouteActive(it.route, current);
+    return `<a class="zs-tab nav-link${on ? " on active" : ""}" href="#${it.route}" data-route="${it.route}"${on ? ' aria-current="page"' : ""}>${ICON(it.svg)}<span>${it.label}</span></a>`;
+  }).join("")}</div>`;
+  host.querySelectorAll(".nav-link").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); navigate(a.dataset.route); }));
 }
 
 export function wireSidebar(root) {
   root.querySelectorAll(".nav-link").forEach((el) => {
-    el.addEventListener("click", () => {
+    el.addEventListener("click", (e) => {
+      e.preventDefault();
       navigate(el.dataset.route);
       closeMobileDrawer();
     });
   });
 
-  const collapseBtn = root.querySelector("#sidebar-collapse-btn");
-  if (collapseBtn) {
-    collapseBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      setSidebarCollapsed(!isSidebarCollapsed());
+  // In the 68 px icon rail a group icon expands the sidebar instead of opening an unreadable list.
+  root.querySelectorAll("summary.gs").forEach((sum) => {
+    sum.addEventListener("click", (e) => {
+      if (isSidebarCollapsed() && window.innerWidth > 1024) {
+        e.preventDefault();
+        setSidebarCollapsed(false);
+        sum.parentElement?.setAttribute("open", "");
+      }
+    });
+  });
+
+  const search = root.querySelector("#sidebar-menu-search");
+  const empty = root.querySelector("#sidebar-menu-empty");
+  if (search) {
+    const groups = [...root.querySelectorAll("details.zs-group")];
+    const restore = new WeakMap();
+    groups.forEach((g) => restore.set(g, { open: g.hasAttribute("open"), mo: [...g.querySelectorAll("details.mo")].map((d) => d.hasAttribute("open")) }));
+    let searching = false;
+    search.addEventListener("input", () => {
+      const q = search.value.trim().toLowerCase();
+      if (q && !searching) {
+        searching = true;
+        groups.forEach((g) => restore.set(g, { open: g.hasAttribute("open"), mo: [...g.querySelectorAll("details.mo")].map((d) => d.hasAttribute("open")) }));
+      }
+      let any = false;
+      groups.forEach((g) => {
+        let hit = false;
+        g.querySelectorAll("a.sub").forEach((a) => {
+          const match = !q || a.textContent.toLowerCase().includes(q);
+          a.hidden = !match;
+          if (match) hit = true;
+        });
+        g.querySelectorAll("details.mo").forEach((d) => {
+          const anyVisible = [...d.querySelectorAll("a.sub")].some((a) => !a.hidden);
+          d.hidden = !anyVisible;
+          if (q && anyVisible) d.setAttribute("open", "");
+        });
+        g.hidden = !hit;
+        if (q && hit) g.setAttribute("open", "");
+        if (hit) any = true;
+      });
+      if (empty) empty.hidden = any || !q;
+      if (!q && searching) {
+        searching = false;
+        groups.forEach((g) => {
+          const st = restore.get(g);
+          if (!st) return;
+          g.toggleAttribute("open", st.open);
+          g.querySelectorAll("details.mo").forEach((d, i) => d.toggleAttribute("open", Boolean(st.mo[i])));
+        });
+      }
     });
   }
 }
@@ -172,258 +223,183 @@ export function wireSidebar(root) {
    Topbar — Design System v2 Header with Persistent Cafe Context Bar
    ------------------------------------------------------------------------- */
 export function renderTopbar({ scopeChip } = {}) {
-  const currentTheme = document.documentElement.dataset.theme || "paper";
+  const currentTheme = document.documentElement.dataset.theme || "azure";
   const user = state.auth?.user || state.user || {};
   const role = state.role || ROLES.MASTER;
-  const initials = user.name
-    ? user.name.split(' ').filter(Boolean).map(n => n[0]).join('').slice(0, 2).toUpperCase()
+  const fullName = user.name || user.fullName || "";
+  const initials = fullName
+    ? fullName.split(" ").filter(Boolean).map((n) => n[0]).join("").slice(0, 2).toUpperCase()
     : (ROLE_INITIALS[role] || "ZU");
+  const firstName = fullName ? fullName.split(" ")[0] : "";
   const isStaff = role === ROLES.STAFF;
   const isCafeOps = role === ROLES.CAFE_ADMIN;
   const isVendor = role === ROLES.VENDOR;
+  const e = escNav;
+  const PIN = `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>`;
+  const CHEV = `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`;
 
-  // Dynamic online/offline badge for Cafe Operations Context Bar
-  function getConnectivityBadge() {
-    if (!navigator.onLine) {
-      return `<span id="cafe-ops-connectivity-badge" class="status error" style="font-size:10px; padding:2px 6px; font-weight:700;">🔴 Offline</span>`;
-    }
-    return `<span id="cafe-ops-connectivity-badge" class="status success" style="font-size:10px; padding:2px 6px; font-weight:700;">🟢 Live</span>`;
-  }
-
-  let cafeScopeHtml = '';
   const isPrimaryMasterUser = Boolean(
-    (state.auth?.user?.role === 'master' || state.user?.role === 'master' || state.role === 'master' || state.originalRole === 'master') &&
+    (state.auth?.user?.role === "master" || state.user?.role === "master" || state.role === "master" || state.originalRole === "master") &&
     (state.auth?.user?.isPrimaryMaster !== false && state.user?.isPrimaryMaster !== false && state.isPrimaryMaster !== false)
   );
 
+  const cafeOptionsHtml = () => (state.cafes || []).map((c) => {
+    const id = c.cafeId || c.id || c.code;
+    return `<option value="${e(id)}" ${state.selectedCafeId === id ? "selected" : ""}>${e(id)} · ${e(c.name || "Outlet")}</option>`;
+  }).join("");
+
+  const cafeSelect = `<label class="zs-chip zs-select-chip" title="Outlet scope">${PIN}<span class="sr-only">Selected café scope</span>
+      <select id="global-cafe-selector" class="select-scope" aria-label="Selected Cafe Scope"><option value="ALL">All cafés (portfolio)</option>${cafeOptionsHtml()}</select>${CHEV}</label>`;
+
+  let scopeHtml = "";
+  let workspaceHtml = "";
   if (isPrimaryMasterUser) {
-    const currentWs = state.activeWorkspace || (state.role === 'master' ? (state.isPrimaryMaster === false ? 'master-normal' : 'master-primary') : state.role);
-    const cafeOptions = (state.cafes || []).map(c => `<option value="${c.cafeId || c.id || c.code}" ${(state.selectedCafeId === (c.cafeId || c.id || c.code)) ? 'selected' : ''}>☕ ${c.cafeId || c.id || c.code} · ${c.name || 'Outlet'}</option>`).join('');
-    const empOptions = (state.employees || []).map(emp => `<option value="${emp.id || emp.employeeId || emp.userId}" ${(state.supervisedEmployeeId === (emp.id || emp.employeeId || emp.userId)) ? 'selected' : ''}>👤 ${emp.name || emp.fullName || emp.userId} (${emp.employeeId || emp.id || ''})</option>`).join('');
-
-    cafeScopeHtml = `
-      <div class="primary-master-topbar-controls" style="display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap;">
-        <div class="workspace-scope-dropdown">
-          <select id="global-workspace-selector" class="select-scope" aria-label="Selected Workspace Window" style="font-weight:700;">
-            <option value="master-primary" ${currentWs === 'master-primary' ? 'selected' : ''}>🛡️ Primary Master</option>
-            <option value="owner" ${currentWs === 'owner' ? 'selected' : ''}>👑 Owner Portal</option>
-            <option value="cafe_admin" ${currentWs === 'cafe_admin' ? 'selected' : ''}>☕ Café Operations</option>
-            <option value="staff" ${currentWs === 'staff' ? 'selected' : ''}>👤 Staff Preview</option>
-            <option value="vendor" ${currentWs === 'vendor' ? 'selected' : ''}>🏢 Vendor Portal</option>
-          </select>
-        </div>
-        <div class="cafe-scope-dropdown">
-          <select id="global-cafe-selector" class="select-scope" aria-label="Selected Cafe Scope">
-            <option value="ALL">🏠 All Cafés (Global Portfolio)</option>
-            ${cafeOptions}
-          </select>
-        </div>
-        <div class="supervised-employee-dropdown">
-          <select id="global-supervised-employee-selector" class="select-scope" aria-label="Supervised Employee Scope">
-            <option value="NONE" ${!state.supervisedEmployeeId ? 'selected' : ''}>👥 Supervise: None (Self)</option>
-            ${empOptions}
-          </select>
-        </div>
-      </div>
-    `;
-  } else if (isCafeOps) {
-    const operatorName = user.name || "Operations Lead";
-    const operatorId = user.userId || "";
-    const cafeName = user.primaryCafeName || (state.currentCafeId ? `Outlet ${state.currentCafeId}` : "Assigned Outlet");
-    const cafeId = user.primaryCafeId || state.currentCafeId || "";
-    const todayStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-
-    cafeScopeHtml = `
-      <div class="cafe-ops-context-bar" style="display:inline-flex; align-items:center; flex-wrap:wrap; gap:8px; padding:4px 10px; border-radius:var(--radius-md); background:var(--bg-surface-2); border:1px solid var(--border-subtle); font-size:12px; color:var(--ink);">
-        <span style="font-weight:700; display:inline-flex; align-items:center; gap:4px;"><span style="color:var(--color-accent-amber);">📍</span> ${cafeName}${cafeId ? ` (${cafeId})` : ''}</span>
-        <span style="color:var(--muted); opacity:0.6;">·</span>
-        <span style="color:var(--muted);">${todayStr}</span>
-        <span style="color:var(--muted); opacity:0.6;">·</span>
-        <span style="font-weight:600; color:var(--ink);">${operatorName}${operatorId ? ` <span style="font-size:10.5px; color:var(--muted); font-family:var(--font-mono);">(${operatorId})</span>` : ''}</span>
-        <span style="color:var(--muted); opacity:0.6;">·</span>
-        ${getConnectivityBadge()}
-        <button class="btn btn-ghost" id="cafe-ops-switch-btn" type="button" style="font-size:11px; padding:2px 8px; margin-left:4px; font-weight:600; color:var(--color-accent-amber);" title="Switch to another authorized operator">Switch</button>
-        <button class="btn btn-ghost" id="cafe-ops-lock-btn" type="button" style="font-size:11px; padding:2px 8px; font-weight:600; color:var(--muted);" title="Temporarily lock terminal">Lock</button>
-      </div>
-    `;
-  } else if (isStaff) {
-    cafeScopeHtml = `<div class="cafe-scope-context" style="display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border-radius:var(--radius-md); background:var(--bg-surface-2); border:1px solid var(--border-subtle); font-size:12px; font-weight:600; color:var(--text-primary);">
-        <span style="font-size:13px;">📍</span>
-        <span>${user.primaryCafeName || (user.primaryCafeId ? `Outlet ${user.primaryCafeId}` : "Assigned Outlet")}</span>
-      </div>`;
-  } else if (isVendor) {
-    const supplierName = user.name || "Demo Supplier Co.";
-    const supplierId = user.vendorId || "VENDOR-DEMO-001";
-    cafeScopeHtml = `
-      <div class="vendor-scope-context" style="display:inline-flex; align-items:center; flex-wrap:wrap; gap:8px; padding:4px 10px; border-radius:var(--radius-md); background:var(--surface-sunken); border:1px solid var(--line); font-size:12px; color:var(--ink);">
-        <span style="font-weight:700; display:inline-flex; align-items:center; gap:4px; color:var(--bronze-500);">🏢 ${supplierName}</span>
-        <span style="color:var(--muted); opacity:0.6;">·</span>
-        <span style="font-family:var(--font-mono, monospace); font-size:11px; color:var(--muted); font-weight:600;">${supplierId}</span>
-        <span style="color:var(--muted); opacity:0.6;">·</span>
-        <span style="display:inline-flex; align-items:center; gap:3px; padding:1px 7px; border-radius:99px; background:#dc262618; color:#dc2626; font-size:10px; font-weight:700; border:1px solid #dc262633;">🔒 READ-ONLY</span>
-      </div>
-    `;
-  } else {
-    const cafeOptions = (state.cafes || []).map(c => `<option value="${c.cafeId || c.id || c.code}" ${(state.selectedCafeId === (c.cafeId || c.id || c.code)) ? 'selected' : ''}>☕ ${c.cafeId || c.id || c.code} · ${c.name || 'Outlet'}</option>`).join('');
-    cafeScopeHtml = `<div class="cafe-scope-dropdown">
-        <select id="global-cafe-selector" class="select-scope" aria-label="Selected Cafe Scope">
-          <option value="ALL">🏠 All Cafés (Global Portfolio)</option>
-          ${cafeOptions}
+    const currentWs = state.activeWorkspace || (state.role === "master" ? (state.isPrimaryMaster === false ? "master-normal" : "master-primary") : state.role);
+    const empOptions = (state.employees || []).map((emp) => {
+      const id = emp.id || emp.employeeId || emp.userId;
+      return `<option value="${e(id)}" ${state.supervisedEmployeeId === id ? "selected" : ""}>${e(emp.name || emp.fullName || emp.userId)} (${e(emp.employeeId || emp.id || "")})</option>`;
+    }).join("");
+    scopeHtml = cafeSelect;
+    workspaceHtml = `
+      <div class="zs-pop-section">
+        <label class="zs-pop-label" for="global-workspace-selector">Open window as</label>
+        <select id="global-workspace-selector" class="select-scope zs-pop-select" aria-label="Selected Workspace Window">
+          <option value="master-primary" ${currentWs === "master-primary" ? "selected" : ""}>Primary Master</option>
+          <option value="owner" ${currentWs === "owner" ? "selected" : ""}>Owner Portal</option>
+          <option value="cafe_admin" ${currentWs === "cafe_admin" ? "selected" : ""}>Café Operations</option>
+          <option value="staff" ${currentWs === "staff" ? "selected" : ""}>Staff Preview</option>
+          <option value="vendor" ${currentWs === "vendor" ? "selected" : ""}>Vendor Portal</option>
+        </select>
+        <label class="zs-pop-label" for="global-supervised-employee-selector">View an employee record</label>
+        <select id="global-supervised-employee-selector" class="select-scope zs-pop-select" aria-label="Supervised Employee Scope">
+          <option value="NONE" ${!state.supervisedEmployeeId ? "selected" : ""}>None (myself)</option>${empOptions}
         </select>
       </div>`;
+  } else if (isCafeOps) {
+    const cafeName = user.primaryCafeName || (state.currentCafeId ? `Outlet ${state.currentCafeId}` : "Assigned outlet");
+    const cafeId = user.primaryCafeId || state.currentCafeId || "";
+    const operatorName = user.name || "Operations lead";
+    const connected = navigator.onLine;
+    scopeHtml = `
+      <span class="zs-chip" title="Outlet bound to this terminal">${PIN}${cafeId ? `<span class="zs-code">${e(cafeId)}</span>` : ""}${e(cafeName)}</span>
+      <span class="zs-chip zs-chip-quiet" title="Signed-in operator">${e(operatorName)}${user.userId ? ` <span class="zs-code">${e(user.userId)}</span>` : ""}</span>
+      <button class="zs-btn-text" id="cafe-ops-switch-btn" type="button" title="Switch to another authorised operator">Switch</button>
+      <button class="zs-btn-text" id="cafe-ops-lock-btn" type="button" title="Temporarily lock this terminal">Lock</button>
+      <span id="cafe-ops-connectivity-badge" class="bd ${connected ? "ok" : "bad"}" role="status"><i></i>${connected ? "Live" : "Offline"}</span>`;
+  } else if (isStaff) {
+    scopeHtml = `<span class="zs-chip">${PIN}${e(user.primaryCafeName || (user.primaryCafeId ? `Outlet ${user.primaryCafeId}` : "Assigned outlet"))}</span>`;
+  } else if (isVendor) {
+    scopeHtml = `
+      <span class="zs-chip">${e(user.name || "Supplier")}${user.vendorId ? ` <span class="zs-code">${e(user.vendorId)}</span>` : ""}</span>
+      <span class="bd bad readonly-banner"><i></i>Read-only</span>`;
+  } else {
+    scopeHtml = cafeSelect;
   }
 
+  const roleLabel = isPrimaryMasterUser
+    ? "Primary Master"
+    : role === ROLES.OWNER ? "Owner"
+    : isCafeOps ? "Café Operations"
+    : isStaff ? "Staff"
+    : isVendor ? "Vendor"
+    : "Zamorin ERP";
+
   const searchPlaceholder = isStaff
-    ? "Search attendance, payslips, requests..."
-    : isCafeOps
-    ? "Search this café…"
-    : isVendor
-    ? "Search purchase orders, deliveries..."
-    : "Search modules, records, employees...";
+    ? "Search attendance, payslips…"
+    : isCafeOps ? "Search this café…"
+    : isVendor ? "Search orders, deliveries…"
+    : "Search modules, records…";
+
+  const themeRow = (code, name, blurb, bg, brand) => `
+        <button class="theme-opt-btn ${currentTheme === code ? "selected" : ""}" data-theme-choice="${code}" type="button">
+          <span class="theme-color-dot" style="background:linear-gradient(135deg, ${bg} 50%, ${brand} 50%);"></span>
+          <span class="theme-text"><strong>${name}${code === "azure" ? " (default)" : ""}</strong><span>${blurb}</span></span>
+        </button>`;
 
   return `
     <div class="topbar-inner">
       <div class="topbar-left">
-        <button class="topbar-action-btn sidebar-topbar-toggle" id="sidebar-toggle-btn" title="Toggle Navigation Sidebar (Ctrl+[)" aria-label="Toggle Sidebar" type="button">
-          ${icon("menu")}
-        </button>
-        ${cafeScopeHtml}
+        <button class="topbar-action-btn sidebar-topbar-toggle" id="sidebar-toggle-btn" title="Show or hide the menu (Ctrl+[)" aria-label="Toggle Sidebar" type="button">${icon("menu")}</button>
+        <div class="zs-brand">Cafe Zamorin</div>
+        <div class="zs-scope">${scopeHtml}</div>
       </div>
 
       <div class="topbar-centre">
         <div class="global-search-wrap">
           <span class="search-icon">${icon("search")}</span>
-          <input type="text" id="topbar-search-input" placeholder="${searchPlaceholder}" autocomplete="off" />
+          <input type="text" id="topbar-search-input" placeholder="${searchPlaceholder}" aria-label="Search" autocomplete="off" />
           <kbd class="search-kbd">Ctrl+K</kbd>
           <div id="topbar-search-results" class="search-results-dropdown" style="display:none;"></div>
         </div>
       </div>
 
       <div class="topbar-right">
-        ${state.isTrainingMode ? `
-          <div class="training-mode-badge" style="display:inline-flex; align-items:center; gap:4px; padding:3px 8px; border-radius:var(--radius-sm); background:#fef3c7; border:1px solid #f59e0b; color:#92400e; font-size:11px; font-weight:700;">
-            <span>🎓 Training Mode</span>
-          </div>
-        ` : ''}
-        ${state.supervisedEmployeeId ? `
-          <div class="supervised-preview-badge" style="display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border-radius:var(--radius-sm); background:rgba(59,130,246,0.12); border:1px solid #3b82f6; color:#1d4ed8; font-size:11.5px; font-weight:700;">
-            <span>👁️ Viewing employee record: <strong style="font-family:var(--font-mono);">${state.supervisedEmployeeId}</strong></span>
-            <button id="exit-supervised-employee-btn" class="btn btn-ghost" type="button" style="padding:1px 6px; font-size:10.5px; height:auto; color:#1d4ed8; text-decoration:underline; font-weight:700; cursor:pointer;" title="Exit Employee Preview">Exit</button>
-          </div>
-        ` : ''}
-
-        <!-- Live System Status Indicator -->
-        <div class="system-status-indicator online" id="topbar-system-status" title="System Connected & Synced">
-          <span style="font-size:10px;">●</span> Online
-        </div>
-
-        <!-- Theme Switcher Button -->
-        <button class="topbar-action-btn" id="theme-btn" title="Change Appearance & Theme" type="button">
-          ${icon("sun")}
-        </button>
-
-        <!-- Notification Bell Button -->
+        ${state.isTrainingMode ? `<span class="zs-flag zs-flag-warn">Training mode</span>` : ""}
+        ${state.supervisedEmployeeId ? `<span class="zs-flag zs-flag-info">Viewing employee <b class="zs-code">${e(state.supervisedEmployeeId)}</b> <button id="exit-supervised-employee-btn" class="zs-btn-text" type="button" title="Exit employee view">Exit</button></span>` : ""}
+        <span id="topbar-system-status" class="bd ok" role="status" title="System connected and synced"><i></i>Online</span>
+        <button class="topbar-action-btn" id="theme-btn" title="Appearance and theme" aria-label="Appearance and theme" type="button">${icon("sun")}</button>
         <div class="notif-wrap">
-          <button class="topbar-action-btn" id="notif-bell-btn" title="Notifications" type="button">
+          <button class="topbar-action-btn" id="notif-bell-btn" title="Notifications" aria-label="Notifications" type="button">
             ${icon("bell")}
-            <span id="notif-bell-badge" class="badge-dot" style="display:none;"></span>
+            <span id="notif-bell-badge" class="zs-count" style="display:none;"></span>
           </button>
         </div>
-
-        <!-- User Profile Avatar Button -->
-        <button class="profile-avatar-btn" id="profile-avatar-btn" type="button">
-          <span class="avatar-text">${initials}</span>
+        <button class="profile-avatar-btn zs-account" id="profile-avatar-btn" type="button" aria-haspopup="menu" aria-label="Account menu">
+          <span class="zs-avatar" aria-hidden="true">${e(initials)}</span>
+          ${firstName ? `<span class="zs-uname">${e(firstName)}</span>` : ""}
+          <span class="zs-rolepill">${e(roleLabel)}</span>
         </button>
       </div>
     </div>
 
-    <!-- Popovers Mount -->
     <div id="themePopover" class="popover theme-popover" style="display:none;">
-      <div class="popover-head">
-        <h4>Appearance &amp; Themes</h4>
-      </div>
+      <div class="popover-head"><h4>Appearance &amp; themes</h4></div>
       <div class="theme-options">
-        <button class="theme-opt-btn ${currentTheme === "paper" ? "selected" : ""}" data-theme-choice="paper">
-          <span class="theme-color-dot" style="background:#faf9f5;border:1px solid #d7d0bd;"></span>
-          <span class="theme-text">
-            <strong>Paper (Default)</strong>
-            <span>Warm porcelain light theme</span>
-          </span>
-        </button>
-        <button class="theme-opt-btn ${currentTheme === "pearl" ? "selected" : ""}" data-theme-choice="pearl">
-          <span class="theme-color-dot" style="background:#f7f0e2;border:1px solid #c99a5c;"></span>
-          <span class="theme-text">
-            <strong>Pearl</strong>
-            <span>Warm parchment roastery light</span>
-          </span>
-        </button>
-        <button class="theme-opt-btn ${currentTheme === "midnight" ? "selected" : ""}" data-theme-choice="midnight">
-          <span class="theme-color-dot" style="background:#0e1729;border:1px solid #b17d38;"></span>
-          <span class="theme-text">
-            <strong>Midnight</strong>
-            <span>Zamorin Navy brand dark mode</span>
-          </span>
-        </button>
-        <button class="theme-opt-btn ${currentTheme === "noir" ? "selected" : ""}" data-theme-choice="noir">
-          <span class="theme-color-dot" style="background:#0a0c10;border:1px solid #445064;"></span>
-          <span class="theme-text">
-            <strong>Noir</strong>
-            <span>Charcoal high-contrast dark</span>
-          </span>
-        </button>
+        ${themeRow("azure", "Azure", "Light, white and blue", "#FFFFFF", "#1D4ED8")}
+        ${themeRow("verdigris", "Verdigris", "Light, teal-green", "#E9F0EE", "#0F6B63")}
+        ${themeRow("paper", "Paper", "Light, warm porcelain", "#FAF9F5", "#101A30")}
+        ${themeRow("pearl", "Pearl", "Light, neutral", "#EDEFF2", "#85591F")}
+        ${themeRow("midnight", "Midnight", "Dark, slate navy", "#0E1424", "#D4A15A")}
+        ${themeRow("noir", "Noir", "Dark, OLED black", "#0B0A09", "#C9964E")}
       </div>
     </div>
 
     <div id="notifPopover" class="popover notif-popover" style="display:none;">
       <div class="notif-popover-head">
         <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
-          <div style="display:flex; align-items:center; gap:6px;">
-            <span style="font-size:14px;">🔔</span>
-            <h4 style="margin:0; font-size:14px; font-weight:700; color:var(--ink);">Notifications</h4>
-          </div>
-          <button class="btn btn-ghost btn-xs" id="popover-mark-all" style="font-size:11.5px; font-weight:600; padding:2px 8px;" type="button">Mark all read</button>
+          <h4 style="margin:0; font-size:15px; font-weight:600; color:var(--heading,var(--ink));">Notifications</h4>
+          <button class="zs-btn-text" id="popover-mark-all" type="button">Mark all read</button>
         </div>
         <div class="notif-tabs">
           <button class="notif-tab-btn active" data-notif-tab="all" type="button">All</button>
           <button class="notif-tab-btn" data-notif-tab="unread" type="button">Unread</button>
-          <button class="notif-tab-btn" data-notif-tab="action" type="button">Action Required</button>
+          <button class="notif-tab-btn" data-notif-tab="action" type="button">Action required</button>
         </div>
       </div>
       <div id="notif-popover-list" class="notif-list"></div>
-      <div class="popover-foot" style="padding:10px 14px; border-top:1px solid var(--line); background:var(--surface-sunken);">
-        <button class="btn btn-sm btn-ghost btn-block" id="popover-view-all" style="font-size:12px; font-weight:600; justify-content:center;" type="button">Open Notification Centre →</button>
+      <div class="popover-foot" style="padding:10px 14px; border-top:1px solid var(--line); background:var(--surface-2);">
+        <button class="zs-btn-text zs-btn-block" id="popover-view-all" type="button">Open notification centre</button>
       </div>
     </div>
 
-    <div id="profilePopover" class="popover profile-popover" style="display:none;">
+    <div id="profilePopover" class="popover profile-popover" style="display:none;" role="menu">
       <div class="profile-card-top">
-        <div class="user-avatar lg">${initials}</div>
+        <div class="user-avatar lg">${e(initials)}</div>
         <div class="profile-details">
-          <div class="user-name">${user.name || user.fullName || (isStaff ? "Staff Member" : isCafeOps ? "Café Administrator" : "Master Administrator")}</div>
-          <div class="user-sub">${ROLE_LABELS[role] || (isStaff ? "Staff Member" : "Master Account")}${user.userId ? ` · ${user.userId}` : ""}</div>
-          <div class="user-email">${user.email || ""}</div>
+          <div class="user-name">${e(fullName || (isStaff ? "Staff member" : isCafeOps ? "Café administrator" : "Master administrator"))}</div>
+          <div class="user-sub">${e(ROLE_LABELS[role] || (isStaff ? "Staff member" : "Master account"))}${user.userId ? ` · ${e(user.userId)}` : ""}</div>
+          <div class="user-email">${e(user.email || "")}</div>
         </div>
       </div>
+      ${workspaceHtml}
       <div class="popover-menu">
-        <button class="popover-menu-item" data-profile-action="my-profile">
-          ${icon("user")} My Profile
-        </button>
-        <button class="popover-menu-item" data-profile-action="my-employment">
-          ${icon("payslip")} My Employment
-        </button>
-        <button class="popover-menu-item" data-profile-action="settings">
-          ${icon("settings")} Preferences &amp; Settings
-        </button>
-        <button class="popover-menu-item" data-profile-action="security">
-          ${icon("shield")} Security &amp; MFA
-        </button>
-        <button class="popover-menu-item" data-profile-action="lock-screen">
-          ${icon("lock")} Lock Application
-        </button>
+        <button class="popover-menu-item" data-profile-action="my-profile" role="menuitem" type="button">${icon("user")} My profile</button>
+        <button class="popover-menu-item" data-profile-action="my-employment" role="menuitem" type="button">${icon("payslip")} My employment</button>
+        <button class="popover-menu-item" data-profile-action="settings" role="menuitem" type="button">${icon("settings")} Preferences &amp; settings</button>
+        <button class="popover-menu-item" data-profile-action="security" role="menuitem" type="button">${icon("shield")} Security &amp; MFA</button>
+        <button class="popover-menu-item" data-profile-action="lock-screen" role="menuitem" type="button">${icon("lock")} Lock application</button>
         <div class="popover-divider"></div>
-        <button class="popover-menu-item logout" data-profile-action="logout">
-          ${icon("logout")} Sign Out
-        </button>
+        <button class="popover-menu-item logout" data-profile-action="logout" role="menuitem" type="button">${icon("logout")} Sign out</button>
       </div>
     </div>
   `;
@@ -434,9 +410,13 @@ export function updateBellBadge() {
   if (!badge) return;
   const count = unreadCount(state.role);
   if (count > 0) {
-    badge.style.display = "block";
+    badge.textContent = count > 99 ? "99+" : String(count);
+    badge.style.display = "inline-block";
+    document.getElementById("notif-bell-btn")?.setAttribute("aria-label", `Notifications, ${count} unread`);
   } else {
+    badge.textContent = "";
     badge.style.display = "none";
+    document.getElementById("notif-bell-btn")?.setAttribute("aria-label", "Notifications");
   }
 }
 
@@ -490,13 +470,11 @@ export function wireBell(root) {
       const badge = document.getElementById('cafe-ops-connectivity-badge');
       if (!badge) return;
       if (navigator.onLine) {
-        badge.className = 'status success';
-        badge.style.cssText = 'font-size:10px; padding:2px 6px; font-weight:700;';
-        badge.textContent = '🟢 Live';
+        badge.className = 'bd ok';
+        badge.innerHTML = '<i></i>Live';
       } else {
-        badge.className = 'status error';
-        badge.style.cssText = 'font-size:10px; padding:2px 6px; font-weight:700;';
-        badge.textContent = '🔴 Offline';
+        badge.className = 'bd bad';
+        badge.innerHTML = '<i></i>Offline';
       }
     };
     window.addEventListener('online', updateConnectivityBadge);
@@ -636,7 +614,10 @@ export function wireBell(root) {
         e.stopPropagation();
         const theme = btn.dataset.themeChoice;
         document.documentElement.dataset.theme = theme;
+        document.documentElement.setAttribute("data-theme", theme);
         localStorage.setItem("zamorin-theme", theme);
+        localStorage.setItem("zm-theme", theme);
+        if (state.settings) state.settings.theme = theme;
         themePop.querySelectorAll("[data-theme-choice]").forEach((b) => b.classList.remove("selected"));
         btn.classList.add("selected");
         themePop.style.display = "none";
@@ -891,12 +872,12 @@ export function wireBell(root) {
   if (statusBadge) {
     const syncStatus = () => {
       if (navigator.onLine) {
-        statusBadge.className = "system-status-indicator online";
-        statusBadge.innerHTML = `<span style="font-size:10px;">●</span> Online`;
+        statusBadge.className = "bd ok";
+        statusBadge.innerHTML = `<i></i>Online`;
         statusBadge.title = "Backend API & Active Session Connected";
       } else {
-        statusBadge.className = "system-status-indicator offline";
-        statusBadge.innerHTML = `<span style="font-size:10px;">●</span> Offline`;
+        statusBadge.className = "bd bad";
+        statusBadge.innerHTML = `<i></i>Offline`;
         statusBadge.title = "Network Disconnected — Retrying Connection";
       }
     };
@@ -1016,7 +997,7 @@ export function openModal(options = {}) {
   }
 
   const modalEl = document.createElement("div");
-  modalEl.className = `modal-backdrop open ${depth > 0 ? "is-nested" : ""}`;
+  modalEl.className = `modal-backdrop scrim open ${depth > 0 ? "is-nested" : ""}`;
   modalEl.id = depth === 0 ? "zamorin-global-modal" : `zamorin-modal-nested-${depth}`;
   modalEl.setAttribute("role", "dialog");
   modalEl.setAttribute("aria-modal", "true");
@@ -1025,7 +1006,7 @@ export function openModal(options = {}) {
 
   if (typeof options === "string") {
     modalEl.innerHTML = `
-      <div class="modal-window" role="document" style="max-width:760px; max-height:85vh; overflow-y:auto; padding:24px; position:relative;">
+      <div class="modal-window modal" role="document" style="max-width:760px; max-height:85vh; overflow-y:auto; padding:24px; position:relative;">
         <button class="modal-close-btn" data-modal-cancel type="button" aria-label="Close"
           style="position:absolute; top:16px; right:16px; background:none; border:none; color:var(--muted); cursor:pointer; font-size:18px;">
           ${icon("x")}
@@ -1048,7 +1029,7 @@ export function openModal(options = {}) {
     modalEl.setAttribute("aria-labelledby", titleId);
 
     modalEl.innerHTML = `
-      <div class="modal-window" role="document" style="max-width:${maxWidth}">
+      <div class="modal-window modal" role="document" style="max-width:${maxWidth}">
         <div class="modal-header">
           <h3 class="modal-title" id="${titleId}">${title}</h3>
           <button class="modal-close-btn" data-modal-cancel type="button" aria-label="Close">
@@ -2132,6 +2113,8 @@ export function createDatePicker(container, {
     closeAllDatePickers();
     isOpen = true;
     wrap.classList.add("open");
+    const popupEl = wrap.querySelector(".zamorin-calendar-popup");
+    if (popupEl) popupEl.classList.add("open");
 
     // Viewport bounds check — open upward if near bottom
     const rect = wrap.getBoundingClientRect();
@@ -2148,6 +2131,8 @@ export function createDatePicker(container, {
   function close() {
     isOpen = false;
     wrap.classList.remove("open", "open-up");
+    const popupEl = wrap.querySelector(".zamorin-calendar-popup");
+    if (popupEl) popupEl.classList.remove("open");
   }
 
   input.addEventListener("focus", open);
@@ -2442,7 +2427,7 @@ export function renderModuleErrorState({
 export function renderFileUploadZone({
   id = "document-file-upload",
   label = "Upload Document, Invoice or Receipt",
-  acceptedTypes = ".pdf,.png,.jpg,.jpeg,.xlsx,.csv",
+  acceptedTypes = ".pdf,.png,.jpg,.jpeg,.xlsx",
   maxSizeBytes = 15728640, // 15MB
   helpText = "Supported: PDF, PNG, JPG, XLSX (Max 15MB)",
   required = false,
@@ -2452,7 +2437,7 @@ export function renderFileUploadZone({
   return `
     <div class="file-upload-wrapper" id="${id}-wrapper" style="width:100%;">
       ${label ? `<label class="form-label" style="font-size:12px; font-weight:700; color:var(--ink); margin-bottom:6px; display:block;">${label} ${required ? '<span style="color:var(--color-accent-coral, #e05252)">*</span>' : ""}</label>` : ""}
-      <div class="file-dropzone" id="${id}-dropzone" tabindex="0" role="button" aria-label="${label}"
+      <div class="file-dropzone dropzone" id="${id}-dropzone" tabindex="0" role="button" aria-label="${label}"
         style="border:2px dashed var(--line-strong, rgba(200,157,92,0.35)); border-radius:var(--radius-md, 10px); padding:16px 14px; text-align:center; background:var(--surface-sunken, rgba(0,0,0,0.02)); cursor:pointer; transition:border-color 0.2s ease, background 0.2s ease; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:${zoneHeight}; position:relative;">
         <input type="file" id="${id}-input" accept="${acceptedTypes}" style="display:none;" />
         <div class="dropzone-empty-state" id="${id}-empty-state">
@@ -2508,7 +2493,7 @@ export function wireFileUploadZone(rootEl, {
     const ext = (file.name.split('.').pop() || "").toLowerCase();
     if (["png", "jpg", "jpeg", "webp", "gif"].includes(ext)) iconEmoji = "🖼️";
     else if (["pdf"].includes(ext)) iconEmoji = "📑";
-    else if (["xlsx", "xls", "csv"].includes(ext)) iconEmoji = "📊";
+    else if (["xlsx", "xls"].includes(ext)) iconEmoji = "📊";
     else if (["zip", "tar", "gz"].includes(ext)) iconEmoji = "🗜️";
 
     if (fileIconEl) fileIconEl.textContent = iconEmoji;
@@ -2684,9 +2669,10 @@ export function openUniversalDocumentModal({
         const headers = {};
         if (token) headers['Authorization'] = `Bearer ${token}`;
 
-        const uploadRes = await fetch('/api/v1/files/documents/attach', {
+        const uploadRes = await fetch('/api/v1/documents/attach', {
           method: 'POST',
           headers,
+          credentials: 'include',
           body: formData,
         });
         const json = await uploadRes.json();

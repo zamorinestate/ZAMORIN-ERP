@@ -191,9 +191,7 @@ export function wireCallCenter(container, subroute) {
         alert("Please add items to the ticket first.");
         return;
       }
-      alert(`Call Center Order dispatched to ${selectedOutlet}! Customer SMS notification sent.`);
-      callCart = [];
-      updateCart();
+      alert("Not connected: call-centre dispatch is not linked to the server yet. The order was NOT sent and no customer message was sent. Your ticket is kept.");
     });
   }
 }

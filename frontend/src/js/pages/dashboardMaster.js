@@ -1,3 +1,4 @@
+import { showDataError } from "../utils/dialogs.js";
 // =============================================================================
 // ZAMORIN CAFE ERP — SCREEN 001: COMMAND CENTRE / GLOBAL PORTFOLIO DASHBOARD
 // Design System v2 (Ledger & Roastery Dark / Porcelain Light Theme)
@@ -1172,8 +1173,10 @@ async function loadDashboardData(root) {
         fallbackData.portfolioKpis.expenses.restricted = true;
       }
       dashboardState.data = fallbackData;
+      renderDashboardContent(root, dashboardState.data);
+      showDataError(root, "empty response");
     }
-    renderDashboardContent(root, dashboardState.data);
+    if (res?.data) renderDashboardContent(root, dashboardState.data);
   } catch (err) {
     console.warn("Live dashboard endpoint unavailable, using authoritative baseline:", err.message);
     const fallbackData = JSON.parse(JSON.stringify(DEFAULT_MASTER_DASHBOARD_DATA));
@@ -1182,6 +1185,7 @@ async function loadDashboardData(root) {
     }
     dashboardState.data = fallbackData;
     renderDashboardContent(root, dashboardState.data);
+    showDataError(root, err.message);
   } finally {
     if (refreshIcon) refreshIcon.style.display = "inline";
   }

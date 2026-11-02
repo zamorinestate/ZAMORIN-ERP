@@ -275,6 +275,13 @@ export function isRouteAllowed(role, rawRoute, isPrimaryMaster = false) {
   }
 
   // Implicit routes allowed for all authenticated non-vendor roles
+  // Back-office order/billing screens are not open to STAFF by URL (backend also guards them).
+  if (
+    (role === ROLES.STAFF || role === 'staff') &&
+    ['call-center', 'phone-orders', 'retail-cpg', 'cpg-invoice', 'emergency-terminal'].includes(route)
+  ) {
+    return false;
+  }
   if (IMPLICIT_ROUTES_ALL.has(route)) return true;
 
   // Primary Master has 100% universal unrestricted access to every route and module

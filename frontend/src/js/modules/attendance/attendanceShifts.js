@@ -4,6 +4,7 @@
 // + Master Parity UX Reflection
 // =============================================================================
 
+import { exportGrid } from "../../utils/exportFile.js";
 import { apiGet, apiPost, apiPatch } from "../../apiClient.js";
 import { showToast, openModal, confirmAction, renderChildHeader } from "../../components.js";
 import { state } from "../../state.js";
@@ -18,6 +19,20 @@ let liveFilterStatus = "ALL"; // 'ALL' | 'NEEDS_ATTENTION' | 'PRESENT' | 'LATE' 
 let liveSearchQuery = "";
 let cachedOverview = null;
 let cachedLiveAttendance = [];
+// Set when the backend refuses attendance administration because this browser
+// is not an enrolled/trusted café device (Cafe Admin privilege profile is
+// SELF_ONLY). Rendered as an actionable banner instead of a silent failure.
+let attendanceAccessNotice = "";
+
+function escapeNotice(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[ch]));
+}
 let cachedRoster = null;
 let cachedServerTime = null;
 let selectedUserId = "";
@@ -158,6 +173,20 @@ export function renderAttendance(subroute) {
         </div>
       </div>
 
+      ${
+        attendanceAccessNotice
+          ? `<div class="alert alert-warn attendance-access-notice" role="status" style="margin-bottom:16px;">
+               <div>
+                 <b>Attendance administration is locked on this device.</b>
+                 ${escapeNotice(attendanceAccessNotice)}
+                 Enroll this browser as a trusted café device from
+                 <a href="#cafe-ops-devices" style="color:inherit;text-decoration:underline;">Devices &amp; Sessions</a>
+                 to manage attendance, overtime and exceptions.
+               </div>
+             </div>`
+          : ""
+      }
+
       <!-- Subpanel Content Container -->
       <div id="attendance-subpanel-root">
         ${renderActiveSubpanel()}
@@ -225,7 +254,7 @@ function renderActiveSubpanel() {
       desc: "Average shift adherence, OT trends, absenteeism rates and peak hour staffing.",
       actionsHtml: `
         <button class="btn btn-secondary btn-sm" id="btn-analytics-attendance-qr-scanner" data-attendance-hub-tile="qrScanner" type="button" style="font-size:12px; font-weight:700; margin-right:8px;">📱 Attendance QR &amp; Scanner</button>
-        <button class="btn btn-ghost btn-sm" id="export-analytics-btn" type="button" style="font-size:12px;">📈 Export CSV</button>
+        <button class="btn btn-ghost btn-sm" id="export-analytics-btn" type="button" style="font-size:12px;">📈 Export XLSX</button>
       `
     },
     qrScanner: {
@@ -1409,7 +1438,7 @@ function renderPoliciesSubpanel() {
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <span style="color:var(--muted);">Third-Party Export Format</span>
-              <strong style="color:var(--ink);">PDF Statutory Proof &amp; CSV</strong>
+              <strong style="color:var(--ink);">PDF Statutory Proof &amp; XLSX</strong>
             </div>
           </div>
         </div>
@@ -1717,7 +1746,7 @@ function renderAnalyticsSubpanel() {
             <p style="font-size:12px; color:var(--muted); margin:0;">Automated statistical anomaly detection across shifts</p>
           </div>
           <button class="btn btn-secondary btn-sm" id="export-analytics-btn" type="button" style="font-size:12px; font-weight:600;">
-            📊 Download Full Analytics CSV
+            📊 Download Full Analytics (XLSX)
           </button>
         </div>
 
@@ -1813,18 +1842,32 @@ export function wireAttendance(root, subroute) {
 }
 
 async function loadLiveAttendanceData() {
+  // Already refused for this device — don't hammer the API with the same
+  // guaranteed 403 on every repaint/refresh. A full reload re-checks.
+  if (attendanceAccessNotice) return;
   try {
-    const role = state.role || state.user?.role || ROLES.MASTER;
+    const role = String(state.role || state.user?.role || ROLES.MASTER).toLowerCase();
     const isCafeAdmin = role === ROLES.CAFE_ADMIN;
     const cafeQuery = isCafeAdmin ? `?cafeId=${state.user?.assignedCafeIds?.[0] || state.currentCafeId || ""}` : "";
 
+    const guarded = (promise) =>
+      promise.catch((err) => {
+        if (
+          err?.status === 403 &&
+          /untrusted devices/i.test(String(err?.message || ""))
+        ) {
+          attendanceAccessNotice = String(err.message);
+        }
+        return null;
+      });
+
     const [ovRes, liveRes, timeRes, shiftsRes, otRes, excRes] = await Promise.all([
-      apiGet(`/api/v1/attendance/overview${cafeQuery}`).catch(() => null),
-      apiGet(`/api/v1/attendance/live${cafeQuery}`).catch(() => null),
-      apiGet("/api/v1/attendance/server-time").catch(() => null),
-      apiGet(`/api/v1/shifts${cafeQuery}`).catch(() => null),
-      apiGet(`/api/v1/attendance/overtime${cafeQuery}`).catch(() => null),
-      apiGet(`/api/v1/attendance/exceptions${cafeQuery}`).catch(() => null),
+      guarded(apiGet(`/api/v1/attendance/overview${cafeQuery}`)),
+      guarded(apiGet(`/api/v1/attendance/live${cafeQuery}`)),
+      guarded(apiGet("/api/v1/attendance/server-time")),
+      guarded(apiGet(`/api/v1/shifts${cafeQuery}`)),
+      guarded(apiGet(`/api/v1/attendance/overtime${cafeQuery}`)),
+      guarded(apiGet(`/api/v1/attendance/exceptions${cafeQuery}`)),
     ]);
 
     if (ovRes?.data) cachedOverview = ovRes.data;
@@ -1841,6 +1884,18 @@ async function loadLiveAttendanceData() {
 
 function rerender(root) {
   if (!state.route?.startsWith("attendance") && state.route !== "staff-attendance") return;
+  // The access notice lives in the page header, not the subpanel. If it was
+  // discovered after the first paint, repaint the whole page once so the
+  // actionable banner is visible instead of silently rendering zeroes.
+  if (
+    attendanceAccessNotice &&
+    root?.querySelector &&
+    !root.querySelector(".attendance-access-notice")
+  ) {
+    root.innerHTML = renderAttendance();
+    wireAttendance(root);
+    return;
+  }
   const subpanelRoot = root?.querySelector ? root.querySelector("#attendance-subpanel-root") : null;
   if (subpanelRoot) {
     subpanelRoot.innerHTML = renderActiveSubpanel();
@@ -2857,7 +2912,7 @@ function openEditAttendanceModal(root, attendanceId) {
 async function openScopedManualAttendanceModal(root) {
   const role = state.role || state.user?.role || ROLES.MASTER;
   const isCafeAdmin = role === ROLES.CAFE_ADMIN;
-  let assignedCafe = state.user?.assignedCafeIds?.[0] || state.currentCafeId || cachedCafes[0]?.cafeId || cachedCafes[0]?.code || "ZC-0001";
+  let assignedCafe = state.user?.assignedCafeIds?.[0] || state.currentCafeId || cachedCafes[0]?.cafeId || cachedCafes[0]?.code || "";
   const cafeName = CAFE_NAMES[assignedCafe] || state.currentCafeName || `Outlet ${assignedCafe}`;
 
   // Fetch real employees to eliminate empty staff dropdown
@@ -3171,15 +3226,8 @@ function exportRosterCsv() {
     return [s.id, s.name, s.role, s.mon, s.tue, s.wed, s.thu, s.fri, s.sat, s.sun, tot.toFixed(1)];
   });
 
-  const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
-  const encodedUri = encodeURI(csvContent);
-  const link = document.createElement("a");
-  link.setAttribute("href", encodedUri);
-  link.setAttribute("download", `Zamorin_Shift_Roster_${activeCafeId}_Week.csv`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  showToast("Weekly Shift Roster CSV exported successfully.", "success");
+  exportGrid({ headers, rows, title: "Zamorin_Shift_Roster", filename: `Zamorin_Shift_Roster_${activeCafeId}_Week` });
+  showToast("Weekly Shift Roster(XLSX) exported successfully.", "success");
 }
 
 // Modal: Create Weekly Shift Roster
@@ -3260,15 +3308,8 @@ function exportTimesheetsCsv() {
         a.status || "PRESENT"
       ])
     : [];
-  const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
-  const encodedUri = encodeURI(csvContent);
-  const link = document.createElement("a");
-  link.setAttribute("href", encodedUri);
-  link.setAttribute("download", `Zamorin_Attendance_Timesheets_${new Date().toISOString().slice(0, 10)}.csv`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  showToast("Attendance Timesheets CSV exported successfully.", "success");
+  exportGrid({ headers, rows, title: "Zamorin_Attendance_Timesheets", filename: `Zamorin_Attendance_Timesheets_${new Date().toISOString().slice(0, 10)}` });
+  showToast("Attendance Timesheets(XLSX) exported successfully.", "success");
 }
 
 // Modal: Official Attendance & Statutory Compliance Certificate
@@ -3342,15 +3383,8 @@ function exportAnalyticsCsv() {
     : [
         [state.currentCafeId || "ZC-MAIN", state.currentCafeName || "Main Outlet", "12", "2200.0", "2210.0", "96.8%", "6.0", "2.0%", "EXCELLENT"]
       ];
-  const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
-  const encodedUri = encodeURI(csvContent);
-  const link = document.createElement("a");
-  link.setAttribute("href", encodedUri);
-  link.setAttribute("download", `Zamorin_Workforce_Analytics_${new Date().toISOString().slice(0, 10)}.csv`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  showToast("Workforce Analytics CSV exported successfully.", "success");
+  exportGrid({ headers, rows, title: "Zamorin_Workforce_Analytics", filename: `Zamorin_Workforce_Analytics_${new Date().toISOString().slice(0, 10)}` });
+  showToast("Workforce Analytics(XLSX) exported successfully.", "success");
 }
 
 // =============================================================================

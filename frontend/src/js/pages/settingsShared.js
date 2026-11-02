@@ -21,7 +21,9 @@
 //      network/session errors with retry actions.
 // =============================================================================
 
+import { askText } from "../utils/dialogs.js";
 import { state, setState, setSettings } from "../state.js";
+import { FONT_FAMILIES, setFontFamily, setFontSize } from "../utils/zui.js";
 import { ROLES } from "../navigation.js";
 import { navigate } from "../router.js";
 import { showToast, confirmAction, renderCafeContextStrip } from "../components.js";
@@ -61,10 +63,12 @@ const ALL_LANGUAGES = [
 ];
 
 const THEMES = [
-  { code: "paper",    label: "Paper",    desc: "Warm porcelain light (Default)", swatch: "#f8f6f0", border: "#d4af37" },
-  { code: "pearl",    label: "Pearl",    desc: "Parchment roastery tone",       swatch: "#ede7de", border: "#c9933e" },
-  { code: "midnight", label: "Midnight", desc: "Zamorin Navy deep dark",        swatch: "#0f172a", border: "#38bdf8" },
-  { code: "noir",     label: "Noir",     desc: "High contrast charcoal obsidian", swatch: "#05070a", border: "#e2e8f0" },
+  { code: "azure",     label: "Azure",     desc: "Vibrant white & cobalt blue (Default)", swatch: "#1d4ed8", border: "#1e40af" },
+  { code: "pearl",     label: "Pearl",     desc: "Warm parchment roastery tone",        swatch: "#ede7de", border: "#c9933e" },
+  { code: "paper",     label: "Paper",     desc: "Warm porcelain light theme",           swatch: "#f8f6f0", border: "#d4af37" },
+  { code: "verdigris", label: "Verdigris", desc: "Deep sage & botanical teal accent",    swatch: "#0f6b63", border: "#0b544e" },
+  { code: "midnight",  label: "Midnight",  desc: "Zamorin Navy deep dark",               swatch: "#0f172a", border: "#38bdf8" },
+  { code: "noir",      label: "Noir",      desc: "High contrast charcoal obsidian",       swatch: "#05070a", border: "#e2e8f0" },
 ];
 
 const FONT_SIZES = [
@@ -1523,7 +1527,7 @@ function renderLanguage() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function renderAppearance() {
-  const currentTheme = document.documentElement.dataset.theme || localStorage.getItem("zamorin-theme") || "paper";
+  const currentTheme = document.documentElement.dataset.theme || localStorage.getItem("zamorin-theme") || localStorage.getItem("zm-theme") || "azure";
   const currentFont = state.settings?.fontSize || localStorage.getItem("zamorin-font-size") || "standard";
   const currentDensity = state.settings?.density || "standard";
 
@@ -1582,6 +1586,18 @@ function renderAppearance() {
               </button>
             `).join("")}
           </div>
+        </div>
+
+        <div class="settings-field-group">
+          <div class="settings-field-label">Font Family</div>
+          <div style="display:flex; flex-wrap:wrap; gap:8px;">
+            ${FONT_FAMILIES.map((f) => `
+              <button class="btn btn-ghost btn-sm ${(document.documentElement.getAttribute("data-font-family") || "inter") === f.code ? "selected" : ""}"
+                data-font-family="${f.code}" data-font-family-name="${f.label}" type="button"
+                title="${f.desc}" aria-pressed="${(document.documentElement.getAttribute("data-font-family") || "inter") === f.code}">${f.label}</button>
+            `).join("")}
+          </div>
+          <div class="settings-field-helper">Applies inside the signed-in workspace only. Money, serial numbers and batches stay in IBM Plex Mono.</div>
         </div>
 
         <div class="settings-field-group">
@@ -1712,7 +1728,6 @@ function renderWorkspace() {
           <select id="settings-ws-export" class="settings-field-input">
             <option value="PDF" ${ws.defaultExportFormat === "PDF" ? "selected" : ""}>PDF (Watermarked &amp; Official)</option>
             <option value="XLSX" ${ws.defaultExportFormat === "XLSX" ? "selected" : ""}>Excel (XLSX)</option>
-            <option value="CSV" ${ws.defaultExportFormat === "CSV" ? "selected" : ""}>CSV</option>
           </select>
         </div>
       </div>
@@ -2633,13 +2648,12 @@ async function _wireConnected(root) {
   const connectBtn = root.querySelector("#btn-connect-gbp");
   if (connectBtn) {
     connectBtn.addEventListener("click", async () => {
-      const locationName = prompt("Enter Google Business Profile Location Name:", "Zamorin Cafe Main Branch");
+      const locationName = await askText({ title: "Connect Google Business Profile", label: "Location name", required: true });
       if (!locationName) return;
+      const placeId = await askText({ title: "Connect Google Business Profile", label: "Google Place ID", required: true });
+      if (!placeId) return;
       try {
-        const res = await apiPost("/settings/google-business/connect", {
-          locationName,
-          placeId: "ChIJN1t_tDeuEmsRUsoyG83frY4",
-        });
+        const res = await apiPost("/settings/google-business/connect", { locationName, placeId });
         showToast(res?.message || "Google Business Profile connected.", "mint");
         const nameEl = root.querySelector("#gbp-location-name");
         if (nameEl) nameEl.textContent = locationName;
@@ -2652,14 +2666,7 @@ async function _wireConnected(root) {
   const disconnectBtn = root.querySelector("#btn-disconnect-gbp");
   if (disconnectBtn) {
     disconnectBtn.addEventListener("click", () => {
-      if (confirm("Disconnect Google Business Profile? Your underlying Google account remains untouched (A005).")) {
-        showToast("Google Business Profile disconnected safely.", "mint");
-        const chip = root.querySelector("#gbp-status-chip");
-        if (chip) {
-          chip.textContent = "UNLINKED";
-          chip.className = "settings-status-chip warning";
-        }
-      }
+      showToast("Disconnecting Google Business Profile is not available from this screen. Nothing was changed.", "warning");
     });
   }
 
@@ -2670,11 +2677,11 @@ async function _wireConnected(root) {
     const prefix = root.querySelector("#scale-barcode-prefix")?.value;
     const dims = root.querySelector("#scale-label-dims")?.value;
     localStorage.setItem("zamorin_scale_config", JSON.stringify({ proto, div, prefix, dims }));
-    showToast("Scale protocol & barcode math configuration saved (C02 verified).", "mint");
+    showToast("Scale and barcode settings saved on this device only. They are not synced to the server.", "mint");
   });
 
   root.querySelector("#btn-test-barcode-print")?.addEventListener("click", () => {
-    showToast("Sample barcode label (Code128 ^BC) dispatched to thermal label printer.", "mint");
+    showToast("No label printer is connected to this screen. Nothing was printed.", "warning");
   });
 }
 
@@ -2710,9 +2717,9 @@ async function _wireProfile(root) {
   });
 
   root.querySelector("#settings-profile-name-change")?.addEventListener("click", async () => {
-    const newName = window.prompt("Enter requested legal full name:");
+    const newName = await askText({ title: "Legal name change", label: "Requested legal full name", required: true });
     if (!newName || !newName.trim()) return;
-    const reason = window.prompt("Enter business/statutory justification:");
+    const reason = await askText({ title: "Legal name change", label: "Business / statutory justification", required: true });
     if (!reason || !reason.trim()) return;
 
     try {
@@ -2736,14 +2743,14 @@ async function _wireProfile(root) {
     input.onchange = (e) => {
       const file = e.target.files?.[0];
       if (file) {
-        showToast(`Profile photo "${file.name}" uploaded successfully.`, "mint");
+        showToast("Profile photo upload is not connected. Your photo was not changed.", "warning");
       }
     };
     input.click();
   });
 
   root.querySelector("#settings-photo-remove-btn")?.addEventListener("click", () => {
-    showToast("Profile photo removed. Reset to initials avatar.", "mint");
+    showToast("Profile photo removal is not connected. Nothing was changed.", "warning");
   });
 }
 
@@ -2848,7 +2855,10 @@ function _wireAppearance(root) {
     btn.addEventListener("click", () => {
       const theme = btn.dataset.themeBtn;
       document.documentElement.dataset.theme = theme;
+      document.documentElement.setAttribute("data-theme", theme);
       localStorage.setItem("zamorin-theme", theme);
+      localStorage.setItem("zm-theme", theme);
+      if (state.settings) state.settings.theme = theme;
       _rerenderInPlace(root);
       showToast(`Theme changed to ${theme.toUpperCase()}`, "mint");
     });
@@ -2857,10 +2867,18 @@ function _wireAppearance(root) {
   root.querySelectorAll("[data-font]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const fontSize = btn.dataset.font;
-      localStorage.setItem("zamorin-font-size", fontSize);
+      setFontSize(fontSize);
       setSettings({ fontSize });
       _rerenderInPlace(root);
       showToast(`Font size set to ${btn.dataset.fontName}`, "mint");
+    });
+  });
+
+  root.querySelectorAll("[data-font-family]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      setFontFamily(btn.dataset.fontFamily);
+      _rerenderInPlace(root);
+      showToast(`Font set to ${btn.dataset.fontFamilyName}`, "mint");
     });
   });
 
@@ -2874,12 +2892,15 @@ function _wireAppearance(root) {
   });
 
   root.querySelector("#settings-appearance-reset")?.addEventListener("click", () => {
-    document.documentElement.dataset.theme = "paper";
-    localStorage.setItem("zamorin-theme", "paper");
-    localStorage.setItem("zamorin-font-size", "standard");
-    setSettings({ fontSize: "standard", density: "standard" });
+    document.documentElement.dataset.theme = "azure";
+    document.documentElement.setAttribute("data-theme", "azure");
+    localStorage.setItem("zamorin-theme", "azure");
+    localStorage.setItem("zm-theme", "azure");
+    setFontSize("standard");
+    setFontFamily("inter");
+    setSettings({ theme: "azure", fontSize: "standard", density: "standard" });
     _rerenderInPlace(root);
-    showToast("Appearance defaults restored (Paper theme).", "mint");
+    showToast("Appearance defaults restored (Azure theme).", "mint");
   });
 }
 
@@ -3056,7 +3077,7 @@ function _wireSecurity(root) {
           btn.addEventListener("click", async (e) => {
             const credId = e.currentTarget.dataset.renamePasskey;
             const currentName = e.currentTarget.dataset.currentName || "";
-            const newName = window.prompt("Enter a new friendly name for this biometric passkey:", currentName);
+            const newName = await askText({ title: "Rename passkey", label: "Friendly name", value: currentName, required: true });
             if (newName && newName.trim() && newName.trim() !== currentName) {
               try {
                 await apiPatch(`/auth/passkeys/${encodeURIComponent(credId)}`, {
@@ -4065,7 +4086,7 @@ function openManageTicketModal(ticket, root) {
   });
 
   modal.querySelector("#mtm-act-resolve")?.addEventListener("click", async () => {
-    const resolutionSummary = prompt("Enter resolution summary:", "Resolved after review.");
+    const resolutionSummary = await askText({ title: "Resolve case", label: "Resolution summary", value: "Resolved after review.", required: true });
     if (resolutionSummary === null) return;
     try {
       await apiPatch(`/settings/support/manage/tickets/${ticket.caseId}`, { status: "RESOLVED", resolutionSummary });
@@ -4124,29 +4145,8 @@ async function _wireUpdates(root) {
         _updatesData = res.data;
       }
     } catch {
-      _updatesData = {
-        releases: [
-          {
-            releaseId: "REL-2026-CORE-001",
-            version: "v1.2.0",
-            title: "Enterprise Core Release & Multi-Outlet Architecture",
-            category: "FEATURE",
-            targetAudience: ["ALL"],
-            criticality: "RECOMMENDED",
-            releaseNotes: "• Universal 28-module enterprise integration\n• Enhanced personal ledger isolation and attendance punch validation\n• 100% verified test suite compliance",
-            sha256Checksum: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-            publishedBy: { name: "Zamorin Master", role: "MASTER" },
-            publishedAt: new Date().toISOString(),
-            status: "ACTIVE",
-            downloadCount: 1,
-            isInstalled: true,
-          },
-        ],
-        unappliedCount: 0,
-        hasPendingUpdates: false,
-        latestAvailableVersion: localVersion,
-        lastCheckedAt: new Date().toISOString(),
-      };
+      _updatesData = { releases: [], unappliedCount: 0, hasPendingUpdates: false, latestAvailableVersion: localVersion, lastCheckedAt: null };
+      showToast("Release information could not be loaded from the server.", "error");
     } finally {
       _loadingUpdates = false;
       _rerenderInPlace(root);

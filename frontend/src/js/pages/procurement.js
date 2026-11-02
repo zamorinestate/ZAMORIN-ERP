@@ -4,6 +4,9 @@ import { state } from '../state.js';
 import { ROLES } from '../navigation.js';
 import { navigate } from '../router.js';
 import { openInvoiceIntelligenceReviewModal } from './invoiceIntelligenceReview.js';
+import { renderSupplierMatrixTab, renderLandedCostTab } from './procurementPhase2.js';
+import { askText, askConfirm, showDataError } from '../utils/dialogs.js';
+import { openBulkPreview } from '../utils/bulkPreview.js';
 
 let activeTab = 'overview';
 let cachedOverview = null;
@@ -42,6 +45,122 @@ const STATUS_PILLS = {
   WITHIN_TOLERANCE: 'pill-amber',
   MISMATCH: 'pill-coral',
 };
+
+const escP = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function poList(res) {
+  const d = res?.data;
+  return d?.orders || d?.purchaseOrders || (Array.isArray(d) ? d : []) || [];
+}
+async function loadSpendBySupplier(root) {
+  const el = root.querySelector('#overview-spend-card');
+  if (!el) return;
+  try {
+    const orders = poList(await apiGet('/procurement/orders')).filter((o) => o.status !== 'CANCELLED');
+    if (!orders.length) { el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--mute);font-size:12px">No committed orders yet.</div>'; return; }
+    const by = new Map();
+    orders.forEach((o) => { const k = o.vendorName || o.vendorId || 'Unknown supplier'; by.set(k, (by.get(k) || 0) + (o.totalAmountPaisa || 0)); });
+    const total = [...by.values()].reduce((a, b) => a + b, 0) || 1;
+    const top = [...by.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+    el.innerHTML = `<div style="display:flex;flex-direction:column;gap:8px;font-size:12px">${top.map(([name, v]) => {
+      const pct = Math.round((v / total) * 100);
+      return `<div><div style="display:flex;justify-content:space-between;margin-bottom:2px"><span>${escP(name)}</span><strong>${formatPaise(v)} (${pct}%)</strong></div><div style="height:6px;background:var(--line);border-radius:3px;overflow:hidden"><div style="width:${pct}%;height:100%;background:var(--brand,var(--accent))"></div></div></div>`;
+    }).join('')}</div>`;
+  } catch (err) {
+    el.innerHTML = `<div role="alert" style="color:var(--err);font-size:12px">Spend could not be loaded: ${escP(err?.message || 'request failed')}</div>`;
+  }
+}
+
+
+function askSupplierResponse(poId) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    openModal({
+      title: `Record supplier answer for ${escP(poId)}`,
+      saveLabel: 'Record answer',
+      maxWidth: '440px',
+      body: `<label class="p3-f" for="sr-status"><span>What did the supplier say?</span><select id="sr-status" class="select">
+          <option value="ACKNOWLEDGED">Acknowledged</option><option value="PARTIALLY_CONFIRMED">Partially confirmed</option>
+          <option value="REJECTED">Rejected</option><option value="NO_RESPONSE">No response yet</option></select></label>
+        <label class="p3-f" for="sr-notes" style="margin-top:10px;display:block"><span>Reference or notes (how and when they answered)</span><textarea id="sr-notes" class="input" rows="3" style="width:100%"></textarea></label>
+        <div id="sr-err" role="alert" style="color:var(--err);font-size:12px;min-height:16px"></div>`,
+      onSave: () => {
+        const status = document.querySelector('#sr-status')?.value;
+        const notes = (document.querySelector('#sr-notes')?.value || '').trim();
+        if (status !== 'NO_RESPONSE' && !notes) { document.querySelector('#sr-err').textContent = 'Add the reference or note so the answer can be traced.'; return false; }
+        finish({ status, notes }); return true;
+      },
+      onCancel: () => finish(null),
+    });
+    const t = setInterval(() => { if (!document.querySelector('#sr-status')) { clearInterval(t); finish(null); } }, 250);
+  });
+}
+
+const MESSAGE_STATES = { QUEUED: 'Queued', SENDING: 'Sending', ACCEPTED_BY_PROVIDER: 'Accepted by provider', DELIVERED: 'Delivered', FAILED: 'Failed', UNKNOWN: 'Unknown' };
+const ANSWER_STATES = { ACKNOWLEDGED: 'Acknowledged', PARTIALLY_CONFIRMED: 'Partially confirmed', REJECTED: 'Rejected', NO_RESPONSE: 'No response' };
+const normKey = (v) => String(v || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+
+// Two separate chip sets (plan 5.8): how the message was handled, and what the supplier answered.
+function renderDispatchChips(o) {
+  const msg = normKey(o.dispatch?.status || o.dispatchStatus || o.messageStatus);
+  const ans = normKey(o.vendorAcknowledgement?.status || o.vendorAckStatus || o.acknowledgementStatus || (o.status === 'ACKNOWLEDGED' ? 'ACKNOWLEDGED' : ''));
+  const sent = ['APPROVED', 'ORDERED', 'ACKNOWLEDGED'].includes(o.status);
+  if (!msg && !ans && !sent) return '';
+  const cls = { DELIVERED: 'badge-ok', FAILED: 'badge-err', UNKNOWN: 'badge-warn' };
+  const m = msg
+    ? `<span class="badge ${cls[msg] || ''}" title="Message status">Message: ${escP(MESSAGE_STATES[msg] || msg.toLowerCase().replace(/_/g, ' '))}</span>`
+    : (sent ? '<span class="badge" title="The server did not report a message status for this order">Message: not reported</span>' : '');
+  const a = ans
+    ? `<span class="badge ${ans === 'ACKNOWLEDGED' ? 'badge-ok' : ans === 'REJECTED' ? 'badge-err' : 'badge-warn'}" title="Supplier answer">Supplier: ${escP(ANSWER_STATES[ans] || ans.toLowerCase().replace(/_/g, ' '))}</span>`
+    : (sent ? '<span class="badge" title="No supplier answer recorded">Supplier: no answer recorded</span>' : '');
+  const unknown = msg === 'UNKNOWN'
+    ? '<div role="alert" style="font-size:10px;color:var(--warn);font-weight:700;margin-top:2px">Send result unknown. Investigate before retry: do not resend or switch channel.</div>' : '';
+  return `<div style="display:flex;flex-direction:column;gap:3px;margin-top:4px">${m}${a}${unknown}</div>`;
+}
+
+const FIELD_LABELS = {
+  physicalQuantityBase: 'Physical stock', quarantinedQuantityBase: 'Quarantined', allocatedQuantityBase: 'Allocated to other uses',
+  usableQuantityBase: 'Usable stock', eligibleInboundBase: 'Confirmed inbound', reorderPointBase: 'Reorder point', targetQuantityBase: 'Target stock',
+  rawNeedBase: 'Raw need', suggestedBaseQuantity: 'Suggested (base unit)', suggestedPurchaseQuantity: 'Suggested (purchase unit)',
+  purchaseUnit: 'Purchase unit', packMultiple: 'Pack multiple', minimumOrderQuantity: 'Minimum order', estimatedCostPaisa: 'Estimated cost',
+  contractedPricePaisa: 'Contract rate', safetyStockBase: 'Safety stock', leadTimeDays: 'Lead time (days)', reviewIntervalDays: 'Review interval (days)',
+  dailyDemandBase: 'Expected daily use', vendorName: 'Supplier', shortageDate: 'Expected shortage date',
+};
+const humanize = (k) => FIELD_LABELS[k] || String(k).replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+function fmtField(k, v) {
+  if (v == null || v === '') return '—';
+  if (/Paisa$/.test(k)) return formatPaise(v);
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v)) return new Date(v).toLocaleString('en-IN');
+  if (Array.isArray(v)) return `${v.length} item(s)`;
+  if (typeof v === 'object') return '';
+  return String(v);
+}
+function fieldRows(obj) {
+  return Object.entries(obj || {}).map(([k, v]) => [k, fmtField(k, v)]).filter(([, v]) => v !== '')
+    .map(([k, v]) => `<tr><th scope="row" style="text-align:left;font-weight:600;padding:4px 8px 4px 0;color:var(--mute);white-space:nowrap">${escP(humanize(k))}</th><td style="padding:4px 0">${escP(v)}</td></tr>`).join('');
+}
+function recFreshness(r) {
+  const snap = r.stockSnapshot || {};
+  const stale = r.stale === true || snap.stale === true || /STALE/i.test(String(snap.freshness || r.dataFreshness || r.freshness || ''));
+  const key = Object.keys({ ...snap, ...r }).find((k) => /asOf|computedAt|snapshotAt|lastSync|lastCount|capturedAt/i.test(k));
+  const at = key ? (snap[key] ?? r[key]) : null;
+  return { stale, at: at && !Number.isNaN(Date.parse(at)) ? new Date(at) : null };
+}
+function openWhyQuantityModal(r) {
+  const fr = recFreshness(r);
+  openModal({
+    title: `Why this quantity: ${escP(r.itemSnapshot?.name || r.itemId || '')}`,
+    saveLabel: 'Close',
+    maxWidth: '560px',
+    body: `${fr.stale ? '<div role="alert" class="alert" style="margin-bottom:10px;padding:8px 10px;border:1px solid var(--warn);border-radius:8px;font-size:12px"><b>Stock data is stale.</b> Sales movements may not be synced. Reconcile stock before sending an order.</div>' : ''}
+      <p style="margin:0 0 8px;font-size:12px;color:var(--mute)">${fr.at ? `Stock data as of ${escP(fr.at.toLocaleString('en-IN'))}.` : 'The server did not return a stock-data time for this recommendation.'}</p>
+      ${r.explanation?.summary ? `<p style="margin:0 0 10px;font-size:13px">${escP(r.explanation.summary)}</p>` : ''}
+      <h4 style="margin:8px 0 4px;font-size:12px">Stock position</h4><table style="font-size:12px;border-collapse:collapse">${fieldRows(r.stockSnapshot) || '<tr><td>Not returned by the server.</td></tr>'}</table>
+      <h4 style="margin:10px 0 4px;font-size:12px">Calculation and pack rounding</h4><table style="font-size:12px;border-collapse:collapse">${fieldRows(r.calculation) || '<tr><td>Not returned by the server.</td></tr>'}</table>
+      <h4 style="margin:10px 0 4px;font-size:12px">Supplier</h4><table style="font-size:12px;border-collapse:collapse">${fieldRows(r.supplierCandidate) || '<tr><td>Not returned by the server.</td></tr>'}</table>`,
+    onSave: () => true,
+  });
+}
 
 function formatPaise(paisa) {
   return '₹' + ((paisa || 0) / 100).toLocaleString('en-IN', {
@@ -197,7 +316,8 @@ async function loadProcurementOverview(root) {
       }
     }
   } catch (err) {
-    console.warn('Procurement overview load notice:', err.message);
+    ['#kpi-open-orders','#kpi-open-commitment','#kpi-deliveries-due','#kpi-awaiting-approval'].forEach((q) => { const e = root.querySelector(q); if (e) e.textContent = '—'; });
+    showDataError(root.querySelector('#procurement-action-centre')?.parentElement || root, err?.message);
   }
 }
 
@@ -272,6 +392,18 @@ async function renderActiveTab(root) {
       icon: '↩️',
       desc: 'Rejected dock shipments, damaged lots, return orders and debit notes.',
       actionsHtml: `<button class="btn btn-sm btn-danger" id="btn-child-new-ret" type="button">+ Record Return</button>`
+    },
+    'supplier-matrix': {
+      title: 'Supplier Matrix',
+      icon: '📖',
+      desc: 'Primary supplier, contract cost, pack size and supplier item code for every material.',
+      actionsHtml: ``
+    },
+    'landed-cost': {
+      title: 'Landed Cost',
+      icon: '💸',
+      desc: 'Spread freight, insurance and packaging across the lines of a purchase order.',
+      actionsHtml: ``
     },
     reports: {
       title: 'Reports & Analytics',
@@ -376,6 +508,10 @@ async function renderActiveTab(root) {
     renderExceptionsSubtab(root, inner);
   } else if (activeTab === 'reports') {
     renderReportsSubtab(root, inner);
+  } else if (activeTab === 'supplier-matrix') {
+    await renderSupplierMatrixTab(inner);
+  } else if (activeTab === 'landed-cost') {
+    renderLandedCostTab(inner);
   }
 }
 
@@ -391,6 +527,8 @@ function renderOverviewSubtab(root, container) {
     { id: 'matching', icon: '⚖️', title: 'Invoices & Matching', subtitle: '3-way automated matching (PO vs GRN vs Invoice)', badge: '3-Way Match', badgeType: 'success' },
     { id: 'suppliers', icon: '🏢', title: 'Suppliers Directory', subtitle: 'Supplier profiles, ratings & compliance records', badge: 'Verified', badgeType: 'success' },
     { id: 'exceptions', icon: '↩️', title: 'Returns & Quality', subtitle: 'Defective lots, dock rejections & debit notes', badge: 'Returns', badgeType: '' },
+    { id: 'supplier-matrix', icon: '📖', title: 'Supplier Matrix', subtitle: 'Supplier-to-material mapping, contract cost & Excel import', badge: 'Mapping', badgeType: '' },
+    { id: 'landed-cost', icon: '💸', title: 'Landed Cost', subtitle: 'Distribute freight, insurance & packaging across PO lines', badge: 'Charges', badgeType: '' },
     { id: 'reports', icon: '📈', title: 'Reports & Analytics', subtitle: 'Procurement spend analytics & supplier scorecards', badge: 'Spend View', badgeType: '' },
   ];
 
@@ -430,45 +568,8 @@ function renderOverviewSubtab(root, container) {
         </div>
 
       <div class="card" style="padding:16px;background:var(--surface);display:flex;flex-direction:column;gap:12px;">
-        <h3 style="font-size:14px;font-weight:700;color:var(--ink);margin:0;">Spend By Category (Q3)</h3>
-        <div style="display:flex;flex-direction:column;gap:8px;font-size:12px;">
-          <div>
-            <div style="display:flex;justify-content:space-between;margin-bottom:2px;">
-              <span>Coffee &amp; Green Beans</span>
-              <strong>₹4,85,000 (45%)</strong>
-            </div>
-            <div style="height:6px;background:var(--line);border-radius:3px;overflow:hidden;">
-              <div style="width:45%;height:100%;background:var(--accent);"></div>
-            </div>
-          </div>
-          <div>
-            <div style="display:flex;justify-content:space-between;margin-bottom:2px;">
-              <span>Dairy &amp; Plant Milk</span>
-              <strong>₹2,90,000 (27%)</strong>
-            </div>
-            <div style="height:6px;background:var(--line);border-radius:3px;overflow:hidden;">
-              <div style="width:27%;height:100%;background:#38bdf8;"></div>
-            </div>
-          </div>
-          <div>
-            <div style="display:flex;justify-content:space-between;margin-bottom:2px;">
-              <span>Bakery &amp; Viennoiserie Inputs</span>
-              <strong>₹1,80,000 (17%)</strong>
-            </div>
-            <div style="height:6px;background:var(--line);border-radius:3px;overflow:hidden;">
-              <div style="width:17%;height:100%;background:#34d399;"></div>
-            </div>
-          </div>
-          <div>
-            <div style="display:flex;justify-content:space-between;margin-bottom:2px;">
-              <span>Packaging &amp; Disposables</span>
-              <strong>₹1,20,000 (11%)</strong>
-            </div>
-            <div style="height:6px;background:var(--line);border-radius:3px;overflow:hidden;">
-              <div style="width:11%;height:100%;background:#fbbf24;"></div>
-            </div>
-          </div>
-        </div>
+        <h3 style="font-size:14px;font-weight:700;color:var(--ink);margin:0;">Committed spend by supplier</h3>
+        <div id="overview-spend-card" aria-live="polite">${skeleton('140px')}</div>
       </div>
     </div>
   `;
@@ -481,6 +582,7 @@ function renderOverviewSubtab(root, container) {
 
   root.querySelector('#view-proc-health-btn')?.addEventListener('click', () => openHealthModal(root));
   loadOrdersForOverview(root);
+  loadSpendBySupplier(root);
 }
 
 async function loadOrdersForOverview(root) {
@@ -519,8 +621,8 @@ async function loadOrdersForOverview(root) {
     `;
   } catch (err) {
     el.innerHTML = `
-      <div style="padding:24px;text-align:center;color:var(--muted);font-size:13px;">
-        No purchase orders found for the selected scope.
+      <div role="alert" style="padding:24px;text-align:center;color:var(--err);font-size:13px;">
+        Purchase orders could not be loaded (${escP(err?.message || 'request failed')}).
       </div>
     `;
   }
@@ -608,6 +710,7 @@ async function openReplenishmentReviewModal(root) {
                   <td><strong>${formatPaise(r.calculation?.estimatedCostPaisa || 0)}</strong></td>
                   <td style="text-align:center;">
                     <div style="display:inline-flex;gap:4px;">
+                      <button class="btn btn-sm btn-ghost" data-why-rec="${r.recommendationId}" style="padding:2px 6px;font-size:10px;" title="Why this quantity">Why?</button>
                       <button class="btn btn-sm btn-ghost" data-defer-rec="${r.recommendationId}" style="padding:2px 6px;font-size:10px;" title="Defer purchasing">⏳ Defer</button>
                       <button class="btn btn-sm btn-ghost" data-alt-rec="${r.recommendationId}" style="padding:2px 6px;font-size:10px;" title="Request alternative vendor">🔄 Alt</button>
                       <button class="btn btn-sm btn-ghost" data-reject-rec="${r.recommendationId}" style="padding:2px 6px;font-size:10px;color:var(--coral);" title="Reject recommendation">❌ Reject</button>
@@ -622,7 +725,17 @@ async function openReplenishmentReviewModal(root) {
     }
 
     html += `</div>`;
+    const staleCount = recs.filter((r) => recFreshness(r).stale).length;
+    if (staleCount) {
+      html = `<div role="alert" style="margin-bottom:12px;padding:8px 10px;border:1px solid var(--warn);border-radius:8px;font-size:12px"><b>Stale stock data on ${staleCount} recommendation(s).</b> Sales movements may not be synced. Reconcile before sending orders.</div>` + html;
+    }
     container.innerHTML = html;
+    container.querySelectorAll('[data-why-rec]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const r = recs.find((x) => x.recommendationId === btn.dataset.whyRec);
+        if (r) openWhyQuantityModal(r);
+      });
+    });
 
     container.querySelectorAll('[data-convert-group]').forEach((btn) => {
       btn.addEventListener('click', async () => {
@@ -645,11 +758,11 @@ async function openReplenishmentReviewModal(root) {
     container.querySelectorAll('[data-defer-rec]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const recId = btn.dataset.deferRec;
-        const days = prompt('Enter number of days to defer this purchase recommendation (e.g. 1, 2, 7):', '1');
-        if (!days) return;
-        const until = new Date();
-        until.setDate(until.getDate() + parseInt(days, 10));
-        const reason = prompt('Enter reason for deferring:', 'Awaiting consumption trend');
+        const untilStr = await askText({ title: 'Defer this recommendation', label: 'Defer until', type: 'datetime-local', okLabel: 'Defer', validate: (v) => (new Date(v) > new Date() ? '' : 'Choose a time in the future.') });
+        if (!untilStr) return;
+        const until = new Date(untilStr);
+        const reason = await askText({ title: 'Reason for deferring', label: 'Reason', placeholder: 'e.g. Awaiting consumption trend' });
+        if (reason === null) return;
         try {
           await apiPost(`/procurement/recommendations/${recId}/defer`, { deferredUntil: until.toISOString(), deferReason: reason || 'Deferred by manager' });
           showToast(`Recommendation deferred until ${until.toISOString().slice(0, 10)}`, 'mint');
@@ -663,11 +776,8 @@ async function openReplenishmentReviewModal(root) {
     container.querySelectorAll('[data-reject-rec]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const recId = btn.dataset.rejectRec;
-        const reason = prompt('Enter reason for rejecting this replenishment recommendation:');
-        if (!reason) {
-          showToast('A rejection reason is mandatory.', 'amber');
-          return;
-        }
+        const reason = await askText({ title: 'Reject this recommendation', label: 'Reason (required)', okLabel: 'Reject' });
+        if (!reason) return;
         try {
           await apiPost(`/procurement/recommendations/${recId}/reject`, { reason });
           showToast('Recommendation rejected.', 'mint');
@@ -681,7 +791,7 @@ async function openReplenishmentReviewModal(root) {
     container.querySelectorAll('[data-alt-rec]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const recId = btn.dataset.altRec;
-        const reason = prompt('Enter reason for requesting an alternative supplier:', 'Supplier unavailable or rate unsuitable');
+        const reason = await askText({ title: 'Request an alternative supplier', label: 'Reason (required)', placeholder: 'e.g. Supplier unavailable or rate unsuitable', okLabel: 'Request alternative' });
         if (!reason) return;
         try {
           const altRes = await apiPost(`/procurement/recommendations/${recId}/request-alternative`, { reason });
@@ -723,6 +833,8 @@ async function renderOrdersSubtab(root, container) {
           <button class="btn btn-sm btn-primary" id="btn-review-replenishment-recs" style="font-size:12px;display:flex;align-items:center;gap:6px;font-weight:700;" type="button">
             <span>📥</span> Replenishment Recommendations
           </button>
+          <span id="bulk-hint" style="font-size:11px;color:var(--mute)"></span>
+          <button class="btn btn-sm btn-secondary" id="btn-bulk-approve" style="font-size:12px;" type="button" disabled>Approve and send selected</button>
           <button class="btn btn-sm btn-ghost" id="refresh-orders-btn" style="font-size:12px;" type="button">🔄 Refresh</button>
         </div>
       </div>
@@ -761,13 +873,9 @@ async function loadOrdersSubtabData(root) {
 }
 
 function downloadOrderBill(poId) {
-  const downloadUrl = `/api/v1/procurement/orders/${poId}/download-receipt-bill`;
-  const a = document.createElement('a');
-  a.href = downloadUrl;
-  a.target = '_blank';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  // The server has no download route for the vendor bill file yet; say so rather than
+  // opening a link that returns an error page.
+  showToast(`The vendor bill file for ${poId} cannot be downloaded yet — the server does not provide that file route.`, 'amber');
 }
 
 async function executeMasterApprove(root, poId) {
@@ -812,6 +920,7 @@ function renderFilteredOrders(root) {
     <table class="glass-table" style="width:100%;font-size:12px;">
       <thead>
         <tr>
+          <th style="width:28px"><span class="sr-only">Select</span></th>
           <th>PO Number</th>
           <th>Supplier</th>
           <th>Café</th>
@@ -839,6 +948,7 @@ function renderFilteredOrders(root) {
 
           return `
           <tr data-po-row="${o.purchaseOrderId}">
+            <td>${['DRAFT', 'SUBMITTED', 'ESCALATED_PENDING_MASTER'].includes(o.status) ? `<input type="checkbox" data-bulk-po="${escP(o.purchaseOrderId)}" aria-label="Select ${escP(o.purchaseOrderId)} for bulk approval">` : ''}</td>
             <td style="font-family:var(--font-mono);font-weight:700;color:var(--ink);">
               ${o.purchaseOrderId}
               ${o.timingType ? `<div style="font-size:9.5px;color:var(--muted);font-weight:normal;">${o.timingType}</div>` : ''}
@@ -848,6 +958,7 @@ function renderFilteredOrders(root) {
             <td>${deliveryBadge}</td>
             <td>
               <div>${renderStatusPill(o.status)}</div>
+              ${renderDispatchChips(o)}
               <div style="display:flex;flex-direction:column;gap:2px;margin-top:4px;">
                 ${(o.editCountBeforeApproval || 0) > 0 ? `
                   <span class="badge" style="background:rgba(59,130,246,0.12);color:#2563eb;font-size:9px;" title="Edits made before Master approval">
@@ -903,6 +1014,33 @@ function renderFilteredOrders(root) {
     </table>
   `;
 
+  const bulkBtn = root.querySelector('#btn-bulk-approve');
+  const bulkHint = root.querySelector('#bulk-hint');
+  const selectedIds = () => [...wrap.querySelectorAll('[data-bulk-po]:checked')].map((c) => c.dataset.bulkPo);
+  const syncBulk = () => {
+    const n = selectedIds().length;
+    if (bulkBtn) { bulkBtn.disabled = n === 0; bulkBtn.textContent = n ? `Approve and send selected (${n})` : 'Approve and send selected'; }
+    if (bulkHint) bulkHint.textContent = n ? '' : 'Tick orders that are waiting for approval to approve them together.';
+  };
+  wrap.querySelectorAll('[data-bulk-po]').forEach((cb) => cb.addEventListener('change', syncBulk));
+  syncBulk();
+  if (bulkBtn) {
+    bulkBtn.onclick = () => {
+      const items = selectedIds().map((id) => {
+        const po = cachedOrders.find((x) => x.purchaseOrderId === id) || {};
+        return { id, rev: po.currentRevision || 1, label: `${id} · ${po.vendorName || po.vendorId || 'Supplier'}`, detail: `Revision ${po.currentRevision || 1} · ${formatPaise(po.totalAmountPaisa)} · ${po.cafeId || 'cafe'}` };
+      });
+      openBulkPreview({
+        title: 'Approve and send selected orders',
+        intro: 'Each order is approved at its current revision and queued for its own supplier.',
+        items,
+        confirmLabel: 'Approve and send',
+        run: (it) => apiPost(`/procurement/orders/${it.id}/approve-and-send`, { revisionNumber: it.rev, notes: 'Bulk approval' }),
+        onDone: async () => { await loadOrdersSubtabData(root); await loadProcurementOverview(root); },
+      });
+    };
+  }
+
   wrap.querySelectorAll('[data-view-po]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const po = cachedOrders.find((x) => x.purchaseOrderId === btn.dataset.viewPo);
@@ -947,7 +1085,7 @@ function renderFilteredOrders(root) {
     btn.addEventListener('click', async () => {
       const poId = btn.dataset.p07Approve;
       const revNum = parseInt(btn.dataset.poRev || '1', 10);
-      const notes = prompt(`Approve and dispatch Purchase Order ${poId} (Rev ${revNum})? Optional notes:`, 'Approved by operations manager');
+      const notes = await askText({ title: `Approve and send ${poId} (revision ${revNum})`, label: 'Notes (optional)', required: false, okLabel: 'Approve and send' });
       if (notes === null) return;
       try {
         btn.disabled = true;
@@ -970,11 +1108,10 @@ function renderFilteredOrders(root) {
   wrap.querySelectorAll('[data-p07-vendor-ack]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const poId = btn.dataset.p07VendorAck;
-      const status = prompt('Select supplier response:\n1 = ACKNOWLEDGED\n2 = PARTIALLY_CONFIRMED\n3 = REJECTED\n4 = NO_RESPONSE', '1');
-      if (!status) return;
-      const statusMap = { '1': 'ACKNOWLEDGED', '2': 'PARTIALLY_CONFIRMED', '3': 'REJECTED', '4': 'NO_RESPONSE' };
-      const selectedResp = statusMap[status.trim()] || status.trim().toUpperCase();
-      const notes = prompt('Enter supplier communication notes/reference:');
+      const answer = await askSupplierResponse(poId);
+      if (!answer) return;
+      const selectedResp = answer.status;
+      const notes = answer.notes;
       try {
         await apiPost(`/procurement/orders/${poId}/vendor-acknowledgement`, {
           status: selectedResp,
@@ -1179,27 +1316,7 @@ async function renderRfqsSubtab(root, container) {
   } catch (err) {
     const wrap = root.querySelector('#rfq-table-wrap');
     if (wrap) {
-      const sampleRFQs = [
-        { rfqId: 'RFQ-2024-001', title: 'Coffee Beans Q3 Procurement', invitedVendorsCount: 4, responsesCount: 3, deadline: '25-Aug-2024', status: 'AWARDED', lowestQuotationPaise: 18500000 },
-        { rfqId: 'RFQ-2024-002', title: 'Dairy & Milk Monthly Supply', invitedVendorsCount: 3, responsesCount: 2, deadline: '28-Aug-2024', status: 'OPEN', lowestQuotationPaise: 9200000 },
-        { rfqId: 'RFQ-2024-003', title: 'Packaging Materials Bulk', invitedVendorsCount: 5, responsesCount: 5, deadline: '22-Aug-2024', status: 'CLOSED', lowestQuotationPaise: 6800000 },
-      ];
-      wrap.innerHTML = `
-        <table class="glass-table" style="width:100%;font-size:12px;">
-          <thead><tr>
-            <th>RFQ ID</th><th>Title</th><th>Invited Suppliers</th><th>Responses</th><th>Deadline</th><th>Status</th><th style="text-align:right;">Lowest Quote</th>
-          </tr></thead>
-          <tbody>${sampleRFQs.map(r => `
-            <tr>
-              <td style="font-family:var(--font-mono);font-weight:700;">${r.rfqId}</td>
-              <td><strong>${r.title}</strong></td>
-              <td>${r.invitedVendorsCount} Suppliers</td>
-              <td><span class="badge success" style="font-size:10px;">${r.responsesCount} Received</span></td>
-              <td style="color:var(--muted);">${r.deadline}</td>
-              <td>${renderStatusPill(r.status)}</td>
-              <td style="text-align:right;font-weight:700;color:var(--accent);">${formatPaise(r.lowestQuotationPaise)}</td>
-            </tr>`).join('')}</tbody>
-        </table>`;
+      wrap.innerHTML = `<div style="padding:24px;text-align:center;color:var(--err,#b91c1c);font-size:13px;">Quotation requests could not be loaded${err?.message ? ": " + String(err.message).replace(/[<>&]/g, "") : ""}.</div>`;
     }
   }
 }
@@ -1447,8 +1564,7 @@ function renderExceptionsSubtab(root, container) {
       <h3 style="font-size:14px;font-weight:700;color:var(--ink);margin:0 0 12px 0;">Returns to Vendor (RTV) &amp; Quality Holds</h3>
       ${cachedReturns.length === 0 ? `
         <div style="text-align:center;padding:32px;color:var(--muted);font-size:13px;">
-          <span style="font-size:24px;display:block;margin-bottom:6px;">✨</span>
-          Zero active return exceptions or quality hold quarantines across all active cafés.
+          <span class="badge">Not connected</span><br>No return list is loaded: the server does not provide return-to-vendor records yet, so this screen cannot say there are none.
         </div>
       ` : `
         <table class="glass-table" style="width:100%;font-size:12px;">
@@ -3125,175 +3241,95 @@ function openReplacePoDocumentModal(po, documentId, onReplaced) {
   });
 }
 
-function renderSuppliersSubtab(root, container) {
-  // Render from API-populated cachedSuppliers; empty state when none loaded yet
-  const suppliers = cachedSuppliers;
-
-  container.innerHTML = `
-    <div class="card" style="padding:16px;background:var(--surface);">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-        <div>
-          <h3 style="font-size:14px;font-weight:700;color:var(--ink);margin:0;">Approved Suppliers &amp; Vendors Directory</h3>
-          <p style="font-size:11px;color:var(--muted);margin:2px 0 0 0;">Commercial partners, GSTIN compliance, and operational ratings</p>
-        </div>
-      </div>
-      <table class="glass-table" style="width:100%;font-size:12px;">
-        <thead>
-          <tr>
-            <th>Vendor ID</th>
-            <th>Legal Name</th>
-            <th>Approved Category</th>
-            <th>GSTIN</th>
-            <th>Payment Terms</th>
-            <th>On-Time Delivery</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${suppliers.map((s) => `
-            <tr>
-              <td style="font-family:var(--font-mono);font-weight:700;">${s.id}</td>
-              <td><strong>${s.name}</strong></td>
-              <td style="color:var(--muted);">${s.category}</td>
-              <td style="font-family:var(--font-mono);">${s.gstin}</td>
-              <td>${s.paymentTerms}</td>
-              <td><span class="badge success" style="font-size:10px;">${s.performance}</span></td>
-              <td><span class="badge success" style="font-size:10px;">${s.status}</span></td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    </div>
-  `;
+async function renderSuppliersSubtab(root, container) {
+  container.innerHTML = `<div class="card" style="padding:16px;background:var(--surface)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap">
+      <div><h3 style="font-size:14px;font-weight:700;color:var(--ink);margin:0">Suppliers directory</h3>
+      <p style="font-size:11px;color:var(--mute);margin:2px 0 0">Read from Vendors &amp; Catalogue. Register or edit a supplier there.</p></div>
+      <button class="btn btn-sm btn-secondary" id="proc-open-vendors" type="button">Open Vendors &amp; Catalogue</button>
+    </div><div id="proc-suppliers-body" aria-live="polite">${skeleton('180px')}</div></div>`;
+  container.querySelector('#proc-open-vendors')?.addEventListener('click', () => navigate('vendors'));
+  const body = () => container.querySelector('#proc-suppliers-body');
+  try {
+    const res = await apiGet('/vendors');
+    const list = res?.data?.vendors || (Array.isArray(res?.data) ? res.data : []);
+    cachedSuppliers = list;
+    if (!body()) return;
+    if (!list.length) { body().innerHTML = '<div style="padding:24px;text-align:center;color:var(--mute)">No suppliers registered for your scope.</div>'; return; }
+    body().innerHTML = `<table class="glass-table" style="width:100%;font-size:12px"><thead><tr><th>Vendor ID</th><th>Name</th><th>Category</th><th>GSTIN</th><th>Payment terms</th><th>Status</th></tr></thead><tbody>
+      ${list.map((v) => `<tr><td style="font-family:var(--font-mono);font-weight:700">${escP(v.vendorId || v.id || '—')}</td><td><strong>${escP(v.name || v.legalBusinessName || v.tradeName || '—')}</strong></td><td style="color:var(--mute)">${escP(v.category || '—')}</td><td style="font-family:var(--font-mono)">${escP(v.gstNumber || v.gstin || '—')}</td><td>${escP(v.paymentTerms || '—')}</td><td><span class="badge">${escP(v.status || '—')}</span></td></tr>`).join('')}
+    </tbody></table>`;
+  } catch (err) {
+    if (body()) body().innerHTML = `<div role="alert" style="color:var(--err);font-size:13px">Suppliers could not be loaded: ${escP(err?.message || 'request failed')}</div>`;
+  }
 }
 
-function renderReportsSubtab(root, container) {
-  container.innerHTML = `
-    <div class="card" style="padding:16px;background:var(--surface);display:flex;flex-direction:column;gap:14px;">
-      <h3 style="font-size:14px;font-weight:700;color:var(--ink);margin:0;">Procurement Period &amp; Spend Intelligence</h3>
-
-      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:10px;">
-        <div class="card" style="padding:12px;background:var(--surface-sunken);">
-          <span style="font-size:11px;color:var(--muted);display:block;">FY 2026-27 YTD Spend</span>
-          <strong style="font-size:18px;color:var(--ink);display:block;margin-top:2px;">₹14,85,000</strong>
-          <span style="font-size:10px;color:var(--mint, #10b981);">98.4% on contract pricing</span>
-        </div>
-        <div class="card" style="padding:12px;background:var(--surface-sunken);">
-          <span style="font-size:11px;color:var(--muted);display:block;">Average Procure-to-Order</span>
-          <strong style="font-size:18px;color:var(--ink);display:block;margin-top:2px;">4.2 Hours</strong>
-          <span style="font-size:10px;color:var(--muted);">Requisition to PO issuance</span>
-        </div>
-        <div class="card" style="padding:12px;background:var(--surface-sunken);">
-          <span style="font-size:11px;color:var(--muted);display:block;">Touchless Procurement</span>
-          <strong style="font-size:18px;color:var(--ink);display:block;margin-top:2px;">92.8%</strong>
-          <span style="font-size:10px;color:var(--muted);">Zero manual match exception</span>
-        </div>
-        <div class="card" style="padding:12px;background:var(--surface-sunken);">
-          <span style="font-size:11px;color:var(--muted);display:block;">Supplier On-Time Rate</span>
-          <strong style="font-size:18px;color:var(--accent);display:block;margin-top:2px;">97.2%</strong>
-          <span style="font-size:10px;color:var(--muted);">Against promised delivery</span>
-        </div>
-      </div>
-    </div>
-  `;
+async function renderReportsSubtab(root, container) {
+  container.innerHTML = `<div class="card" style="padding:16px;background:var(--surface)"><h3 style="font-size:14px;font-weight:700;color:var(--ink);margin:0 0 12px">Procurement spend summary</h3><div id="proc-report-body" aria-live="polite">${skeleton('160px')}</div></div>`;
+  const body = () => container.querySelector('#proc-report-body');
+  try {
+    const orders = poList(await apiGet('/procurement/orders'));
+    const live = orders.filter((o) => o.status !== 'CANCELLED');
+    const total = live.reduce((t, o) => t + (o.totalAmountPaisa || 0), 0);
+    const received = live.filter((o) => ['RECEIVED', 'CLOSED'].includes(o.status)).length;
+    const bySupplier = new Map();
+    live.forEach((o) => { const k = o.vendorName || o.vendorId || 'Unknown supplier'; bySupplier.set(k, (bySupplier.get(k) || 0) + (o.totalAmountPaisa || 0)); });
+    const top = [...bySupplier.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (!body()) return;
+    if (!orders.length) { body().innerHTML = '<div style="padding:24px;text-align:center;color:var(--mute)">No purchase orders in your scope yet.</div>'; return; }
+    const tile = (l, v, n) => `<div class="card" style="padding:12px;background:var(--surface-sunken)"><span style="font-size:11px;color:var(--mute);display:block">${l}</span><strong style="font-size:18px;color:var(--ink);display:block;margin-top:2px">${v}</strong><span style="font-size:10px;color:var(--mute)">${n}</span></div>`;
+    body().innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
+      ${tile('Committed value (not cancelled)', formatPaise(total), `${live.length} order(s)`)}
+      ${tile('Received or closed', `${received} of ${live.length}`, 'Orders fully received')}
+      ${tile('Largest supplier by value', escP(top ? top[0] : '—'), top ? formatPaise(top[1]) : 'No orders')}
+    </div><p style="margin:12px 0 0;font-size:11px;color:var(--mute)">Computed from the orders the server returned. For period reports with PDF or XLSX export, open Reports &amp; Analytics.</p>`;
+  } catch (err) {
+    if (body()) body().innerHTML = `<div role="alert" style="color:var(--err);font-size:13px">Spend summary could not be loaded: ${escP(err?.message || 'request failed')}</div>`;
+  }
 }
 
-function openHealthModal(root) {
-  const modalHtml = `
-    <div style="display:flex;flex-direction:column;gap:14px;width:100%;max-width:540px;">
-      <h2 style="font-size:16px;font-weight:800;color:var(--ink);margin:0;">Procurement Subsystem Health</h2>
-      <p style="font-size:12px;color:var(--muted);margin:-8px 0 0 0;">Real-time operational control &amp; compliance status</p>
-
-      <div style="display:flex;flex-direction:column;gap:6px;font-size:12px;">
-        ${[
-          { label: 'Purchase Requests Pending Approval', count: '0 Pending', status: 'PASS' },
-          { label: 'Active RFQs & Competitive Quotes', count: '1 Active', status: 'PASS' },
-          { label: 'POs Awaiting Acknowledgement', count: '0 Overdue', status: 'PASS' },
-          { label: 'Inbound Shipments Overdue', count: '0 Delayed', status: 'PASS' },
-          { label: 'Partially Received PO Deliveries', count: '0 Pending', status: 'PASS' },
-          { label: '3-Way Match Exceptions', count: '0 Exceptions', status: 'PASS' },
-          { label: 'Open Vendor Returns & RTV', count: '0 Open', status: 'PASS' },
-          { label: 'Received Not Invoiced (RNI)', count: '1 In Progress', status: 'PASS' },
-          { label: 'Supplier Document Compliance (FSSAI/GST)', count: '100% Compliant', status: 'PASS' },
-        ].map((h) => `
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:var(--surface-sunken);border-radius:4px;">
-            <span>${h.label}</span>
-            <div style="display:flex;align-items:center;gap:6px;">
-              <span style="font-weight:700;color:var(--ink);">${h.count}</span>
-              <span class="badge success" style="font-size:9px;">${h.status}</span>
-            </div>
-          </div>
-        `).join('')}
-      </div>
-
-      <div style="display:flex;justify-content:flex-end;margin-top:10px;">
-        <button class="btn btn-ghost" id="modal-health-close" style="font-size:12px;" type="button">Close</button>
-      </div>
-    </div>
-  `;
-
-  openModal(modalHtml);
-  document.getElementById('modal-health-close')?.addEventListener('click', closeModal);
+async function openHealthModal(root) {
+  openModal({
+    title: 'Procurement health',
+    saveLabel: 'Close',
+    maxWidth: '560px',
+    body: `<div id="proc-health-body" aria-live="polite">${skeleton('180px')}</div>`,
+    onSave: () => true,
+  });
+  const host = () => document.getElementById('proc-health-body');
+  try {
+    const [ordersRes, rfqRes, matchRes] = await Promise.all([
+      apiGet('/procurement/orders'),
+      apiGet('/procurement/rfqs').catch(() => null),
+      apiGet('/procurement/matching').catch(() => null),
+    ]);
+    const orders = poList(ordersRes);
+    const rfqs = rfqRes?.data?.rfqs || (Array.isArray(rfqRes?.data) ? rfqRes.data : null);
+    const matches = matchRes?.data?.recentMatches || null;
+    const count = (fn) => orders.filter(fn).length;
+    const rows = [
+      { label: 'Orders awaiting approval', n: count((o) => ['SUBMITTED', 'ESCALATED_PENDING_MASTER', 'VERIFIED_PENDING_MASTER_APPROVAL'].includes(o.status)) },
+      { label: 'Orders sent, no supplier answer recorded', n: count((o) => o.status === 'ORDERED') },
+      { label: 'Partly received orders', n: count((o) => o.status === 'PARTIALLY_RECEIVED') },
+      { label: 'Orders changed after approval (re-approval needed)', n: count((o) => o.needsReapproval || (o.editCountAfterApproval || 0) > 0) },
+    ];
+    if (rfqs) rows.push({ label: 'Open sourcing rounds (RFQ)', n: rfqs.filter((r) => ['OPEN', 'EVALUATION'].includes(r.status)).length });
+    if (matches) rows.push({ label: 'Invoice matches with a mismatch', n: matches.filter((m) => m.matchStatus === 'MISMATCH').length });
+    if (!host()) return;
+    host().innerHTML = `<p style="margin:0 0 10px;font-size:12px;color:var(--mute)">Counted from the ${orders.length} order(s) the server returned for your scope. Figures the server does not provide are not shown.</p>
+      <ul class="list" style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px">${rows.map((r) => `<li style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:var(--surface-sunken);border-radius:8px;font-size:12px"><span>${escP(r.label)}</span><span><strong>${r.n}</strong> <span class="badge ${r.n ? 'badge-warn' : 'badge-ok'}">${r.n ? 'Needs attention' : 'Clear'}</span></span></li>`).join('')}</ul>`;
+  } catch (err) {
+    if (host()) host().innerHTML = `<div role="alert" style="color:var(--err);font-size:13px">Health could not be loaded: ${escP(err?.message || 'request failed')}</div>`;
+  }
 }
 
 function openNewBlanketAgreementModal(root) {
-  const modalHtml = `
-    <div style="display:flex;flex-direction:column;gap:14px;width:100%;max-width:520px;">
-      <h2 style="font-size:16px;font-weight:800;color:var(--ink);margin:0;">Create Blanket Purchase Agreement</h2>
-      <p style="font-size:12px;color:var(--muted);margin:-8px 0 0 0;">Establish long-term supply contract with pre-locked rates</p>
-
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-        <div>
-          <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px;">Vendor ID *</label>
-          <input type="text" id="modal-bpa-vendor" class="input" style="font-size:12px;width:100%;" value="VEND-0001">
-        </div>
-        <div>
-          <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px;">Annual Commitment (₹) *</label>
-          <input type="number" id="modal-bpa-amount" class="input" style="font-size:12px;width:100%;" value="1200000">
-        </div>
-      </div>
-
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-        <div>
-          <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px;">Valid From *</label>
-          <input type="date" id="modal-bpa-from" class="input" style="font-size:12px;width:100%;" value="${new Date().toISOString().split('T')[0]}">
-        </div>
-        <div>
-          <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px;">Valid Until *</label>
-          <input type="date" id="modal-bpa-to" class="input" style="font-size:12px;width:100%;" value="${new Date(Date.now() + 86400000 * 365).toISOString().split('T')[0]}">
-        </div>
-      </div>
-
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;">
-        <button class="btn btn-ghost" id="modal-bpa-cancel" style="font-size:12px;" type="button">Cancel</button>
-        <button class="btn btn-primary" id="modal-bpa-submit" style="font-size:12px;font-weight:700;" type="button">Create Agreement</button>
-      </div>
-    </div>
-  `;
-
-  openModal(modalHtml);
-  document.getElementById('modal-bpa-cancel')?.addEventListener('click', closeModal);
-  document.getElementById('modal-bpa-submit')?.addEventListener('click', async () => {
-    const vendorId = document.getElementById('modal-bpa-vendor')?.value;
-    const amount = Number(document.getElementById('modal-bpa-amount')?.value);
-    const validTo = document.getElementById('modal-bpa-to')?.value || '2027-03-31';
-    if (!vendorId || !amount) {
-      showToast('Please fill all mandatory fields.', 'coral');
-      return;
-    }
-    const newId = `BPA-2026-00${cachedAgreements.length + 1}`;
-    cachedAgreements.unshift({
-      id: newId,
-      supplier: vendorId,
-      category: 'Contract Supply',
-      validTo,
-      totalLimit: amount * 100,
-      released: 0
-    });
-    showToast(`Blanket Agreement ${newId} created with ${vendorId} for ₹${amount.toLocaleString('en-IN')}`, 'mint');
-    closeModal();
-    const inner = document.querySelector('#proc-submodule-inner-content');
-    if (inner) renderAgreementsSubtab(root, inner);
+  openModal({
+    title: 'Blanket agreement',
+    saveLabel: 'Close',
+    maxWidth: '480px',
+    body: `<p style="margin:0;font-size:13px"><span class="badge">Not connected</span> The server has no route to create a blanket purchase agreement yet, so nothing is created here. Contract rates are managed in Catalogue &amp; Pricing and the Supplier Matrix.</p>`,
+    onSave: () => true,
   });
 }
 
@@ -3523,128 +3559,22 @@ function openDirectGrnModal(root) {
 }
 
 function openAddSupplierModal(root) {
-  const modalHtml = `
-    <div style="display:flex;flex-direction:column;gap:14px;width:100%;max-width:520px;">
-      <h2 style="font-size:16px;font-weight:800;color:var(--ink);margin:0;">Register Approved Supplier</h2>
-      <p style="font-size:12px;color:var(--muted);margin:-8px 0 0 0;">Add new vendor to commercial supply master</p>
-
-      <div class="form-group">
-        <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px;">Legal Entity Name *</label>
-        <input type="text" id="modal-supp-name" class="input" style="font-size:12px;width:100%;" placeholder="e.g. Coorg Plantation Roast Labs LLP">
-      </div>
-
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-        <div>
-          <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px;">GSTIN *</label>
-          <input type="text" id="modal-supp-gst" class="input" style="font-size:12px;width:100%;" placeholder="32AAAAA0000A1Z5">
-        </div>
-        <div>
-          <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px;">Category</label>
-          <select id="modal-supp-cat" class="select" style="font-size:12px;width:100%;">
-            <option value="BEANS">Coffee Beans &amp; Roasts</option>
-            <option value="DAIRY">Dairy &amp; Milk</option>
-            <option value="PACKAGING">Packaging &amp; Disposables</option>
-            <option value="BAKERY">Bakery Ingredients</option>
-          </select>
-        </div>
-      </div>
-
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;">
-        <button class="btn btn-ghost" id="modal-supp-cancel" style="font-size:12px;" type="button">Cancel</button>
-        <button class="btn btn-primary" id="modal-supp-submit" style="font-size:12px;font-weight:700;" type="button">Save Supplier</button>
-      </div>
-    </div>
-  `;
-
-  openModal(modalHtml);
-  document.getElementById('modal-supp-cancel')?.addEventListener('click', closeModal);
-  document.getElementById('modal-supp-submit')?.addEventListener('click', async () => {
-    const name = document.getElementById('modal-supp-name')?.value;
-    const gst = document.getElementById('modal-supp-gst')?.value;
-    const cat = document.getElementById('modal-supp-cat')?.value || 'BEANS';
-    if (!name) {
-      showToast('Supplier legal name is required.', 'coral');
-      return;
-    }
-    const catNames = {
-      BEANS: 'Coffee Beans & Roasts',
-      DAIRY: 'Dairy & Milk',
-      PACKAGING: 'Packaging & Disposables',
-      BAKERY: 'Bakery Ingredients'
-    };
-    const newId = `VEND-000${cachedSuppliers.length + 1}`;
-    cachedSuppliers.unshift({
-      id: newId,
-      name,
-      category: catNames[cat] || cat,
-      gstin: gst || '32AABCT' + Math.floor(1000 + Math.random() * 9000) + 'L1ZV',
-      paymentTerms: 'Net 30',
-      performance: '100% On-Time',
-      status: 'ACTIVE'
-    });
-    showToast(`Supplier "${name}" (${newId}) registered and sent for onboarding compliance review.`, 'mint');
-    closeModal();
-    const inner = document.querySelector('#proc-submodule-inner-content');
-    if (inner) renderSuppliersSubtab(root, inner);
+  openModal({
+    title: 'Register an approved supplier',
+    saveLabel: 'Open Vendors & Catalogue',
+    maxWidth: '480px',
+    body: `<p style="margin:0;font-size:13px">Suppliers are registered in <b>Vendors &amp; Catalogue</b>, where GSTIN, bank details and compliance checks are validated by the server. Nothing is saved from this screen.</p>`,
+    onSave: () => { navigate('vendors'); return true; },
   });
 }
 
 function openNewReturnModal(root) {
-  const modalHtml = `
-    <div style="display:flex;flex-direction:column;gap:14px;width:100%;max-width:500px;">
-      <h2 style="font-size:16px;font-weight:800;color:var(--ink);margin:0;">Record Return to Vendor (RTV)</h2>
-      <p style="font-size:12px;color:var(--muted);margin:-8px 0 0 0;">Create debit note &amp; return authorization for non-compliant items</p>
-
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-        <div>
-          <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px;">PO / GRN Number *</label>
-          <input type="text" id="modal-rtv-ref" class="input" style="font-size:12px;width:100%;" value="GRN-2026-0012">
-        </div>
-        <div>
-          <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px;">Defect Reason</label>
-          <select id="modal-rtv-reason" class="select" style="font-size:12px;width:100%;">
-            <option value="DAMAGED">Damaged in Transit</option>
-            <option value="EXPIRY">Near Expiry / Expired Lot</option>
-            <option value="WRONG_SPEC">Wrong SKU / Specification</option>
-            <option value="QUALITY">Failed QC Cupping / Moisture</option>
-          </select>
-        </div>
-      </div>
-
-      <div>
-        <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px;">Return Notes &amp; Debit Note Value</label>
-        <textarea id="modal-rtv-notes" class="input" style="font-size:12px;width:100%;height:60px;resize:none;" placeholder="Description of rejection and requested debit adjustment..."></textarea>
-      </div>
-
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;">
-        <button class="btn btn-ghost" id="modal-rtv-cancel" style="font-size:12px;" type="button">Cancel</button>
-        <button class="btn btn-danger" id="modal-rtv-submit" style="font-size:12px;font-weight:700;" type="button">Issue Return Notice</button>
-      </div>
-    </div>
-  `;
-
-  openModal(modalHtml);
-  document.getElementById('modal-rtv-cancel')?.addEventListener('click', closeModal);
-  document.getElementById('modal-rtv-submit')?.addEventListener('click', async () => {
-    const ref = document.getElementById('modal-rtv-ref')?.value || 'GRN-2026-0012';
-    const reasonSelect = document.getElementById('modal-rtv-reason');
-    const reasonText = reasonSelect?.options[reasonSelect.selectedIndex]?.text || 'Damaged in Transit';
-
-    const newId = `RTV-2026-00${cachedReturns.length + 1}`;
-    cachedReturns.unshift({
-      rtvId: newId,
-      refDoc: ref,
-      supplier: document.getElementById('modal-rtv-supplier')?.value || '—',
-      reason: reasonText,
-      debitNotePaise: 350000,
-      status: 'DEBIT_NOTE_ISSUED',
-      createdAt: new Date().toISOString().split('T')[0]
-    });
-
-    showToast(`RTV authorization ${newId} created for ${ref}. Debit note draft queued in Finance.`, 'mint');
-    closeModal();
-    const inner = document.querySelector('#proc-submodule-inner-content');
-    if (inner) renderExceptionsSubtab(root, inner);
+  openModal({
+    title: 'Return to vendor',
+    saveLabel: 'Close',
+    maxWidth: '480px',
+    body: `<p style="margin:0;font-size:13px"><span class="badge">Not connected</span> The server has no route to create a return-to-vendor record or debit note yet, so nothing is created here. Record the rejected quantity when you verify the delivery (Receiving &amp; GRN), and raise the debit note with Finance.</p>`,
+    onSave: () => true,
   });
 }
 

@@ -61,7 +61,7 @@ class UniversalAttachmentModal {
 
   async loadDocumentDetails(docId) {
     try {
-      const res = await apiGet(`/files/documents/${docId}`);
+      const res = await apiGet(`/documents/${docId}`);
       if (res?.data) {
         this.activeDoc = res.data;
         this.versionHistory = res.data.versions || [];
@@ -178,7 +178,7 @@ class UniversalAttachmentModal {
                         <td class="p-2 truncate max-w-[140px] text-white font-mono">${v.originalFilename}</td>
                         <td class="p-2 text-slate-400">${new Date(v.uploadedAt).toLocaleDateString()}</td>
                         <td class="p-2 text-right">
-                          <a href="/api/v1/files/documents/${documentId}/versions/${v.versionNumber}/download" target="_blank" class="text-amber-400 hover:underline">Download</a>
+                          <a href="#" data-att-dl="/documents/${documentId}/versions/${v.versionNumber}/download" data-att-name="${v.originalFilename}" class="text-amber-400 hover:underline">Download</a>
                         </td>
                       </tr>
                     `).join('')}
@@ -276,18 +276,20 @@ class UniversalAttachmentModal {
           }
           formData.append('changeReason', reason);
 
-          const res = await fetch(`/api/v1/files/documents/${this.activeConfig.documentId}/replace-version`, {
+          const res = await fetch(`/api/v1/documents/${this.activeConfig.documentId}/replace-version`, {
             method: 'POST',
             headers: { Authorization: `Bearer ${token}` },
+            credentials: 'include',
             body: formData,
           });
           const data = await res.json();
           if (!res.ok) throw new Error(data.message || 'Version replacement failed');
           showToast('New version uploaded successfully.', 'mint');
         } else {
-          const res = await fetch('/api/v1/files/documents/attach', {
+          const res = await fetch('/api/v1/documents/attach', {
             method: 'POST',
             headers: { Authorization: `Bearer ${token}` },
+            credentials: 'include',
             body: formData,
           });
           const data = await res.json();
@@ -311,3 +313,29 @@ class UniversalAttachmentModal {
 
 export const universalAttachmentModal = new UniversalAttachmentModal();
 export default universalAttachmentModal;
+
+
+// Authenticated download for version links (a plain <a href> carries no credentials).
+if (typeof document !== 'undefined' && !window.__attDlWired) {
+  window.__attDlWired = true;
+  document.addEventListener('click', async (e) => {
+    const a = e.target.closest?.('[data-att-dl]');
+    if (!a) return;
+    e.preventDefault();
+    try {
+      const { apiBlob } = await import('../apiClient.js');
+      const blob = await apiBlob(a.getAttribute('data-att-dl'));
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = a.getAttribute('data-att-name') || 'document';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    } catch (err) {
+      const { showToast } = await import('../components.js');
+      showToast(err?.message || 'The document could not be downloaded.', 'error');
+    }
+  });
+}

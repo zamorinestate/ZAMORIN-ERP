@@ -17,6 +17,11 @@
 // =============================================================================
 
 import { state, setState } from "./state.js";
+import { applyAppearance, startAutoPagination } from "./utils/zui.js";
+import { startEmojiIcons } from "./utils/emojiIcons.js";
+import { startNotConnected } from "./utils/notConnected.js";
+import { startPosPhase3 } from "./utils/posPhase3.js";
+import { installAlertShim } from "./utils/dialogs.js";
 import { NAVIGATION, ROLES, isRouteAllowed } from "./navigation.js";
 import { renderShell, navigate } from "./router.js";
 import {
@@ -868,10 +873,10 @@ async function boot() {
     state.settings.theme || "paper"
   );
 
-  document.documentElement.setAttribute(
-    "data-font-size",
-    state.settings.fontSize || "normal"
-  );
+  applyAppearance({ fontSize: state.settings.fontSize });
+  startAutoPagination();
+  startEmojiIcons();
+  startNotConnected(); startPosPhase3(); installAlertShim();
 
   // Permanently ensure no dev preview banner exists
   document.getElementById("zamorin-dev-preview-banner")?.remove();
@@ -1020,8 +1025,8 @@ async function boot() {
     clearAllAuthTokens();
   }
 
-  // Local development / automated testing persona resolution (fallback via localStorage)
-  if (isDirectDashboardAllowed() && localStorage.getItem("zamorin-dev-role")) {
+  // Local development / automated testing persona resolution (fallback via localStorage or URL query parameter)
+  if (isDirectDashboardAllowed() && (localStorage.getItem("zamorin-dev-role") || new URLSearchParams(window.location.search).get("role") || new URLSearchParams(window.location.search).get("devRole"))) {
     const devKey = getRequestedDevRole();
     if (!devKey || !DEV_PREVIEW_USERS[devKey]) {
       clearAllAuthTokens();

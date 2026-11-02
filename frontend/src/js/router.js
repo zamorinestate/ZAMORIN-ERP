@@ -10,7 +10,7 @@
 
 import { state, setState } from "./state.js";
 import { NAVIGATION, isRouteAllowed, ROLES } from "./navigation.js";
-import { renderSidebar, wireSidebar, renderTopbar, wireBell, updateBellBadge, updateSidebarActive, renderModuleErrorState, wireCafeContextStrip, closeAllModals } from "./components.js";
+import { renderSidebar, wireSidebar, renderTopbar, wireBell, updateBellBadge, updateSidebarActive, renderStaffBottomBar, renderModuleErrorState, wireCafeContextStrip, closeAllModals, isSidebarCollapsed } from "./components.js";
 import { renderNotificationCentre, wireNotificationCentre } from "./pages/notificationCentre.js";
 import { icon } from "./icons.js";
 import { renderMasterDashboard, hydrateMasterDashboard } from "./pages/dashboardMaster.js";
@@ -188,15 +188,19 @@ export function renderShell() {
     if (app.dataset.shellRole && app.dataset.shellRole !== state.role) {
       clearApiCacheAndInFlight();
     }
+    const isCollapsed = isSidebarCollapsed();
     app.dataset.shellRole = state.role;
     app.innerHTML = `
-      <div class="app-shell">
-        <div id="sidebar-overlay" class="sidebar-overlay" aria-hidden="true"></div>
-        <aside id="sidebar" class="sidebar" role="navigation" aria-label="Main Navigation"></aside>
-        <main class="main-shell" role="main">
-          <header id="topbar" class="topbar" role="banner"></header>
-          <div id="page-content" class="page"></div>
-        </main>
+      <div class="app-shell shell zs-shell ${state.role === "staff" ? "zs-staff" : ""} ${isCollapsed ? 'sidebar-collapsed rail' : ''}">
+        <header id="topbar" class="topbar zs-topbar" role="banner"></header>
+        <div class="zs-body">
+          <div id="sidebar-overlay" class="sidebar-overlay scrim nav" aria-hidden="true"></div>
+          <aside id="sidebar" class="sidebar ${isCollapsed ? 'collapsed' : ''}" aria-label="Sidebar"></aside>
+          <main class="main-shell main" role="main">
+            <div id="page-content" class="page content"></div>
+          </main>
+        </div>
+        <nav id="staff-bottom-bar" class="zs-bottom-bar" aria-label="Staff"></nav>
       </div>
       <div id="modal-root" role="region" aria-label="Modals"></div>
       <div id="toast-root" class="toast-stack" aria-live="polite" aria-atomic="true" role="status"></div>
@@ -206,6 +210,7 @@ export function renderShell() {
     if (sb) {
       sb.innerHTML = renderSidebar();
       wireSidebar(sb);
+      renderStaffBottomBar();
     }
     if (tb) {
       tb.innerHTML = renderTopbar();

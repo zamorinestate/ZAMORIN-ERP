@@ -32,7 +32,7 @@ export const state = {
     checkOutAt: null,
   },
   settings: {
-    theme: (typeof localStorage !== "undefined" && localStorage.getItem("zamorin-theme")) || "paper",
+    theme: (typeof localStorage !== "undefined" && (localStorage.getItem("zamorin-theme") || localStorage.getItem("zm-theme"))) || "azure",
     fontSize: (typeof localStorage !== "undefined" && localStorage.getItem("zamorin-font-size")) || "standard",
     language: "en",
     notifications: {

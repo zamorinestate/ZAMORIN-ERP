@@ -1090,16 +1090,12 @@ async function loadProfile(root) {
       });
       profile = payload?.data?.profile;
     } catch (err) {
-      // In local dev preview mode, gracefully fallback to the canonical fixture for seamless inspection
-      if (state.user?.isDevPreview || (typeof location !== "undefined" && (location.hostname === "localhost" || location.hostname === "127.0.0.1"))) {
-        profile = getDevProfileFixture(state.user);
-      } else {
-        throw err;
-      }
+      // No sample profile is ever shown: a failed load is an error, not a fixture.
+      throw err;
     }
 
     if (!profile?.identity) {
-      profile = getDevProfileFixture(state.user);
+      throw new Error("Your employee profile was not returned by the server.");
     }
 
     if (requestController.signal.aborted || !root.isConnected) return;

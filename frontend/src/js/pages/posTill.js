@@ -1,3 +1,4 @@
+import { askText } from "../utils/dialogs.js";
 // =============================================================================
 // PAGE: POS & Billing Terminal — Canonical Zamorin Point of Sale (SCR-019 / ADM-SCR-002)
 //
@@ -1590,14 +1591,12 @@ function wirePOSEventListeners(root) {
       const lineId = span.dataset.qtyLine;
       const line = cart.find((l) => l.lineId === lineId);
       if (line) {
-        const input = prompt(`Enter quantity/weight for ${line.item.name} (supports decimals e.g. 0.450 or 2.25):`, String(line.qty));
-        if (input != null) {
-          const parsed = parseFloat(input);
-          if (!isNaN(parsed) && parsed > 0) {
-            line.qty = parsed;
-            refreshPOSView(root);
-          }
-        }
+        askText({ title: "Quantity or weight", label: `${line.item.name} (decimals allowed, e.g. 0.450)`, value: String(line.qty), type: "number", min: "0.001", step: "any", okLabel: "Set",
+          validate: (v) => (parseFloat(v) > 0 ? "" : "Enter a number above zero.") }).then((input) => {
+          if (input == null) return;
+          line.qty = parseFloat(input);
+          refreshPOSView(root);
+        });
       }
     });
   });
@@ -1731,7 +1730,7 @@ function wirePOSEventListeners(root) {
   if (occasionTreatBtn) {
     occasionTreatBtn.addEventListener("click", () => {
       discountReason = "Occasion / Birthday Celebration Treat (F230)";
-      showToast("Celebratory occasion treat acknowledged! Applied to bill notes.", "mint");
+      showToast("Occasion note added to this bill only. It is not saved to the customer profile.", "info");
       refreshPOSView(root);
     });
   }
@@ -2274,25 +2273,17 @@ function openPartnerVoucherModal(root) {
 }
 
 function openCaptainPairingModal(root) {
-  const cafeId = resolvePosCafeId() || "ZC-0001";
-  const bridgeIp = "192.168.1.150:4000";
-  const pairingUri = `${window.location.origin}/#captain?cafeId=${encodeURIComponent(cafeId)}&bridge=${encodeURIComponent(bridgeIp)}`;
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(pairingUri)}`;
+  const cafeId = resolvePosCafeId() || "";
+  const pairingUri = `${window.location.origin}/#captain/${encodeURIComponent(cafeId)}`;
 
   openModal({
-    title: "Floor Captain Handheld QR Pairing (A131, F254)",
+    title: "Floor Captain handheld link",
     maxWidth: "440px",
     body: `
-      <div style="display:flex;flex-direction:column;align-items:center;text-align:center;gap:12px;padding:8px;">
-        <div style="font-size:12px;color:var(--muted);">Scan this QR with waiter/captain smartphone to pair instantly with local POS bridge.</div>
-        <div style="background:#FFF;padding:12px;border-radius:12px;border:1px solid var(--line);">
-          <img src="${qrUrl}" alt="Captain Pairing QR" style="width:180px;height:180px;display:block;" />
-        </div>
-        <div style="background:var(--surface-sunken);border:1px solid var(--line);border-radius:6px;padding:8px 12px;width:100%;box-sizing:border-box;font-size:12px;text-align:left;">
-          <div>Outlet: <strong>${escapeHtml(cafeId)}</strong></div>
-          <div>Local Bridge Server: <strong>${bridgeIp}</strong></div>
-          <div style="color:var(--success);font-weight:700;margin-top:2px;">UDP Discovery: Broadcasting ACTIVE</div>
-        </div>
+      <div style="display:flex;flex-direction:column;gap:12px;padding:8px;">
+        <div style="font-size:12px;color:var(--muted);">Open this address on the waiter's phone and sign in. There is no local bridge or automatic pairing; the handheld talks to the same server as this till.</div>
+        <input class="input" readonly value="${escapeHtml(pairingUri)}" onclick="this.select()" style="width:100%;font-size:12px;" />
+        <div style="font-size:12px;">Outlet: <strong>${escapeHtml(cafeId || "not selected")}</strong></div>
       </div>
     `,
     cancelLabel: "Close",
@@ -2300,41 +2291,19 @@ function openCaptainPairingModal(root) {
 }
 
 function openHardwareDiagnosticsModal(root) {
+  const online = typeof navigator === "undefined" || navigator.onLine !== false;
   openModal({
-    title: "Peripheral Health & Diagnostics Matrix (A132, F271)",
-    maxWidth: "520px",
+    title: "Connection check",
+    maxWidth: "480px",
     body: `
-      <div style="display:flex;flex-direction:column;gap:10px;font-size:12px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--surface-sunken);border-radius:6px;border:1px solid var(--line);">
-          <div>
-            <strong>Kitchen Display Screen (KDS-01)</strong>
-            <div style="color:var(--muted);font-size:11px;">192.168.1.182 · Latency: 4ms · Battery: AC Power</div>
-          </div>
-          <span style="color:var(--success);font-weight:800;background:rgba(16,185,129,0.15);padding:3px 8px;border-radius:4px;">ONLINE</span>
+      <div style="display:flex;flex-direction:column;gap:10px;font-size:12.5px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--surface-sunken);border-radius:6px;">
+          <strong>This device's network</strong>
+          <span style="font-weight:800;color:${online ? "var(--success)" : "var(--err)"};">${online ? "ONLINE" : "OFFLINE"}</span>
         </div>
-
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--surface-sunken);border-radius:6px;border:1px solid var(--line);">
-          <div>
-            <strong>Takeaway Token TV Board</strong>
-            <div style="color:var(--muted);font-size:11px;">192.168.1.190 · Latency: 8ms · WebAudio: Connected</div>
-          </div>
-          <span style="color:var(--success);font-weight:800;background:rgba(16,185,129,0.15);padding:3px 8px;border-radius:4px;">ONLINE</span>
-        </div>
-
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--surface-sunken);border-radius:6px;border:1px solid var(--line);">
-          <div>
-            <strong>Thermal Kitchen Printer (EPSON TM-T88)</strong>
-            <div style="color:var(--muted);font-size:11px;">USB Direct · Status: Paper Roll OK</div>
-          </div>
-          <span style="color:var(--success);font-weight:800;background:rgba(16,185,129,0.15);padding:3px 8px;border-radius:4px;">READY</span>
-        </div>
-
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--surface-sunken);border-radius:6px;border:1px solid var(--line);">
-          <div>
-            <strong>Floor Captain Handhelds (3 Units)</strong>
-            <div style="color:var(--muted);font-size:11px;">App v2.4 · Mesh Latency: 12ms · Battery: 86% avg</div>
-          </div>
-          <span style="color:var(--success);font-weight:800;background:rgba(16,185,129,0.15);padding:3px 8px;border-radius:4px;">3 PAIRED</span>
+        <div style="color:var(--muted);line-height:1.6;">
+          Printers, kitchen screens, token boards and handhelds do not report their health to the server,
+          so their status cannot be shown here. Use <strong>Kitchen tools → Printer check</strong> to send a real test print.
         </div>
       </div>
     `,
@@ -4428,13 +4397,11 @@ function openCustomerOtpModal(customer, root) {
         customerId: customer.customerId,
       });
       challengeId = res?.data?.challengeId;
-      showToast(res?.data?.message || "OTP sent to customer mobile.", "mint");
+      showToast(res?.data?.otp ? "Code requested, but no SMS service is connected. The customer cannot receive it." : (res?.data?.message || "Code requested."), res?.data?.otp ? "error" : "success");
       const entrySection = document.querySelector("#pos-otp-entry-section");
       if (entrySection) entrySection.style.display = "flex";
       const input = document.querySelector("#pos-customer-otp-input");
-      if (input && res?.data?.otp) {
-        input.value = res.data.otp; // Pre-fill in local demo/dev mode
-      }
+      if (input) input.value = "";
     } catch (err) {
       showToast(err.message || "Failed to dispatch OTP", "error");
     } finally {
@@ -4589,11 +4556,12 @@ export function triggerNegativeFeedbackSiren(feedbackData = {}) {
 
 // F234 & F236: Customer Wallet 4-Digit SMS OTP Challenge Dialog
 function openWalletOtpChallengeModal(customer, root, amount, onVerified) {
-  const generatedOtp = Math.floor(1000 + Math.random() * 9000).toString();
+  // The code is created and checked by the server only. It is never generated, shown or pre-filled here.
+  let challengeId = "";
   let isSending = false;
 
   openModal({
-    title: `Customer Wallet OTP Challenge (F234) · ₹${amount.toFixed(2)}`,
+    title: `Customer wallet OTP · ₹${amount.toFixed(2)}`,
     maxWidth: "440px",
     body: `
       <div style="display:flex;flex-direction:column;gap:12px;font-size:12.5px;">
@@ -4603,93 +4571,79 @@ function openWalletOtpChallengeModal(customer, root, amount, onVerified) {
             <strong>${escapeHtml(customer.name)} (${escapeHtml(customer.phone)})</strong>
           </div>
           <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-            <span style="color:var(--muted);">Available Wallet:</span>
+            <span style="color:var(--muted);">Available wallet:</span>
             <strong style="color:var(--success);">₹${((customer.walletBalancePaise || 0) / 100).toFixed(2)}</strong>
           </div>
           <div style="display:flex;justify-content:space-between;">
-            <span style="color:var(--muted);">Deduction Amount:</span>
+            <span style="color:var(--muted);">Amount to deduct:</span>
             <strong style="color:var(--ink);font-size:13px;">₹${amount.toFixed(2)}</strong>
           </div>
         </div>
-
-        <div style="font-size:11.5px;color:var(--muted);line-height:1.4;">
-          Per customer wallet debit security policy (F234), wallet credit deductions require a 4-digit SMS OTP challenge before debiting customer balance.
-        </div>
-
+        <div style="font-size:11.5px;color:var(--muted);line-height:1.4;">Using wallet money needs a one-time code that the customer receives. The server checks the code.</div>
         <div style="display:flex;justify-content:space-between;align-items:center;">
-          <span style="font-weight:700;color:var(--ink);">Dispatch SMS Challenge:</span>
-          <button class="btn btn-sm btn-secondary" id="pos-send-wallet-otp-btn" type="button" style="font-weight:700;font-size:11.5px;">
-            📲 Send 4-Digit OTP
-          </button>
+          <span style="font-weight:700;color:var(--ink);">Send code to customer:</span>
+          <button class="btn btn-sm btn-secondary" id="pos-send-wallet-otp-btn" type="button" style="font-weight:700;font-size:11.5px;">Send code</button>
         </div>
-
-        <div id="pos-wallet-otp-status" style="display:none;font-size:11px;padding:6px 8px;border-radius:4px;"></div>
-
+        <div id="pos-wallet-otp-status" role="status" aria-live="polite" style="display:none;font-size:11.5px;padding:6px 8px;border-radius:4px;"></div>
         <div>
-          <label style="font-weight:700;display:block;margin-bottom:4px;color:var(--ink);">Enter 4-Digit SMS OTP *</label>
-          <input
-            type="text"
-            id="pos-wallet-otp-input"
-            class="input"
-            placeholder="e.g. ${generatedOtp}"
-            maxlength="4"
-            style="font-size:18px;letter-spacing:6px;text-align:center;font-weight:800;font-family:var(--font-mono);"
-          />
+          <label style="font-weight:700;display:block;margin-bottom:4px;color:var(--ink);" for="pos-wallet-otp-input">Enter the 6-digit code *</label>
+          <input type="text" inputmode="numeric" autocomplete="one-time-code" id="pos-wallet-otp-input" class="input" maxlength="6"
+            style="font-size:18px;letter-spacing:6px;text-align:center;font-weight:800;font-family:var(--font-mono);" />
         </div>
       </div>
     `,
-    saveLabel: "Authorize Wallet Debit 👛",
+    saveLabel: "Verify and use wallet",
     cancelLabel: "Cancel",
     onSave: async () => {
       const enteredOtp = document.querySelector("#pos-wallet-otp-input")?.value?.trim();
-      if (!enteredOtp || enteredOtp.length !== 4) {
-        showToast("Enter 4-digit SMS OTP from customer.", "error");
-        return;
-      }
-      if (enteredOtp !== generatedOtp && enteredOtp !== "1234" && enteredOtp !== "0000") {
-        showToast("Incorrect OTP. Please check customer's mobile SMS.", "error");
-        return;
+      if (!challengeId) { showToast("Send the code first.", "error"); return false; }
+      if (!/^\d{6}$/.test(enteredOtp || "")) { showToast("Enter the 6-digit code.", "error"); return false; }
+      try {
+        const res = await apiPost("/customers/otp/verify", { challengeId, otp: enteredOtp, customerId: customer.customerId });
+        if (!res?.data?.verified) { showToast("The code was not accepted.", "error"); return false; }
+        if (res.data.authorizationToken) customerAuthToken = res.data.authorizationToken;
+      } catch (err) {
+        showToast(err?.message || "The code could not be verified.", "error");
+        return false;
       }
       isWalletOtpVerified = true;
-      closeModal();
-      showToast("Wallet OTP challenge authorized successfully!", "mint");
-      if (typeof onVerified === "function") {
-        onVerified();
-      } else {
-        refreshPOSView(root);
-      }
+      showToast("Code verified.", "success");
+      if (typeof onVerified === "function") onVerified(); else refreshPOSView(root);
+      return true;
     },
   });
 
   const sendBtn = document.querySelector("#pos-send-wallet-otp-btn");
   const statusDiv = document.querySelector("#pos-wallet-otp-status");
+  const note = (msg, ok) => {
+    if (!statusDiv) return;
+    statusDiv.style.display = "block";
+    statusDiv.style.background = "var(--surface-raised)";
+    statusDiv.style.color = ok ? "var(--success)" : "var(--danger)";
+    statusDiv.textContent = msg;
+  };
 
   sendBtn?.addEventListener("click", async () => {
     if (isSending) return;
     isSending = true;
     sendBtn.disabled = true;
-    sendBtn.textContent = "⏳ Sending...";
+    sendBtn.textContent = "Sending…";
     try {
-      try {
-        await apiPost("/customers/otp/request", {
-          customerId: customer.customerId,
-          phone: customer.phone,
-          purpose: "WALLET_DEBIT",
-        });
-      } catch (_) {}
-
-      if (statusDiv) {
-        statusDiv.style.display = "block";
-        statusDiv.style.background = "var(--surface-raised)";
-        statusDiv.style.color = "var(--success)";
-        statusDiv.innerHTML = `✅ 4-Digit OTP dispatched to <strong>${escapeHtml(customer.phone)}</strong> (Demo test OTP: <code>${generatedOtp}</code>)`;
+      const res = await apiPost("/customers/otp/request", { customerId: customer.customerId, purpose: "WALLET_DEBIT" });
+      challengeId = res?.data?.challengeId || "";
+      if (!challengeId) throw new Error("The server did not return a challenge.");
+      if (res?.data?.otp) {
+        // Server is in test mode: it returned the code instead of sending it. Never reveal it here.
+        note("No SMS service is connected, so the customer cannot receive this code. Ask the owner to connect a delivery service.", false);
+      } else {
+        note(res?.data?.message || "Code requested.", true);
       }
-      const input = document.querySelector("#pos-wallet-otp-input");
-      if (input) input.value = generatedOtp;
-      showToast("OTP sent to customer mobile.", "mint");
+    } catch (err) {
+      challengeId = "";
+      note(err?.message || "The code could not be sent.", false);
     } finally {
       sendBtn.disabled = false;
-      sendBtn.textContent = "🔁 Resend OTP";
+      sendBtn.textContent = "Send again";
       isSending = false;
     }
   });

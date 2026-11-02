@@ -9,7 +9,7 @@
 import { apiGet, apiPost } from "../apiClient.js";
 import { showToast } from "../components.js";
 
-let currentCafeId = "ZC-0001";
+let currentCafeId = "";
 let currentTableId = "T-01";
 let currentTableNumber = "1";
 let activeCategory = "ALL";
@@ -166,17 +166,11 @@ export async function wireGuestQrOrdering(root, subroute) {
 async function loadGuestMenu() {
   try {
     // Try public web menu endpoint
-    const res = await apiGet(`/api/v1/channels/public/web-menu/${currentCafeId}`);
+    const res = await apiGet(`/channels/public/web-menu/${currentCafeId}`);
     cachedMenu = res.data?.items || res.data || [];
   } catch (err) {
-    // Fallback demo menu if offline or mock
-    cachedMenu = [
-      { itemId: "ITEM-01", name: "Malabar Cold Brew", pricePaisa: 22000, category: "COLD_BREW", foodType: "Veg", description: "Steeped for 18 hours with hints of caramel and cinnamon." },
-      { itemId: "ITEM-02", name: "Cardamom Rose Latte", pricePaisa: 25000, category: "HOT_COFFEE", foodType: "Veg", description: "Double espresso infused with organic rose water and green cardamom." },
-      { itemId: "ITEM-03", name: "Tellicherry Pepper Paneer Wrap", pricePaisa: 28000, category: "MAINS", foodType: "Veg", description: "Charred cottage cheese tossed with crushed Malabar black peppercorns." },
-      { itemId: "ITEM-04", name: "Ghee Roast Chicken Slider", pricePaisa: 32000, category: "MAINS", foodType: "Non-Veg", description: "Slow-roasted pulled chicken in fiery Kundapur red ghee gravy." },
-      { itemId: "ITEM-05", name: "Mysore Pak Cheesecake", pricePaisa: 26000, category: "DESSERTS", foodType: "Veg", description: "Traditional gram flour fudge infused into Philadelphia cream cheese." },
-    ];
+    cachedMenu = [];
+    showToast("The menu could not be loaded. Please refresh the page or ask the staff for help.", "error");
   }
   const root = document.querySelector(".guest-qr-page");
   if (root) renderMenuCards(root);
@@ -330,14 +324,15 @@ async function submitGuestRound(root) {
 
     // Attempt backend dispatch
     try {
-      await apiPost(`/api/v1/channels/public/direct-order`, {
+      await apiPost(`/channels/public/direct-order`, {
         cafeId: currentCafeId,
         channel: "QR_DINE_IN",
         tableNumber: currentTableNumber,
         items: roundPayload.items,
       });
     } catch (e) {
-      // Local fallback
+      // Propagate so the outer handler reports the failure and the cart is kept.
+      throw e;
     }
 
     orderRounds.push({

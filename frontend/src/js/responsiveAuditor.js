@@ -18,7 +18,7 @@ export async function runZamorinResponsiveAudit() {
     matrixLog: []
   };
 
-  const themes = ["paper", "pearl", "midnight", "noir"];
+  const themes = ["azure", "pearl", "paper", "verdigris", "midnight", "noir"];
   const viewports = [
     { width: 1920, height: 1080, name: "Desktop 1080p" },
     { width: 1440, height: 900, name: "Laptop HD" },
@@ -166,8 +166,8 @@ export async function runZamorinResponsiveAudit() {
     }
   }
 
-  // Restore default paper theme
-  document.documentElement.setAttribute("data-theme", "paper");
+  // Restore default azure theme
+  document.documentElement.setAttribute("data-theme", "azure");
 
   console.log("=== AUDIT SUMMARY ===");
   console.log("Total Routes Tested:", results.totalRoutesTested);

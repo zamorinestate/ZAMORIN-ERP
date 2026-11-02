@@ -3,7 +3,7 @@
 // Enterprise Business Intelligence, Management Reporting, Analytics Governance,
 // Decision Intelligence & Universal Corporate Export System (ZURF v1).
 // =============================================================================
-import { apiGet, apiPost, apiPatch, apiDelete } from '../apiClient.js';
+import { apiGet, apiPost, apiPatch, apiDelete, apiBlob } from '../apiClient.js';
 import { showToast, skeleton, openModal, closeModal, renderCafeContextStrip, renderModuleErrorState } from '../components.js';
 import { state } from '../state.js';
 import { ROLES } from '../navigation.js';
@@ -12,6 +12,11 @@ import { navigate } from '../router.js';
 let activeTab = 'overview';
 let cachedOverview = null;
 let cachedLibrary = null;
+let _lastReportErr = 0;
+function reportsLoadFailed(err) {
+  const now = Date.now(); if (now - _lastReportErr < 4000) return; _lastReportErr = now;
+  showToast((err && err.message ? err.message : 'Request failed') + ' — this report may be incomplete or empty.', 'error');
+}
 let cachedCategories = null;
 let cachedMetrics = null;
 let cachedSales = null;
@@ -590,7 +595,7 @@ export async function wireReports(root, subroute) {
   // Central Delegated Event Listener for entire Reports & Analytics Module
   if (!root.dataset.reportsDelegated) {
     root.dataset.reportsDelegated = 'true';
-    root.addEventListener('click', (e) => {
+    root.addEventListener('click', async (e) => {
       // 1. Back to Hub
       const backBtn = e.target.closest('#analytics-back-to-hub-btn');
       if (backBtn) {
@@ -723,14 +728,19 @@ export async function wireReports(root, subroute) {
         e.preventDefault();
         const jobId = downloadBtn.dataset.downloadJob;
         const job = (cachedJobs || []).find((j) => j.jobId === jobId);
-        const downloadUrl = job?.downloadUrl || `/api/v1/reports/export/${jobId}/download`;
-        const a = document.createElement('a');
-        a.href = downloadUrl;
-        a.download = `export_${jobId}`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        showToast('ZURF v1 certified export download initiated!', 'success');
+        const rawUrl = job?.downloadUrl || `/reports/export/${jobId}/download`;
+        const apiPath = String(rawUrl).replace(/^https?:\/\/[^/]+/, '').replace(/^\/api\/v1/, '');
+        try {
+          const blob = await apiBlob(apiPath);
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = `export_${jobId}`;
+          document.body.appendChild(a); a.click(); document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 10000);
+          showToast('Export downloaded.', 'success');
+        } catch (err) {
+          showToast(err.message || 'The export could not be downloaded.', 'error');
+        }
         return;
       }
 
@@ -1397,7 +1407,7 @@ async function renderLibrarySubtab(root, container) {
   try {
     const res = await apiGet('/reports/library');
     if (res?.data?.reports) cachedLibrary = res.data.reports;
-  } catch (_) {}
+  } catch (_e) { reportsLoadFailed(_e); }
 
   if (!cachedLibrary) {
     cachedLibrary = [];
@@ -1496,7 +1506,7 @@ async function renderSalesSubtab(root, container) {
   try {
     const res = await apiGet('/reports/sales' + buildFilterQueryString('sales'));
     if (res?.data) cachedSales = res.data;
-  } catch (_) {}
+  } catch (_e) { reportsLoadFailed(_e); }
 
   if (!cachedSales || !cachedSales.summary) {
     cachedSales = {
@@ -2406,7 +2416,7 @@ async function renderSalesSubtab(root, container) {
     el.addEventListener('click', (e) => {
       e.preventDefault();
       const billId = el.dataset.billDrill;
-      const cafeId = el.dataset.billCafe || 'ZC-0001';
+      const cafeId = el.dataset.billCafe || '';
       openBillDrilldownModal(billId, cafeId);
     });
   });
@@ -2417,7 +2427,7 @@ async function renderCashSubtab(root, container) {
   try {
     const res = await apiGet('/reports/cash-flow' + buildFilterQueryString());
     if (res?.data) cachedCash = res.data;
-  } catch (_) {}
+  } catch (_e) { reportsLoadFailed(_e); }
 
   // Normalise from both old cash-flow endpoint and new financeCalculations cashAndTill shape
   const cashAndTill = cachedCash?.cashAndTill || cachedCash || {};
@@ -2581,7 +2591,7 @@ async function renderFinanceSubtab(root, container) {
   try {
     const res = await apiGet('/reports/finance' + buildFilterQueryString());
     if (res?.data) cachedFinance = res.data;
-  } catch (_) {}
+  } catch (_e) { reportsLoadFailed(_e); }
 
   // Normalise to PM-02F canonical shape
   const fin = cachedFinance || {};
@@ -2897,7 +2907,7 @@ async function renderWorkforceSubtab(root, container) {
   try {
     const res = await apiGet('/reports/workforce' + buildFilterQueryString('workforce'));
     if (res?.data) cachedWorkforce = res.data;
-  } catch (_) {}
+  } catch (_e) { reportsLoadFailed(_e); }
 
   if (!cachedWorkforce || !cachedWorkforce.workforceMetrics) {
     cachedWorkforce = {
@@ -3459,7 +3469,7 @@ async function renderCustomersSubtab(root, container) {
   try {
     const res = await apiGet('/reports/customers' + buildFilterQueryString());
     if (res?.data) cachedCustomers = res.data;
-  } catch (_) {}
+  } catch (_e) { reportsLoadFailed(_e); }
 
   if (!cachedCustomers || !cachedCustomers.customerSummary) {
     cachedCustomers = {
@@ -4147,7 +4157,7 @@ async function renderInventorySubtab(root, container) {
   try {
     const res = await apiGet('/reports/inventory' + buildFilterQueryString('inventory'));
     if (res?.data) cachedInventory = res.data;
-  } catch (_) {}
+  } catch (_e) { reportsLoadFailed(_e); }
 
   if (!cachedInventory) {
     cachedInventory = {
@@ -4563,7 +4573,7 @@ async function renderProcurementSubtab(root, container) {
   try {
     const res = await apiGet('/reports/procurement' + buildFilterQueryString('procurement'));
     if (res?.data) cachedProcurement = res.data;
-  } catch (_) {}
+  } catch (_e) { reportsLoadFailed(_e); }
 
   if (!cachedProcurement) {
     cachedProcurement = {
@@ -5013,7 +5023,7 @@ async function renderMenuSubtab(root, container) {
   try {
     const res = await apiGet('/reports/menu' + buildFilterQueryString('menu'));
     if (res?.data) cachedMenu = res.data;
-  } catch (_) {}
+  } catch (_e) { reportsLoadFailed(_e); }
 
   if (!cachedMenu || !cachedMenu.engineering) {
     cachedMenu = {
@@ -5511,7 +5521,7 @@ async function renderQualitySubtab(root, container) {
   try {
     const res = await apiGet('/reports/quality' + buildFilterQueryString());
     if (res?.data) cachedQuality = res.data;
-  } catch (_) {}
+  } catch (_e) { reportsLoadFailed(_e); }
 
   if (!cachedQuality || !cachedQuality.qualityMetrics) {
     cachedQuality = {
@@ -5586,7 +5596,7 @@ async function renderAssetsSubtab(root, container) {
   try {
     const res = await apiGet('/reports/assets' + buildFilterQueryString());
     if (res?.data) cachedAssets = res.data;
-  } catch (_) {}
+  } catch (_e) { reportsLoadFailed(_e); }
 
   if (!cachedAssets || !cachedAssets.assetMetrics) {
     cachedAssets = {
@@ -5644,7 +5654,7 @@ async function renderPortfolioSubtab(root, container) {
 
     const res = await apiGet('/reports/portfolio?' + params.toString());
     if (res?.data) cachedPortfolio = res.data;
-  } catch (_) {}
+  } catch (_e) { reportsLoadFailed(_e); }
 
   if (!cachedPortfolio) {
     cachedPortfolio = {
@@ -6226,7 +6236,7 @@ async function renderGoalsSubtab(root, container) {
   try {
     const res = await apiGet('/reports/goals' + buildFilterQueryString());
     if (res?.data) cachedGoals = res.data;
-  } catch (_) {}
+  } catch (_e) { reportsLoadFailed(_e); }
 
   if (!cachedGoals || !cachedGoals.scorecards) {
     cachedGoals = {
@@ -6280,7 +6290,7 @@ async function renderScheduledAlertsSubtab(root, container) {
   try {
     const res = await apiGet('/reports/scheduled-alerts');
     if (res?.data) cachedScheduledAlerts = res.data;
-  } catch (_) {}
+  } catch (_e) { reportsLoadFailed(_e); }
 
   if (!cachedScheduledAlerts || !cachedScheduledAlerts.subscriptions) {
     cachedScheduledAlerts = {
@@ -7565,7 +7575,7 @@ async function renderReconciliationsSubtab(root, container) {
   try {
     const res = await apiGet('/reports/reconciliations' + buildFilterQueryString());
     if (res?.data?.reconciliations) cachedReconciliations = res.data.reconciliations;
-  } catch (_) {}
+  } catch (_e) { reportsLoadFailed(_e); }
 
   if (!cachedReconciliations || cachedReconciliations.length === 0) {
     cachedReconciliations = [];
@@ -7630,7 +7640,7 @@ async function renderMetricsSubtab(root, container) {
   try {
     const res = await apiGet('/reports/metrics');
     if (res?.data?.metrics) cachedMetrics = res.data.metrics;
-  } catch (_) {}
+  } catch (_e) { reportsLoadFailed(_e); }
 
   if (!cachedMetrics || cachedMetrics.length === 0) {
     cachedMetrics = [
@@ -7698,7 +7708,7 @@ async function renderDataQualitySubtab(root, container) {
   try {
     const res = await apiGet('/reports/data-quality' + buildFilterQueryString());
     if (res?.data) cachedDataQuality = res.data;
-  } catch (_) {}
+  } catch (_e) { reportsLoadFailed(_e); }
 
   if (!cachedDataQuality || !cachedDataQuality.lineageNodes) {
     cachedDataQuality = {
@@ -7757,7 +7767,7 @@ async function renderExportsSubtab(root, container) {
   try {
     const res = await apiGet('/reports/export/jobs');
     if (res?.data?.jobs) cachedJobs = res.data.jobs;
-  } catch (_) {}
+  } catch (_e) { reportsLoadFailed(_e); }
 
   if (!cachedJobs) {
     cachedJobs = [];
@@ -8295,7 +8305,7 @@ async function renderTrustCentreSubtab(root, container) {
   try {
     const res = await apiGet('/reports/trust-centre/overview' + buildFilterQueryString());
     if (res?.success && res?.data) tc = res.data;
-  } catch (_) {}
+  } catch (_e) { reportsLoadFailed(_e); }
 
   const summary = tc?.summary || {};
   const dq = tc?.dataQuality || {};
@@ -8643,7 +8653,7 @@ async function renderSavedViewsSubtab(root, container) {
         const format = isPdf ? 'PDF' : 'XLSX';
         try {
           const resManifest = await apiGet(`/reporting-productivity/custom-reports/${id}/export-manifest`);
-          showToast(`Export manifest compiled for ${format}: Scope re-evaluated`, 'success');
+          showToast(`Saved view checked for ${format}. A downloadable file is not connected for saved views yet.`, 'info');
         } catch (err) {
           showToast(err.message || 'Export error', 'error');
         }
@@ -9423,18 +9433,14 @@ function openReportPackModal(root, packDoc = null, onSaved = null) {
       showToast('Maximum 20 items allowed in a report pack (TECHNICAL_GUARDRAIL)', 'error');
       return;
     }
-    const sampleReports = [
-      { reportId: 'inventory-valuation', label: 'Inventory Stock Valuation', classification: 'INTERNAL' },
-      { reportId: 'workforce-labour-cost', label: 'Labour Cost & Productivity', classification: 'CONFIDENTIAL' },
-      { reportId: 'customer-retention', label: 'Guest Retention & Loyalty', classification: 'INTERNAL' },
-      { reportId: 'quality-compliance', label: 'Food Safety Audit Summary', classification: 'INTERNAL' },
-    ];
-    const picked = sampleReports[items.length % sampleReports.length];
+    const used = new Set(items.map((i) => i.reportId));
+    const picked = (cachedLibrary || []).find((r) => !used.has(r.reportId));
+    if (!picked) { showToast('No more reports are available to add.', 'info'); return; }
     items.push({
       itemType: 'CANONICAL_REPORT',
       reportId: picked.reportId,
-      label: picked.label,
-      classification: picked.classification,
+      label: picked.title || picked.name || picked.label || picked.reportId,
+      classification: picked.classification || 'INTERNAL',
       order: items.length
     });
     renderItemsList();
