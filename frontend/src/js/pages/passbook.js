@@ -175,8 +175,9 @@ function renderChildWorkspace(route, paramId) {
 // ─── 0. MAIN OVERVIEW ────────────────────────────────────────────────────────
 function renderOverview() {
   const data = passbookData || DEFAULT_PASSBOOK_DATA;
-  const kpis = data.kpis;
-  const cafes = data.cafes;
+  const kpis = data.kpis || DEFAULT_PASSBOOK_DATA.kpis;
+  // Backend returns `cafePositions` (not `cafes`); support both for safety.
+  const cafes = data.cafePositions || data.cafes || [];
 
   return `
     <div style="display: flex; flex-direction: column; gap: 24px;">
