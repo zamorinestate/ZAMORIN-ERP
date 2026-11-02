@@ -5870,15 +5870,15 @@ table.glass-table tbody tr:last-child td:last-child {
 
 .sidebar {
   position: sticky !important;
-  top: 0 !important;
-  height: 100vh !important;
+  top: var(--topbar-height, 68px) !important;
+  height: calc(100vh - var(--topbar-height, 68px)) !important;
   background: var(--sb-bg) !important;
   color: var(--sb-ink) !important;
   border-right: 1px solid var(--sb-line) !important;
   display: flex !important;
   flex-direction: column !important;
   overflow: hidden !important;
-  z-index: 30 !important;
+  z-index: 20 !important;
 }
 
 .topbar {
