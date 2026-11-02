@@ -118,7 +118,9 @@ async function executeTransactionWithRetry(operationFn, options = {}) {
         err.code === 24 ||
         String(err.codeName || '') === 'LockTimeout' ||
         String(err.message).includes('WriteConflict') ||
-        String(err.message).includes('Unable to acquire IX lock');
+        String(err.message).includes('Unable to acquire IX lock') ||
+        String(err.message).includes('catalog changes') ||
+        String(err.message).includes('please retry the operation');
 
       if (isTransient && transientAttempts < maxTransientRetries) {
         lastTransientError = err;

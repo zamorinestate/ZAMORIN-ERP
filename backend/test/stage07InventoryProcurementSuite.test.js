@@ -211,7 +211,7 @@ test('STAGE 07 — Inventory & Procurement Master Test Suite', async (t) => {
       cafeId: 'ZC-0001',
       itemId: 'INV-BUTTER-01',
       quantityBase: 20.0,
-      expiryDate: '2026-10-30',
+      expiryDate: '2027-10-30',
       status: 'AVAILABLE',
       supplierLot: 'SUP-BUTTER-01',
     },
