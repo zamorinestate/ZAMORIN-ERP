@@ -11,6 +11,9 @@ test('SCR-023: Settings Controller exposes all mandatory endpoints', () => {
   assert.equal(typeof settingsController.getSettingsOverview, 'function');
   assert.equal(typeof settingsController.getMyProfile, 'function');
   assert.equal(typeof settingsController.updateMyProfile, 'function');
+  assert.equal(typeof settingsController.uploadMyProfilePhoto, 'function');
+  assert.equal(typeof settingsController.removeMyProfilePhoto, 'function');
+  assert.equal(typeof settingsController.getMyProfilePhoto, 'function');
   assert.equal(typeof settingsController.submitProfileChangeRequest, 'function');
   assert.equal(typeof settingsController.listMyProfileChangeRequests, 'function');
   assert.equal(typeof settingsController.getMyAccess, 'function');

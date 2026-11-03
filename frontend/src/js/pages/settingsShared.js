@@ -28,7 +28,7 @@ import { ROLES } from "../navigation.js";
 import { navigate } from "../router.js";
 import { showToast, confirmAction, renderCafeContextStrip } from "../components.js";
 import { loadSessionManagement, renderSessionManagement } from "../sessionManagement.js";
-import { apiGet, apiPatch, apiPost, apiDelete } from "../apiClient.js";
+import { apiGet, apiPatch, apiPost, apiDelete, apiUpload, apiBlob } from "../apiClient.js";
 import { renderStaffPayslips, wireStaffPayslips } from "./staffPayslips.js";
 import { renderStaffLoansAdvances, wireStaffLoansAdvances } from "./staffLoansAdvances.js";
 import { setupModalA11y } from "../utils/modalA11y.js";
@@ -723,8 +723,9 @@ function renderProfile() {
       </div>
 
       <div style="display:flex; align-items:center; gap:20px; padding:16px; background:var(--surface-sunken); border-radius:var(--radius-sm, 8px); border:1px solid var(--line);">
-        <div class="user-avatar lg" style="width:64px; height:64px; font-size:24px; background:var(--surface); border:2px solid var(--bronze-500); color:var(--ink); display:flex; align-items:center; justify-content:center; border-radius:50%; font-weight:700;">
-          ${escHtml(displayName.charAt(0).toUpperCase())}
+        <div class="user-avatar lg" id="settings-photo-avatar" style="position:relative; width:64px; height:64px; font-size:24px; background:var(--surface); border:2px solid var(--bronze-500); color:var(--ink); display:flex; align-items:center; justify-content:center; border-radius:50%; font-weight:700; overflow:hidden;">
+          <span id="settings-photo-initials">${escHtml(displayName.charAt(0).toUpperCase())}</span>
+          <img id="settings-photo-img" alt="Your profile photo" style="display:none; width:100%; height:100%; object-fit:cover;" />
         </div>
         <div>
           <div style="font-size:16px; font-weight:700; color:var(--ink); font-family:var(--font-display);">${escHtml(displayName)}</div>
@@ -2685,6 +2686,52 @@ async function _wireConnected(root) {
   });
 }
 
+let _profilePhotoObjectUrl = null;
+let _profilePhotoLoadToken = 0;
+
+function _clearProfilePhotoObjectUrl() {
+  if (_profilePhotoObjectUrl) {
+    try {
+      URL.revokeObjectURL(_profilePhotoObjectUrl);
+    } catch {}
+    _profilePhotoObjectUrl = null;
+  }
+}
+
+async function _loadProfilePhoto(root) {
+  const img = root.querySelector("#settings-photo-img");
+  const initials = root.querySelector("#settings-photo-initials");
+  if (!img) return;
+
+  const loadToken = ++_profilePhotoLoadToken;
+
+  if (!_profileData?.profileImageUrl) {
+    _clearProfilePhotoObjectUrl();
+    img.removeAttribute("src");
+    img.style.display = "none";
+    if (initials) initials.style.display = "";
+    return;
+  }
+
+  try {
+    const blob = await apiBlob("/settings/profile/photo");
+    if (loadToken !== _profilePhotoLoadToken || !root.isConnected) return;
+    _clearProfilePhotoObjectUrl();
+    _profilePhotoObjectUrl = URL.createObjectURL(blob);
+    img.src = _profilePhotoObjectUrl;
+    img.style.display = "block";
+    if (initials) initials.style.display = "none";
+  } catch {
+    if (loadToken !== _profilePhotoLoadToken || !root.isConnected) return;
+    img.removeAttribute("src");
+    img.style.display = "none";
+    if (initials) initials.style.display = "";
+  }
+}
+
+const PROFILE_PHOTO_MAX_BYTES = 2 * 1024 * 1024;
+const PROFILE_PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
 async function _wireProfile(root) {
   if (!_profileData) {
     _loadingProfile = true;
@@ -2697,6 +2744,8 @@ async function _wireProfile(root) {
       _loadingProfile = false;
     }
   }
+
+  _loadProfilePhoto(root);
 
   root.querySelector("#settings-profile-save")?.addEventListener("click", async () => {
     const preferredName = root.querySelector("#settings-preferred-name")?.value?.trim() || "";
@@ -2739,18 +2788,83 @@ async function _wireProfile(root) {
   root.querySelector("#settings-photo-upload-btn")?.addEventListener("click", () => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = "image/png, image/jpeg, image/webp";
-    input.onchange = (e) => {
+    input.accept = "image/jpeg, image/png, image/webp";
+    input.onchange = async (e) => {
       const file = e.target.files?.[0];
-      if (file) {
-        showToast("Profile photo upload is not connected. Your photo was not changed.", "warning");
+      if (!file) return;
+
+      if (!PROFILE_PHOTO_TYPES.includes(file.type)) {
+        showToast("Choose a JPG, PNG or WebP image.", "coral");
+        return;
+      }
+      if (file.size > PROFILE_PHOTO_MAX_BYTES) {
+        showToast("Profile photos must be 2 MB or smaller.", "coral");
+        return;
+      }
+
+      const btn = root.querySelector("#settings-photo-upload-btn");
+      const originalLabel = btn?.textContent || "Upload Photo";
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = "Uploading…";
+      }
+
+      const formData = new FormData();
+      formData.append("photo", file);
+
+      try {
+        const res = await apiUpload("/settings/profile/photo", formData);
+        _profileData = {
+          ...(_profileData || {}),
+          profileImageUrl: res?.data?.photoUrl || "/settings/profile/photo",
+          photoMimeType: res?.data?.photoMimeType || file.type,
+          photoSizeBytes: res?.data?.photoSizeBytes || file.size,
+          photoUpdatedAt: res?.data?.photoUpdatedAt || new Date().toISOString(),
+        };
+        showToast(res?.message || "Profile photo updated.", "mint");
+        _rerenderInPlace(root);
+      } catch (err) {
+        showToast(err?.userMessage || err?.message || "Could not upload the profile photo. Nothing was changed.", "coral");
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = originalLabel;
+        }
       }
     };
     input.click();
   });
 
-  root.querySelector("#settings-photo-remove-btn")?.addEventListener("click", () => {
-    showToast("Profile photo removal is not connected. Nothing was changed.", "warning");
+  root.querySelector("#settings-photo-remove-btn")?.addEventListener("click", async () => {
+    if (!_profileData?.profileImageUrl) {
+      showToast("There is no profile photo to remove.", "warning");
+      return;
+    }
+
+    const btn = root.querySelector("#settings-photo-remove-btn");
+    const originalLabel = btn?.textContent || "Remove";
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Removing…";
+    }
+
+    try {
+      const res = await apiDelete("/settings/profile/photo");
+      _profileData = {
+        ...(_profileData || {}),
+        profileImageUrl: null,
+        photoMimeType: null,
+        photoSizeBytes: null,
+        photoUpdatedAt: null,
+      };
+      showToast(res?.message || "Profile photo removed.", "mint");
+      _rerenderInPlace(root);
+    } catch (err) {
+      showToast(err?.userMessage || err?.message || "Could not remove the profile photo. Nothing was changed.", "coral");
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+      }
+    }
   });
 }
 

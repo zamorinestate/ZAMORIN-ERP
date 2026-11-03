@@ -6,15 +6,17 @@
 // strict sensitive data masking, governed change requests, and WCAG 2.2 AA accessibility.
 // =============================================================================
 
-import { ApiClientError, apiGet, apiPatch, apiPost } from "../apiClient.js";
+import { ApiClientError, apiGet, apiPatch, apiPost, apiBlob } from "../apiClient.js";
 import { skeleton, showToast } from "../components.js";
 import { state } from "../state.js";
+import { navigate } from "../router.js";
 import { setupModalA11y } from "../utils/modalA11y.js";
 import { openChangePasswordModal } from "../components/changePasswordModal.js";
 
 let activeRequest = null;
 let currentProfileData = null;
 let activeTab = "overview";
+let headerPhotoObjectUrl = null;
 
 const esc = (v) =>
   String(v ?? "")
@@ -221,8 +223,9 @@ function renderProfileHeader(p) {
       <div class="flex justify-between items-center" style="gap:18px;flex-wrap:wrap;">
         <div class="flex items-center" style="gap:18px;">
           <div style="position:relative;cursor:pointer;" data-edit-photo title="Manage profile photo">
-            <div style="width:68px;height:68px;border-radius:50%;background:linear-gradient(135deg,var(--ink-900),var(--ink-800));border:2px solid var(--bronze-500);display:flex;align-items:center;justify-content:center;color:#ffffff;font-size:24px;font-weight:700;" class="font-display">
-              ${initials}
+            <div style="width:68px;height:68px;border-radius:50%;background:linear-gradient(135deg,var(--ink-900),var(--ink-800));border:2px solid var(--bronze-500);display:flex;align-items:center;justify-content:center;color:#ffffff;font-size:24px;font-weight:700;overflow:hidden;position:relative;" class="font-display">
+              <span id="employee-profile-initials">${initials}</span>
+              <img id="employee-profile-photo" alt="Your profile photo" style="display:${headerPhotoObjectUrl ? "block" : "none"};position:absolute;inset:0;width:100%;height:100%;object-fit:cover;"${headerPhotoObjectUrl ? ` src="${headerPhotoObjectUrl}"` : ""} />
             </div>
             <div style="position:absolute;bottom:0;right:0;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,0.7);border:1px solid rgba(255,255,255,0.4);display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--ink);">📷</div>
           </div>
@@ -1064,6 +1067,37 @@ function failure(e) {
   `;
 }
 
+async function loadHeaderPhoto(root) {
+  try {
+    const blob = await apiBlob("/settings/profile/photo");
+    if (!root.isConnected) return;
+    if (headerPhotoObjectUrl) {
+      try { URL.revokeObjectURL(headerPhotoObjectUrl); } catch {}
+    }
+    headerPhotoObjectUrl = URL.createObjectURL(blob);
+    root.querySelectorAll("#employee-profile-photo").forEach((img) => {
+      img.src = headerPhotoObjectUrl;
+      img.style.display = "block";
+    });
+    root.querySelectorAll("#employee-profile-initials").forEach((el) => {
+      el.style.display = "none";
+    });
+  } catch {
+    // No photo set (or unavailable) — fall back to initials.
+    if (headerPhotoObjectUrl) {
+      try { URL.revokeObjectURL(headerPhotoObjectUrl); } catch {}
+      headerPhotoObjectUrl = null;
+    }
+    root.querySelectorAll("#employee-profile-photo").forEach((img) => {
+      img.removeAttribute("src");
+      img.style.display = "none";
+    });
+    root.querySelectorAll("#employee-profile-initials").forEach((el) => {
+      el.style.display = "";
+    });
+  }
+}
+
 // ─── DATA LOADING & ORCHESTRATION ─────────────────────────────────────────────
 async function loadProfile(root) {
   activeRequest?.abort();
@@ -1103,6 +1137,7 @@ async function loadProfile(root) {
     currentProfileData = profile;
     host.innerHTML = view(profile);
     wireTabEvents(root);
+    loadHeaderPhoto(root);
   } catch (e) {
     if (e?.name === "AbortError" || !root.isConnected) return;
     host.innerHTML = failure(e);
@@ -1114,6 +1149,11 @@ async function loadProfile(root) {
 
 // ─── EVENT WIRING ─────────────────────────────────────────────────────────────
 function wireTabEvents(root) {
+  // Profile photo management lives in Settings (self-service, audited).
+  root.querySelectorAll("[data-edit-photo]").forEach((el) => {
+    el.addEventListener("click", () => navigate("settings/profile"));
+  });
+
   // Tab switching
   root.querySelectorAll("[data-profile-tab]").forEach((btn) => {
     btn.addEventListener("click", () => {

@@ -10,12 +10,21 @@
  */
 
 const express = require('express');
+const multer = require('multer');
 const { authenticate } = require('../middleware/authenticate');
+const { ApiError } = require('../utils/ApiError');
+const {
+  MAX_PROFILE_PHOTO_BYTES,
+  ALLOWED_MIME_TYPES,
+} = require('../services/profilePhotoService');
 
 const {
   getSettingsOverview,
   getMyProfile,
   updateMyProfile,
+  uploadMyProfilePhoto,
+  removeMyProfilePhoto,
+  getMyProfilePhoto,
   submitProfileChangeRequest,
   listMyProfileChangeRequests,
   getMyAccess,
@@ -59,6 +68,40 @@ const {
 
 const router = express.Router();
 
+// Profile photo uploads are held in memory (max 2 MB) and handed straight to
+// the canonical document storage adapter — nothing is written to ephemeral disk.
+const profilePhotoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: MAX_PROFILE_PHOTO_BYTES,
+    files: 1,
+  },
+  fileFilter: (req, file, cb) => {
+    const mime = String(file.mimetype || '').trim().toLowerCase().replace('image/jpg', 'image/jpeg');
+    if (!ALLOWED_MIME_TYPES.includes(mime)) {
+      return cb(new ApiError(400, 'PROFILE_PHOTO_TYPE_NOT_ALLOWED', 'Only JPG, PNG or WebP profile photos are accepted.'));
+    }
+    return cb(null, true);
+  },
+}).single('photo');
+
+function acceptProfilePhoto(req, res, next) {
+  profilePhotoUpload(req, res, (err) => {
+    if (!err) return next();
+    if (err instanceof ApiError) return next(err);
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return next(new ApiError(413, 'PROFILE_PHOTO_TOO_LARGE', 'Profile photos must be 2 MB or smaller.'));
+    }
+    if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+      return next(new ApiError(400, 'PROFILE_PHOTO_FIELD_INVALID', 'Upload the image using the "photo" form field.'));
+    }
+    if (err.code === 'LIMIT_FILE_COUNT') {
+      return next(new ApiError(400, 'PROFILE_PHOTO_TOO_MANY_FILES', 'Upload exactly one profile photo.'));
+    }
+    return next(err);
+  });
+}
+
 // All settings endpoints require an authenticated session.
 router.use(authenticate);
 
@@ -68,6 +111,9 @@ router.get('/overview', getSettingsOverview);
 // ── Profile & Identity ────────────────────────────────────────────────────────
 router.get('/profile', getMyProfile);
 router.patch('/profile', updateMyProfile);
+router.get('/profile/photo', getMyProfilePhoto);
+router.post('/profile/photo', acceptProfilePhoto, uploadMyProfilePhoto);
+router.delete('/profile/photo', removeMyProfilePhoto);
 router.post('/profile/change-request', submitProfileChangeRequest);
 router.get('/profile/change-requests', listMyProfileChangeRequests);
 

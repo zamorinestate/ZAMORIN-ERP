@@ -29,6 +29,8 @@ const { RolePermission } = require('../models/RolePermission');
 const { Delegation } = require('../models/Delegation');
 const { SequenceCounter } = require('../models/SequenceCounter');
 const auditService = require('../services/auditService');
+const profilePhotoService = require('../services/profilePhotoService');
+const { documentStorageAdapter } = require('../services/documentStorageAdapter');
 const ApiError = require('../utils/ApiError');
 
 // â”€â”€ 23 top-level language definitions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -192,7 +194,10 @@ async function getMyProfile(req, res) {
       personalEmail: user.personalEmail || null,
       personalMobile: user.personalMobile || null,
       emergencyContact: user.emergencyContact || null,
-      profileImageUrl: user.profileImageUrl || null,
+      profileImageUrl: user.photoAttachmentId ? '/settings/profile/photo' : (user.profileImageUrl || null),
+      photoMimeType: user.photoMimeType || null,
+      photoSizeBytes: user.photoSizeBytes || null,
+      photoUpdatedAt: user.photoUpdatedAt || null,
       accountStatus: user.accountStatus,
       designation: user.designation || null,
       department: user.department || null,
@@ -245,6 +250,94 @@ async function updateMyProfile(req, res) {
   await auditService.recordAuditEvent({ organisationId, actorUserId: userId, actorRole: req.user.role, module: 'SETTINGS', action: 'PROFILE_SELF_UPDATE', entityType: 'USER', entityId: userId, metadata: { updatedFields: Object.keys(updates) } });
 
   res.json({ success: true, message: 'Profile updated successfully.' });
+}
+
+/**
+ * POST /api/v1/settings/profile/photo
+ * Uploads or replaces the authenticated user's profile photo.
+ * Multipart field: `photo` (JPG/PNG/WebP, max 2 MB).
+ */
+async function uploadMyProfilePhoto(req, res) {
+  if (!req.file) {
+    throw new ApiError(400, 'PROFILE_PHOTO_REQUIRED', 'Select a JPG, PNG or WebP image to upload.');
+  }
+
+  const user = req.authenticatedUser || await User.findOne({ userId: req.user.userId });
+  if (!user) throw new ApiError(404, 'USER_NOT_FOUND', 'Account not found.');
+
+  const photo = await profilePhotoService.saveProfilePhoto({
+    user,
+    buffer: req.file.buffer,
+    mimeType: req.file.mimetype,
+    originalFilename: req.file.originalname,
+    actorRole: req.user.role,
+  });
+
+  res.status(201).json({
+    success: true,
+    message: 'Profile photo updated.',
+    data: photo,
+  });
+}
+
+/**
+ * DELETE /api/v1/settings/profile/photo
+ * Removes the authenticated user's profile photo. Idempotent.
+ */
+async function removeMyProfilePhoto(req, res) {
+  const user = req.authenticatedUser || await User.findOne({ userId: req.user.userId });
+  if (!user) throw new ApiError(404, 'USER_NOT_FOUND', 'Account not found.');
+
+  const photo = await profilePhotoService.removeProfilePhoto({
+    user,
+    actorRole: req.user.role,
+  });
+
+  res.json({
+    success: true,
+    message: 'Profile photo removed.',
+    data: photo,
+  });
+}
+
+/**
+ * GET /api/v1/settings/profile/photo
+ * Streams the authenticated user's own profile photo. Never public.
+ */
+async function getMyProfilePhoto(req, res) {
+  const user = await User.findOne({ userId: req.user.userId })
+    .select('photoAttachmentId photoMimeType')
+    .lean();
+
+  if (!user || !user.photoAttachmentId || !user.photoMimeType) {
+    throw new ApiError(404, 'PROFILE_PHOTO_NOT_FOUND', 'No profile photo is set for this account.');
+  }
+
+  let stream;
+  try {
+    stream = await documentStorageAdapter.getStream({ storageKey: user.photoAttachmentId });
+  } catch (err) {
+    throw new ApiError(404, 'PROFILE_PHOTO_NOT_FOUND', 'The stored profile photo is unavailable.');
+  }
+
+  res.setHeader('Content-Type', user.photoMimeType);
+  res.setHeader('Content-Disposition', 'inline; filename="profile-photo"');
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Accept-Ranges', 'none');
+
+  stream.on('error', () => {
+    if (!res.headersSent) {
+      res.status(404).json({
+        success: false,
+        error: { code: 'PROFILE_PHOTO_NOT_FOUND', message: 'The stored profile photo is unavailable.' },
+      });
+      return;
+    }
+    res.destroy();
+  });
+
+  return stream.pipe(res);
 }
 
 /**
@@ -1902,6 +1995,9 @@ module.exports = {
   getSettingsOverview,
   getMyProfile,
   updateMyProfile,
+  uploadMyProfilePhoto,
+  removeMyProfilePhoto,
+  getMyProfilePhoto,
   submitProfileChangeRequest,
   listMyProfileChangeRequests,
   getMyAccess,
