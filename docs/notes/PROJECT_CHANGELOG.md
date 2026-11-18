@@ -1,0 +1,638 @@
+# Project Changelog — All Changes So Far
+
+This document combines a high-level rationale summary with the full commit history of the
+`main` branch. Commit entries are auto-generated from `git log` (newest-first within each
+month). Commit messages follow conventional-commit style (`feat:`, `fix:`, `style:`, etc.)
+and are the primary source of "why" for each change.
+
+## Why this project exists
+
+Zamorin Cafe ERP is a multi-tenant café operations platform (Primary Master / Owner /
+Cafe Admin / Staff / Vendor portals) built as an Express + Mongoose backend with a
+zero-build vanilla-JS frontend. The work captured here spans:
+
+- **Identity & access**: auth (password, app PIN, passkeys, MFA, trusted devices), role/scope
+  enforcement, NORMAL_MASTER retirement.
+- **POS & billing**: till sessions, KOT, void/refund with OTP, split tenders, offline sync.
+- **Inventory & supply**: FEFO lots, transfers, cycle counts, recipes, GRN, vendor lifecycle.
+- **Finance & accounting**: cash book, double-entry journals, CoA, AP/AR, GST/e-invoice
+  payloads, Z-reports, advance deposits, institutional credit, budgets.
+- **Workforce**: employees, attendance (QR/kiosk/geofence/offline), shifts, leave, payroll.
+- **Governance (Owner portal)**: risk, compliance, BCDR, privacy, master data, complaints.
+- **Platform**: Android/Apple/Windows clients, kiosk/PWA, MailOps, hardware adapters.
+
+## How changes are tracked
+
+- Every change is a conventional commit on `main`.
+- Architectural freezes are documented in `.agents/rules/*.md` and `AGENTS.md`.
+- Brain maps and guides live under `Ref/`.
+- This session's finance-specific changes are detailed in
+  `docs/notes/FINANCE_MODULE_CHANGES.md`.
+
+## Recent finance focus (this session)
+
+See `docs/notes/FINANCE_MODULE_CHANGES.md` for the full rationale. Summary:
+
+- Wired New Journal, Record AP Bill, Add Bank Account, and Allocate Budget modals to real
+  backend endpoints (they previously showed "Not connected").
+- Added `POST /finance/bank-accounts` and `POST /finance/budgets`.
+- Replaced the hardcoded budget mock with real `BudgetPlan` + `Expense` aggregation.
+- Relaxed `BudgetPlan` category enum to support free-form UI categories.
+- Verified syntax (727 backend files), router imports, 36 system checks, and
+  `financeAccounting` tests (12/12).
+
+---
+
+Auto-generated from `git log` on the `main` branch. Commits are listed newest-first within each month.
+
+Total commits: 577
+
+
+## 2026-11
+
+- `29a53aa` (2026-11-03) — feat(settings): add profile photo upload and removal
+- `78658ac` (2026-11-03) — fix(layout): align topbar-height to 68px
+- `77e4a11` (2026-11-03) — fix(layout): sidebar starts below topbar so neither overlays the other
+- `d6d153d` (2026-11-03) — fix(layout): raise topbar z-index above sidebar to prevent overlay on scroll
+- `cd7306f` (2026-11-03) — fix(tests): retry catalog-change writes; fix stale butter-lot expiry fixture
+- `214ce17` (2026-11-03) — feat(backend): add Google Business disconnect endpoint; security fixes for OTP and gift-card
+- `44f75c7` (2026-11-03) — fix(auth): prevent failed-login locking from crashing Primary Master validation
+- `9641cc0` (2026-11-03) — fix(passbook): map backend KPI field names so seeded treasury data renders
+- `955bcf1` (2026-11-03) — fix(passbook): use cafePositions field returned by backend (was cafes)
+- `d2b09f9` (2026-11-03) — style(forms): layer base styling so component rules win; add option/select list styling
+- `b5357f4` (2026-11-03) — style(forms): consistent kit styling for bare inputs/selects/textareas
+- `3832636` (2026-11-03) — fix(sidebar): force nav list overflow-y auto over zs-shell override
+- `d8230ef` (2026-11-02) — style(sidebar): keep nav list scrollable with a thin scrollbar
+- `ee02eff` (2026-11-02) — style(layout): make only main content scrollable; keep sidebar fixed
+- `7bbca1e` (2026-11-02) — feat(frontend): integrate delivered UI kit, fix API paths, and restore backend-integrated fixes
+
+## 2026-10
+
+- `ff7311e` (2026-10-21) — fix(vendor): supplier edit and status toggle repaint from the server document
+- `8e3aded` (2026-10-21) — feat(vendor): atomic vendor ledger writes, portal payload fixes, supplier page server-authoritative data
+- `7e495f1` (2026-10-21) — fix(payroll): payslip attendance becomes server-derived display, employee select accepts VU/EMP-ZC ids
+- `4b3a94f` (2026-10-21) — feat(reports): wire /reports/finance P&L and waterfall to the COGS engine
+- `fb1aa74` (2026-10-21) — feat(reports): implement COGS & product margin engine with LAST_PO_PRICE basis (#2)
+- `87b3d1b` (2026-10-20) — fix(reports,payroll): derive integrity and statutory compliance from real data
+- `f0d5de6` (2026-10-20) — fix(payroll): derive payslip attendance, repair PDF branch, allow pay without reference
+- `3f25fac` (2026-10-20) — fix(staff): derive leave balances on read, remove fabricated ledger and metrics
+- `eef106b` (2026-10-20) — fix(attendance): atomic punches, fail-closed QR secret, real KPIs, list pagination
+- `2747895` (2026-10-20) — fix(seed): remove shadowed duplicate runSeed and hoist crypto to module scope
+- `a47f7b9` (2026-10-20) — fix(backend): fail closed on org/cafe identity in reports, staff, attendance, vendor
+- `3cbeed3` (2026-10-20) — Merge pull request #1 from zamorinestate/fix/backend-routes-and-deploy
+- `16d06a5` (2026-10-20) — fix(docker): lowercase paths, add .dockerignore, restore IST and Redis
+- `a194126` (2026-10-20) — fix(ci): point native client jobs at Platform/ paths after repo reorg
+- `df60500` (2026-10-19) — fix(config): make the production startup validator actually validate
+- `3a185db` (2026-10-19) — fix(root): lowercase script paths so npm test runs on Linux
+- `0c04578` (2026-10-19) — fix(deploy): document REDIS_URL requirement in render.yaml and env example
+- `743e943` (2026-10-19) — feat(revenue-share): add deposit and recovery charge creation
+- `4a156b5` (2026-10-19) — feat(hardware): add caller-id alias and biometric device test
+- `81268a4` (2026-10-19) — feat(settings): add privacy request route and fix requestId bug
+- `ce4c1eb` (2026-10-19) — feat(pos,inventory): add barcode lookup and recommendations aliases
+- `e18e258` (2026-10-19) — feat(channels): add live-orders, pause, and order accept/reject routes
+- `788d170` (2026-10-19) — fix(backend): correct case-sensitive ApiError import paths
+- `e994756` (2026-10-16) — docs(workflow): mandate automatic github sync on all completed tasks
+- `ea782a3` (2026-10-16) — fix(security): enforce RBAC and PII sanitization on advance-slip lookup
+- `832d6ab` (2026-10-15) — feat(ui): complete application-wide premium UI/UX refinement
+- `cee71c0` (2026-10-15) — fix(scripts): update verify_universal_hub_architecture.mjs path and router check
+- `9e7ddfe` (2026-10-15) — fix(vendor-portal): eliminate duplicate shell, integrate tokens, add dev fallbacks
+- `c452803` (2026-10-14) — chore(cleanup): remove broken obsolete scripts/check_syntax.mjs
+- `544dd15` (2026-10-14) — chore(cleanup): remove obsolete frontend/src/js/triageAudit.js and frontend/test_boot.mjs
+- `5ce1862` (2026-10-14) — chore(cleanup): remove accidental root file 0 and scripts/last_user_prompt.txt
+- `13e1a47` (2026-10-14) — feat(reports): modernize excel templates, purge residual csv, and support multi-sheet domain workbooks
+- `306f202` (2026-10-13) — feat(invoice-pos): 8K corporate invoice, official monochrome logo, soft-copy QR, and 80mm thermal receipt standard
+- `f2ff803` (2026-10-13) — fix(app): zero-friction dev authentication, full seed bootstrap, and terminal station navigation
+- `2750ef8` (2026-10-13) — feat(parity): Petpooja 619-point parity, delta UI screens, and empirical scenarios
+- `3e3f81a` (2026-10-11) — feat(benchmark): implement all remaining Petpooja benchmark options and regression test suite
+- `a26a194` (2026-10-11) — fix(security): untrack pre-handover backup and harden docker publishing
+- `587f7b5` (2026-10-11) — docs: add target repository migration manifest
+- `64ead80` (2026-10-11) — docs: consolidate foundation manifests, registers, and storage handoffs into docs/
+- `ed65c09` (2026-10-11) — feat(p22): acceptance pilot, operational readiness, and final handover closeout
+- `5ba514c` (2026-10-11) — feat(p21): implement external services, integration dependencies, and benchmark scope decisions
+- `356a8af` (2026-10-11) — feat(p20): implement updates, own-server readiness, backup recovery, and hardware integration
+- `ce90de9` (2026-10-11) — feat(p19): implement guided onboarding, configuration templates, outlet copy settings, and controlled data migration
+- `ffda4a1` (2026-10-11) — feat(p18): implement governance, portfolio oversight, and decision follow-through lifecycle
+- `9f2b2e1` (2026-10-11) — feat(p17): implement sales and demand forecasting, stockout risk intelligence, supplier price variance, and assisted business analysis
+- `3ae41c2` (2026-10-11) — feat(p16): implement tasks, training, sops, and recurring stepwise checklists
+- `7048c69` (2026-10-11) — feat(p15): implement channels, qr ordering, reservations, and front-service lifecycle
+- `b06a667` (2026-10-11) — feat(p14): implement customers, loyalty, feedback, and campaigns lifecycle
+- `7db21a6` (2026-10-11) — feat(p13): complete workforce attendance and payroll lifecycle verification
+- `88b3e1e` (2026-10-10) — feat(p13): complete petpooja benchmark coverage audit and register
+- `db25a97` (2026-10-10) — feat(p13): implement workforce attendance, employee lifecycle, and payroll
+- `e7c90c3` (2026-10-10) — feat(p12): implement finance, reports, exports, and owner insight
+- `5154067` (2026-10-10) — feat(p11): implement inventory counts, transfers, quality, and assets
+- `740b560` (2026-10-10) — fix(p10): pre-initialize model collections and clean up deprecated returnDocument options
+- `00dbc76` (2026-10-10) — fix(p10): resolve advance gst tax timing, custody confirmation lifecycle, and five-persona authorization
+- `e6943af` (2026-10-09) — fix(p10): correct cash custody accounting and CBIC GST advance configuration
+- `1152271` (2026-10-09) — feat(p10): implement cash custody, receivables, credit exposure concurrency, and advance deposits
+- `0698aa8` (2026-10-09) — feat(p09): pos, menu, payments, receipts, and final financial/inventory integrity gate
+- `993e619` (2026-10-08) — fix(rbac): restrict owner from gst generation and z-report till mutation with canonical access matrix
+- `9473dc0` (2026-10-08) — fix(rbac): remediate finance and owner navigation discrepancies with 5-persona verification
+- `0194937` (2026-10-08) — feat(p07): close verification cases for stale draft approval, worker crash recovery & in-flight coordination
+- `c9b9347` (2026-10-08) — docs(p08): add delivery verification and AP payables completion report
+- `1b98287` (2026-10-08) — feat(p08): delivery verification, 3-way match, AP invoice & payables service + 31-test suite
+- `c63babb` (2026-10-08) — fix(foundation): reconcile final gate clarification across all 4 points
+- `f36fb7c` (2026-10-08) — feat(foundation): complete final evidence gate across all 4 tracks (PASS - FOUNDATION ACCEPTED)
+- `84b9073` (2026-10-07) — fix(foundation): resolve scope conflicts, strengthen vendor isolation, pin Node 24 LTS, and add safe migration rollback procedure
+- `02b619c` (2026-10-07) — feat(foundation): implement five-window architecture, decommission Normal Master, and enforce read-only Vendor portal
+
+## 2026-09
+
+- `b31efce` (2026-09-22) — chore(reorg): align workspace directory topology, documentation, and platform assets
+- `d85217a` (2026-09-22) — chore(reorg): preserve consolidated workspace structure, docs, and platform assets
+- `357c545` (2026-09-22) — chore(frontend): add .gitignore to ignore local .vercel build artifacts
+- `524f3bc` (2026-09-22) — fix(auth-pin): refine eye toggle styling, z-index, and field classes for visible PIN and password controls
+- `9293a06` (2026-09-22) — feat(auth-pin): add eye toggle icon to view PIN and password inputs across setup and lock screens
+- `33283f6` (2026-09-22) — fix(env): sanitize NODE_ENV quotes and provide fail-safe Render fallback to prevent crash
+- `75422a5` (2026-09-22) — fix(passkey): resolve canonical rpID on Render cloud staging and production environments
+- `81bd4dc` (2026-09-21) — fix(cors): permit canonical Zamorin Vercel frontend origins in CORS and CSRF
+- `c1972d1` (2026-09-21) — fix(deploy): disable immutable caching for source files, send Clear-Site-Data header, and bump cache-bust version
+- `6b03fb2` (2026-09-21) — fix: broaden placeholder guard to allow real Atlas cluster hostnames
+- `cba92b6` (2026-09-21) — fix(auth): coordinate webauthn request lifecycle and resolve windows hello registration collision
+- `f9f381e` (2026-09-21) — feat: complete line-by-line master implementation with vendor lifecycle freeze and test certifications
+- `ad5756d` (2026-09-20) — fix(auth-ui): modernize modal typography to sans-serif, eliminate passkey popup latency via prefetch, and fix un-enrolled biometric error handling
+- `53b97be` (2026-09-20) — fix(ui): ACP-05E-02 refine Face ID scanner and Fingerprint ridge SVG icons in biometric modal
+- `57c1449` (2026-09-20) — fix(auth): ACP-05E-02 remediate passkey rate limiting bucket collision and restore 3-option biometric modal with 6-digit PIN login
+- `c0bda6a` (2026-09-20) — fix(auth): coordinate WebAuthn conditional mediation with explicit passkey trigger using AbortController
+- `85e8711` (2026-09-20) — fix(auth): restore missing closing tag on terms modal so login container renders prominently
+- `eec64c0` (2026-09-20) — feat(auth): remediate native WebAuthn biometric passkeys and add six-digit personal App PIN
+- `264151f` (2026-09-20) — docs(governance): establish permanent auth design freeze rule
+- `ae6735f` (2026-09-20) — feat(auth): lock Login 2.0 visual redesign, 4K rotating backgrounds, button-form Terms modal, and aligned actions
+- `2561483` (2026-09-19) — fix(acp05b): restore mailops navigation and reconcile attendance permissions policy
+- `59ebb10` (2026-09-18) — test(acp04a): remediate test debt, stale fixtures, and static assertion fragility
+- `5cf018d` (2026-09-18) — test(acp03): end-to-end multi-cafe operational simulation and tenant isolation suite
+- `5655f30` (2026-09-18) — feat(acp02): POS thermal printing 58mm/80mm, print preview, mobile, and ESC/POS bridge operationalization
+- `d8cfac7` (2026-09-18) — feat(bcp02b): implement first infrastructure approval readiness test suite
+- `afb43bc` (2026-09-18) — feat(bcp02a): implement wave zero capacity and finops measurement suite
+- `007c604` (2026-09-18) — feat(bcp02): implement paid blocker prioritisation and finops governance suite
+- `0ceb586` (2026-09-18) — feat(bcp01b): implement provider governance mfa recovery and continuity verification suite
+- `587c7bd` (2026-09-18) — feat(bcp01): certify atlas wildcard removal and render cidr network hardening
+- `b5629c8` (2026-09-18) — feat(bcp01): implement zero-cost governance network closure and continuity verification suite
+- `ecb3063` (2026-09-18) — feat(ext19): implement cutover preparation validation and safety governance suite
+- `03c9904` (2026-09-18) — feat(ext18): implement executive sign-off preparation and launch decision package suite
+- `d0f278c` (2026-09-18) — feat(ext17): implement zero-cost monitoring, health checks, synthetic availability probes, and alerting verification suite
+- `a2404e3` (2026-09-18) — feat(ext16): implement production secrets, access control, and environment isolation audit suite
+- `de4c000` (2026-09-18) — feat(ext15): implement PWA distribution validation, Microsoft Store readiness, and 41-point acceptance suite
+- `bfae316` (2026-09-18) — feat(ext14): implement preflight environment validation and 40-point pilot acceptance test suite
+- `88d2e0a` (2026-09-18) — feat(ext-13): real thermal printer acceptance suite and HTML print XSS sanitation
+- `e98ed94` (2026-09-18) — test(ext-12): add physical Windows installation and desktop workflow acceptance 30-point invariant suite
+- `a7da3e1` (2026-09-18) — feat(ext-11): add PWA manifest icon sizes and Android mobile acceptance 28-point invariant suite
+- `b17a843` (2026-09-18) — test(ext-10): add production domain, dns, tls and hosting readiness 24-point invariant suite
+- `af33a61` (2026-09-18) — feat(ext-09): GitHub branch protection, rulesets, CI enforcement & release governance
+- `a436503` (2026-09-18) — feat(ext-08): CA/tax/statutory review preparation — 42-point internal tax readiness suite
+- `3c0bb29` (2026-09-17) — fix(ext-05): update git-log assertion in test-19 to match post-EXT-07 commits
+- `653e4f2` (2026-09-17) — feat(ext-07): pentest preparation — scope, RoE, validation script, 36-point readiness suite
+- `6fab957` (2026-09-17) — fix(dast): continue-on-error for ZAP baseline to run full active scan
+- `581110a` (2026-09-17) — fix(zap): use fixed string matching in denylist check to avoid false positive domain match
+- `28a396b` (2026-09-17) — feat(dast): configure real OWASP ZAP matrix for live staging backend and preview frontend
+- `0a36314` (2026-09-17) — build(zap): update OWASP ZAP actions to official v0.13.0 releases
+- `d2c06b6` (2026-09-17) — feat(ext-06a): add official OWASP ZAP GitHub Actions workflow and EXT-06A live closure test suite
+- `e78a8ac` (2026-09-17) — feat(ext-06): implement zero-cost staging DAST validation, security probe suite & target guards
+- `ba47313` (2026-09-17) — feat(ext-05): implement zero-cost disaster recovery exercise, RTO/RPO measurement & business continuity validation
+- `913e020` (2026-09-17) — feat(ext-04): implement GridFS document restore, revision recovery & integrity verification service
+- `9f2468d` (2026-09-17) — fix(ext-03f-r): enforce write-quiescence guard, upload draining & consistency verification for Free-tier backup
+- `fdb0f78` (2026-09-17) — feat(ext-03f): implement Free-Tier MongoDB backup script, mongodump/restore validation & retention policy
+- `83a89ef` (2026-09-17) — feat(ext-03): implement MongoDB Atlas backup restore verification, GridFS stream validation & safety guards
+- `37ab65e` (2026-09-17) — feat(ext-02): implement ClamAV INSTREAM socket scanner, GridFS stream integration & fail-closed quarantine enforcement
+- `55e5257` (2026-09-17) — feat(ext-01g): implement MongoDB Atlas GridFS production document storage, streaming, security & immutable revisions
+- `8c96b9c` (2026-09-17) — feat(ext-01r): finalize Cloudflare R2 live object storage provider architecture and audit documentation
+- `dae2568` (2026-09-17) — docs(audit): generate EXT-01 production object storage audit, security matrix, and handoff documentation
+- `096b97e` (2026-09-17) — fix(auth): fix password recovery routing and elevate passkey notice modal styling
+- `bb8cfbe` (2026-09-17) — fix(auth): map all raw WebAuthn OS errors to friendly in-app messages
+- `17e12f9` (2026-09-17) — fix(auth): replace broken fingerprint icon with verified Lucide SVG asset
+- `bb884c1` (2026-09-17) — feat(rec-19a): reconcile auth background preload, conditional passkey discoverability, and passkey UI management
+- `b544403` (2026-09-17) — feat(rec-19): Login 2.0 UI normalization, password recovery repair, WebAuthn passkeys, federated auth governance, and performance hardening
+- `8d639d7` (2026-09-17) — fix(server): hoist documentStorageAdapter import to module level for startup validation
+- `0bef7d5` (2026-09-17) — feat(rec-18): retire legacy login and canonicalize Login 2.0
+- `642b044` (2026-09-17) — feat(rec-17c): PO approval authority, accounts-department capability & canonical AP aging reconciliation
+- `4404391` (2026-09-17) — feat(rec-17b): canonical regression runner inclusion, accounts authority reconciliation & PO approval matrix
+- `2642969` (2026-09-17) — feat(rec-17a): vendor AP UI, accounts handoff, financial posting, control ledger & final freeze closure
+- `18bcb8c` (2026-09-16) — feat(rec-17): vendor accounts payable ledger, receipt-based payable calculation, partial payment & lifetime vendor balance
+- `39a3a30` (2026-09-16) — feat(rec-17): vendor short supply, backorder, partial receipt, non-receipt, substitution & alternative-sourcing management
+- `af0d4d3` (2026-09-16) — feat(rec-11b): personal ledger primary master + owner access correction & final internal freeze reconciliation
+- `73f0b9f` (2026-09-16) — feat(rec-11a): reconcile personal ledger policy, pos route, rec-13 leaves, and recovery programme labels
+- `b407386` (2026-09-16) — feat(rec-11): final cross-role regression, multi-tenant security boundary & internal product certification
+- `6aaf72c` (2026-09-16) — feat(rec-10): new cafe end-to-end acceptance, provisioning & tenant-isolation certification
+- `c64acb0` (2026-09-16) — feat(rec-09a): session entropy, csrf topology, recovery-code & password-blocklist reconciliation
+- `89c9a1d` (2026-09-16) — feat(rec-09): final authentication, session, trusted-device, account-recovery & security hardening
+- `19880e2` (2026-09-16) — feat(rec-08a): global control ledger reconciliation, hold cart lifecycle & authoritative functional freeze
+- `95935cf` (2026-09-16) — feat(rec-08): global interactive control audit, dead-control elimination & final certification
+- `2a38722` (2026-09-16) — feat(rec-16a): payable rounding arithmetic reconciliation & boundary matrix freeze
+- `e889ddf` (2026-09-16) — feat(rec-16): gst rounding, tax-component calculation, invoice totals & 50-paise payable policy certification
+- `2b13615` (2026-09-16) — feat(rec-15): asset maintenance scheduling, preventive maintenance, alerting & certification
+- `de70247` (2026-09-16) — REC-07: Staff Settings Hardening, Simplification & Role-Boundary Certification
+- `40731e3` (2026-09-16) — fix(rec-05a): reconcile test accounting, 3-way match backward-compatibility, and full regression baseline
+- `a0553b8` (2026-09-16) — feat(rec-05): complete purchase order invoice, delivery challan, receipt and procurement document lifecycle
+- `2728e20` (2026-09-16) — feat(rec-06a): production malware-scanner provider contract & storage-runtime certification closure
+- `984314f` (2026-09-16) — feat(rec-06): universal durable private document storage, security, authorization & recovery architecture
+- `60f8ca9` (2026-09-16) — feat(rec-13b): offline POS review owner-authority reconciliation, execution-time re-auth, and final freeze
+- `000951a` (2026-09-16) — feat(rec-13a): disabled-operator late offline sync governance closure and review workflow
+- `c6166f4` (2026-09-16) — feat(rec-13): offline POS queue synchronization, conflict-safe recovery and exactly-once certification
+- `3b7f454` (2026-09-16) — feat(rec-04b): distributed idempotency, unknown-outcome recovery and durable financial reconciliation
+- `41a2e54` (2026-09-16) — feat(rec-04a): POS transaction integrity reconciliation and certification closure
+- `cc12da3` (2026-09-16) — feat(rec-04): POS save/print/reprint lifecycle, thermal print bridge, reprint last, BOM import fix
+- `8a5eea4` (2026-09-15) — chore: record final control classification runtime timestamp
+- `10c9a0e` (2026-09-15) — feat(rec-03a): reconcile test arithmetic, normalize public failure disclosure, and add security evidence
+- `7d9586c` (2026-09-15) — feat(rec-03): per-cafe unique QR, secure deep-link, gateway and access-credential lifecycle
+- `7197deb` (2026-09-15) — recovery(REC-02A): reconcile Git lineage documentation and FSSAI Kind of Business fee architecture
+- `ceeaf56` (2026-09-15) — recovery(REC-02): complete new cafe lifecycle, provisioning, FSSAI 2026, PIN retirement
+- `a7f21b1` (2026-09-15) — recovery(REC-01): harden approval and device controllers against unhandled 500 crashes
+- `865dfb9` (2026-09-15) — recovery(REC-01 to REC-08): café ops hardening, QR/deep-link, new-café E2E, dead-button elimination
+- `9bec2f4` (2026-09-15) — fix(owner-stage-13): clean residual liability variables from loyalty page
+- `27a15bd` (2026-09-15) — fix(owner-stage-13): purge liability terminology, support simulation exposure, and remove liability aliases
+- `9d1c128` (2026-09-15) — fix(owner-batch-03): eliminate client loyalty override, purge liability terminology, and align 2025 tax forms
+- `714583b` (2026-09-15) — fix(owner-batch-03): configure 35% utility anomaly threshold and enforce default-off loyalty runtime gate
+- `14eabe6` (2026-09-15) — fix(stage-13): realign loyalty metrics to programme exposure without balance sheet recognition
+- `297bc21` (2026-09-15) — ci: install backend dependencies in backend-web job and log Apple runner environment variables
+- `ae40da6` (2026-09-15) — fix(owner-batch-03): correct menu labelling dual branches, 2025 small-company thresholds, and regulatory matrices
+- `d61dd8d` (2026-09-14) — fix(owner-batch-03): correct secretarial audit Rule 9 turnover threshold and auditor rotation Rule 5 class applicability
+- `131974d` (2026-09-14) — fix(owner-batch-03): restore canonical complaint lifecycle, cpcb swm 2026 bwg matrix, ruco fssai pathways, and dpdp commencement status
+- `7851b54` (2026-09-14) — fix(owner-batch-03): delegate menu pricing to gst tax service, add proposal supersession, reconcile s184 exemption, and isolate test data
+- `4357153` (2026-09-14) — fix(refund): ensure 404 NOT_FOUND on cross-cafe mismatch to prevent resource existence disclosure
+- `32456d4` (2026-09-14) — refactor(refund): unify authoritative bill refund business logic into canonical refundService
+- `513c089` (2026-09-14) — fix(owner-batch-03): wire canonical refund ledger, statutory Section 173 notice rules, and extended delegation coverage
+- `03fcdf4` (2026-09-14) — fix(test): add clean database disconnect teardown hooks to Batch 03 test suites
+- `8b58b08` (2026-09-14) — feat(owner): implement Owner Strategic Expansion Batch 03 (Stages 11-15) and freeze
+- `608b38b` (2026-09-14) — fix(owner-batch-02): enforce calendar-year FoSTaC validity, CERT-In 180-day logs, and Rule 46 governance
+- `98e458f` (2026-09-14) — fix(owner-batch-02): correct FoSTaC 2-year validity, Rule 46(8) localisation, and DPDP DPO governance
+- `8fa1262` (2026-09-14) — chore(owner-batch-02): finalize evidence closure (Rule 46(9) 7-tax-year retention, FoSTaC validity decoupling)
+- `653f8d9` (2026-09-14) — chore(owner-batch-02): finalize certification truth closure (EPF internal policy, BCDR auth invariant, Render persistent disk)
+- `93857bc` (2026-09-14) — test(owner-batch-02): ensure clean test isolation in cross-app distribution suite
+- `16da59c` (2026-09-14) — chore(owner-batch-02): complete zero-gap corrective closure for legal architecture, retention engine, and data classification
+- `c7b81ed` (2026-09-14) — feat(owner-expansion): complete cross-app distribution and application-wide data privacy & cybersecurity integration (Stages 04-10)
+- `90c592f` (2026-09-14) — feat(owner-expansion): implement Owner Strategic Expansion Batch 02 (Stages 04-10)
+- `c1f994a` (2026-09-14) — fix(auth): defer passkey authentication by default, add authentication baseline tests and owner feature branch CI triggers
+- `66b5d87` (2026-09-14) — fix(owner): separate regulatory licence status from internal compliance state, correct Schedule 4 mapping and remove phantom MFA anomaly event
+- `77df853` (2026-09-14) — feat(owner): strategic expansion batch 01 final corrective closure (stages 01, 02, 03)
+- `b3effb7` (2026-09-14) — fix(windows): align windows-app-web-link schema to official top-level array format
+- `c005ad4` (2026-09-14) — feat(windows): add windows-app-web-link website association with exact PFN
+- `41fbe38` (2026-09-13) — test(pos): add offline financial safety and idempotency test suite (Cases A-F)
+- `dfbf585` (2026-09-13) — ci(apple): capture explicit toolchain provenance, simulator naming, and upload xcresult artifacts
+- `b2fa427` (2026-09-13) — build(apple): align macOS Info.plist LSMinimumSystemVersion to 14.0
+- `a2b3985` (2026-09-13) — test(apple): complete native bridge and document security XCTest coverage for iOS and macOS
+- `81c34ee` (2026-09-13) — apple: create native Xcode projects, AppDelegates, and Xcode 26+ CI workflow
+- `48d404a` (2026-09-13) — ci: add Apple CI job and dedicated POS/attachment concurrency suites
+- `567ebe5` (2026-09-13) — ci: add native Android and Windows verification jobs
+- `71539d9` (2026-09-13) — feat(batch-04): add release manifest, CycloneDX SBOM, and role training curriculum JSON
+- `7aebab0` (2026-09-13) — fix(apple): update privacy manifest reason to 3B52.1 for user-granted file access
+- `fd31a2c` (2026-09-13) — fix(batch-02): eliminate unverified hosts, secure signing configs, add Apple privacy manifests, create privacy page and MSIX assets
+- `a25b7ad` (2026-09-13) — fix(platform): add Apple Info.plist configurations and enhance Windows WebView2 runtime detection
+- `ff1eb10` (2026-09-13) — fix(security): enforce domain-only associated domains in Apple entitlements and configure cafe components in AASA
+- `0d36265` (2026-09-13) — feat(cross-platform): implement Windows WinUI/WebView2, Apple iOS WKWebView, Apple macOS AppKit/WKWebView native shells and unified capability protocol
+- `038fc15` (2026-09-13) — feat(android): implement native Android client with hardened WebView, SAF, App Links, Print Framework, and attachment coordination
+- `cc0de05` (2026-09-13) — fix(retention): enforce CGST Sec 36 72-month statutory retention and Android 11+ SAF boundary restrictions
+- `323535c` (2026-09-13) — feat(shared-infra): enforce statutory retention, legal hold, Android SAF native bridge authority, and notification lifecycle
+- `5e6e2a1` (2026-09-13) — feat(shared-infra): absolute final security, resource-aware auth, SAF, and platform closure
+- `9af522f` (2026-09-13) — fix(gst): finalize multi-series DB unique index sync, conflict detection, and GST-DB-01..07 verification
+- `cc8c4f6` (2026-09-13) — fix(gst): enforce GSTIN-scoped invoice uniqueness, compact branch code collision protection, DB unique indexes, and 99999 POS series capacity
+- `d47d086` (2026-09-13) — fix(statutory): reconcile test inventory arithmetic, enforce GST Rule 46(b) <=16 char serials, add Times New Roman typography and official export filenames
+- `8a4647b` (2026-09-13) — feat(closure): complete test inventory reconciliation, canonical XLSX OOXML validation, and GST invoice numbering immutability (GST-NUM-01..07)
+- `964d874` (2026-09-13) — feat(statutory): implement ESI Rule 50 contribution-period continuity, EPF Scheme 1952 membership logic, and comprehensive statutory test suite
+- `386be8d` (2026-09-13) — chore: remove all markdown files across repository - full conversion to working code modules verified
+- `6d15b18` (2026-09-13) — chore: remove obsolete specification and completed stage reports post full code conversion
+- `922cc99` (2026-09-13) — feat(stage-10): implement executive analytics dashboard, BCG menu engineering, hourly heatmap, food cost variance, and multi-cafe benchmarks
+- `de78322` (2026-09-13) — feat(stage-09): implement attendance-linked wages, statutory EPF/ESI/PT deductions, corporate payslip PDF with verification QR, and NEFT/RTGS bank disbursement export
+- `6175387` (2026-09-13) — feat(stage-08): implement CBIC-compliant GST Tax Invoicing, sequential gapless invoice allocation, Z-Report daily reconciliation, period lock enforcement, and GSTR reporting
+- `3539e03` (2026-09-13) — feat(stage-07): implement inventory BOM recipe explosion, FEFO lot depletion, and procurement PO document attachment pipeline
+- `28f403c` (2026-09-13) — feat(stage-06): implement authoritative POS order pipeline with idempotency, explicit save/print/preview, and safe printer failure resilience
+- `35663f5` (2026-09-13) — feat(stage-05): complete Hardware Bridge + Device Integration with ESC/POS engine, multi-station KOT routing, and cash drawer kick pulse
+- `bbedc14` (2026-09-13) — feat(stage-04): complete Employee Registration, Onboarding Readiness & Staff Settings Reduction with DPDP compliance
+- `ea61d6d` (2026-09-13) — feat(stage03): complete Cafe Registration Wizard, 7-stage Readiness Engine, and Universal QR integration
+- `5de2980` (2026-09-13) — feat(stage02): complete Universal QR Engine with opaque tokens, HMAC signing, lifecycle rotation and printable card PDF
+- `7891807` (2026-09-13) — feat(stage01): complete Universal Export + Print Engine with APA 7 PDF, Excel OpenXML, preview and direct streaming APIs
+- `ecfdbfb` (2026-09-13) — stage10-proof-gates: permission-based bypass, kill-switch scoping, secrets validation CLI, GitHub ruleset
+- `1b55415` (2026-09-13) — docs: add Stage 10 final evidence report
+- `62ec652` (2026-09-13) — stage10: production safety, monitoring, backup, DR, incident response, feature flags, release governance - 31 tests pass, P0=0 P1=0 P2=0
+- `6c32f5a` (2026-09-13) — fix(readiness): align readiness probe status with database readiness and finalize PIN auth rejection test
+- `e2ec643` (2026-09-13) — feat(storage): enforce durable Render persistent disk storage adapter and fail-safe startup validation
+- `dab30bd` (2026-09-13) — feat(security): complete final freeze gate corrections for NIST 15-char password, disk uploads, ASVS matrix, fallback UI, and malware scanning
+- `742762a` (2026-09-06) — feat(owner): complete Phase 1 discovery, Phase 2 remediation, and OWN-SCR-001 Owner Dashboard implementation
+- `e49f97b` (2026-09-06) — chore(ide): remove deprecated markdownlint.config property in favor of .markdownlint.json
+- `7212948` (2026-09-06) — chore(ide): disable markdownlint on workspace files to eliminate markdown warning flood
+- `d28060c` (2026-09-06) — chore(ide): disable edge-devtools webhint and add .hintrc to eliminate 6K+ CSS compat warnings
+- `8c26eb8` (2026-09-06) — chore(ide): disable validation engines in workspace settings to eliminate legacy archive phantom problems
+- `9ec9087` (2026-09-06) — chore(ide): configure jsconfig project boundaries and exclude legacy folders to resolve 6K+ phantom problems
+- `9980e55` (2026-09-06) — feat(staff): complete and freeze employee self-service workspace
+- `4e58585` (2026-09-06) — feat(attendance): complete secure attendance, rosters, payroll integration and QR geo-selfie verification
+- `6634fc1` (2026-09-04) — fix(purge): use native collection deletion to clear immutable collections during production reset
+- `31860a2` (2026-09-04) — feat(data): add automated production purge script and minimal clean seed mode
+- `670f7ac` (2026-09-04) — fix(ui): restore page scrolling by scoping login overflow lock to auth-screen only
+- `8a8395a` (2026-09-04) — fix(auth): disable 2FA challenges completely for all accounts in frictionless mode
+- `6c50c63` (2026-09-04) — fix(auth): eliminate mandatory authenticator app mfa requirement and enable frictionless direct password login
+- `c5a38e1` (2026-09-04) — fix(security): eliminate auth token persistence in localStorage/sessionStorage and enforce pure in-memory and HttpOnly cookie authority
+- `0097338` (2026-09-04) — fix(auth): correct production session handoff, disable /auth/me caching, and restore same-origin proxying
+- `80b31ee` (2026-09-04) — fix(deviceTrust): guard database operations when connection is unready
+- `1dffefb` (2026-09-04) — feat(auth): implement real trusted-device remember-this-device subsystem with role-based expiry and 31-point validation
+- `faedb0f` (2026-09-04) — fix(mfa): bump asset cache versions to v3.4.0 and sw to v2.3.8
+- `7e79b55` (2026-09-04) — fix(mfa): add cache buster on login.js import and complete automated tests
+- `cd6fdac` (2026-09-04) — fix(mfa): automatic seamless MFA orchestration on LOGIN-PAGE-2.0 without error flash
+- `7b0d0a3` (2026-09-04) — fix(login2): restore original scenic background images and remove local assets
+- `037ff44` (2026-09-04) — fix(login2): resolve slow background loading with local WebP suite and fix false auth timeouts with 60s lifecycle & health warm-up
+- `4c12094` (2026-09-04) — fix(auth): fix ReferenceError cafeOpsLink in wireLoginPage2 and bump assets to 3.3.6
+- `f4dc52c` (2026-09-04) — fix(attendance): fix employee attendance buttons, check-in/out verification flow, and directory deep links
+- `4301ebf` (2026-09-04) — feat(security): implement Passkey Management Hub in Settings, role-based inactivity policies, and device trust integration
+- `606ab75` (2026-09-04) — feat(security): enforce strict self-scope isolation on employee profiles and role-based module landing
+- `32c0f0a` (2026-09-04) — feat(ui): permanently remove dev preview persona switcher banner and all banner styles
+- `a83d69b` (2026-09-04) — feat(ui): eliminate page vertical scrolling, enforce zero-scroll viewport, and update biometric/input vector icons
+- `761084b` (2026-09-04) — chore(deploy): update vercel cache-control headers and bust module import cache
+- `6fb57f9` (2026-09-03) — feat(ui): refine login-page-2.0 dimensions, compact height, buttonize terms, fast boot & remove dev switcher
+- `f8156c1` (2026-09-03) — chore(release): bump asset version to v3.2.1 and PWA cache to v2.0.1
+- `eb44c73` (2026-09-03) — fix(frontend): clean up auth screen routing in main.js
+- `117a0a4` (2026-09-03) — feat(auth): integrate LOGIN-PAGE-2.0 presentation layer and standards-compliant WebAuthn passkey backend
+- `b99eb1d` (2026-09-03) — Merge pull request #1 from zamorinestate-erp/fix/password-reset-gmail-delivery
+- `db5ccb7` (2026-09-03) — chore(auth): trigger clean post-Vercel verification
+- `c5fd977` (2026-09-03) — fix(test): restore password reset delivery tests
+- `f513c1b` (2026-09-03) — test(auth): cover Gmail password reset delivery
+- `7b2f4bd` (2026-09-03) — fix(auth): add Gmail password reset delivery
+- `ef10024` (2026-09-03) — fix(auth): add Gmail password reset delivery
+- `c707cb7` (2026-09-02) — fix(auth): enforce production login and isolate dev preview
+- `9932e41` (2026-09-02) — Update vercel.json
+- `02dccdf` (2026-09-02) — fix(deploy): enforce persistent cloudinary storage driver in render.yaml
+- `9ac4ce1` (2026-09-02) — chore(deploy): ignore temporary browser test directories in .gitignore
+- `3886230` (2026-09-02) — chore(deploy): purge dev auto-login credentials, add health check aliases, and enforce 0 secrets
+- `42cbf02` (2026-09-01) — chore(deploy): prepare production configuration for Vercel, Render, MongoDB Atlas and GitHub CI/CD
+- `ecbc31c` (2026-09-01) — feat(deployment): release package, pre-flight diagnostics, and production configurations
+- `30f5dee` (2026-09-01) — fix(auth,test): strengthen audit & sequence resilience and fix primaryMaster & preview test suites
+- `e0f87f7` (2026-09-01) — chore(deploy): complete pre-deployment data sanitisation & demo purge across frontend and database
+- `53dd5b5` (2026-09-01) — chore(deploy): production data cleanup — removed all seed/fake data, preserved Primary Master + permissions
+- `e3728de` (2026-09-01) — fix(auth): preserve login form inputs on error and fix body serialisation in apiClient
+- `9510067` (2026-09-01) — feat(auth): configure official Primary Master credentials and remove legacy mock accounts
+- `936b3ea` (2026-09-01) — fix(auth): fix login API payload unwrapping, dynamic role recognition, and seed all authentic role accounts
+- `a92dc72` (2026-09-01) — fix(auth): update login placeholders to Email ID and Password, and enforce universal box-sizing for perfect input/button alignment
+- `ef4efdf` (2026-09-01) — fix(cafe-ops): add box-sizing:border-box to auth-input so inputs match button width exactly
+- `25214d9` (2026-09-01) — fix(cafe-ops): match input background to warm cream, add missing CSS tokens to align with main login
+- `c5409ca` (2026-09-01) — fix(cafe-ops): align brand header, logo, title, subtitle, form field spacing and label size to match main login page exactly
+- `efd0a7e` (2026-09-01) — fix(cafe-ops): constrain cafeOpsRoot to 580px max-width to match main login card width
+- `fcd0894` (2026-09-01) — fix(cafe-ops): scale card, logo, inputs, buttons, keypad and kiosk for laptop/desktop
+- `5e9b5d8` (2026-09-01) — fix(login): expand card width to 580px and enlarge typography and button scale for laptop screens
+- `d7f72a4` (2026-09-01) — fix(login): scale card dimensions and typography for desktop and laptop displays
+
+## 2026-08
+
+- `4c8c7c1` (2026-08-31) — fix(login): add components.base.css link, use official stacked SVG logo across all auth screens
+- `7d25068` (2026-08-31) — fix(login): center auth-screen flex container, use stacked SVG logo, and polish card alignment
+- `83769c2` (2026-08-31) — feat(auth): mount canonical login and password recovery screen with full porcelain card styling
+- `68eb1fd` (2026-08-31) — fix(cafe-operations): link components.base.css for proper card alignment and styling
+- `d297045` (2026-08-31) — chore: merge v1.1.0 release to main (validation/android-preview-rc1)
+- `081c686` (2026-08-31) — release: v1.1.0 — UI remediation, navigation, dashboard layout, security hardening
+- `6191b85` (2026-08-30) — feat(ui): replicate 6-metric child box card layout and spacing across Master, Owner, and Cafe Operations
+- `57cfabc` (2026-08-30) — fix(dashboard): fix return syntax in dashboardMaster.js and bump asset versions to 3.0.5
+- `264aaaa` (2026-08-30) — feat(ui): standardize header, KPI grid, and card spacing across Primary Master, Normal Master, Owner, and Cafe Operations
+- `d4786ea` (2026-08-30) — fix(staff-home): add distinct 12px vertical spacing between each schedule day box
+- `fe65f55` (2026-08-30) — fix(staff-home): format weekly schedule as horizontal day-strip with distinct spacing
+- `af6c0c2` (2026-08-30) — fix(cache): add cache-busting version headers to prevent stale mobile asset caching
+- `7430bb9` (2026-08-30) — feat(nav): add Staff Self-Service to navigation and Employee Directory header
+- `b3bfbf4` (2026-08-30) — feat(mobile-ui): align staff self-service modules with HRIS reference design system
+- `c8ab11b` (2026-08-30) — fix(mobile): resolve responsive multi-column layouts, badge clipping, and unlock full Primary Master access
+- `463377c` (2026-08-30) — docs: complete platform account ownership consolidation across GitHub, Vercel, Render, and Atlas
+- `b84ed80` (2026-08-30) — docs: add platform account ownership consolidation programme report
+- `e8a324b` (2026-08-30) — docs: add pre-deployment certification reports and operational runbooks
+- `a5d4acf` (2026-08-30) — docs: add Vercel Preview and Android validation preparation report
+- `bb49fad` (2026-08-30) — chore: update edge-case validation screenshots
+- `69dfe8e` (2026-08-30) — feat(ui): add accessible performance-safe motion and microinteractions
+- `2d9ccf2` (2026-08-30) — docs: align ui/ux closure report with pre-production validation baseline and honest evidence standards
+- `3c95c04` (2026-08-30) — docs(screenshots): record updated edge case baseline visual artifacts
+- `ba61de6` (2026-08-30) — feat(ui): complete final ui/ux edge-case, forced-colors, and accessibility closure gate
+- `1705e30` (2026-08-30) — docs(screenshots): record updated visual artifacts from master verification suite
+- `0b3d281` (2026-08-30) — feat(release): add unified master test orchestrator, production preflight audit, pwa offline caching, and i18n
+- `541b7fd` (2026-08-30) — docs(screenshots): update visual audit screenshots from automated headless verification
+- `07e26b5` (2026-08-30) — feat(treasury): complete personal ledger and passbook workspaces and standalone verifications
+- `aaad1ca` (2026-08-29) — feat(ui): complete application-wide UX and visual consistency remediation
+- `a163e2b` (2026-08-29) — fix(security): eliminate frontend refresh token exposure and make access token memory-only
+- `1fd7158` (2026-08-29) — fix(auth): complete authentication token, JWT, and session lifecycle remediation
+- `8f10877` (2026-08-29) — fix(ui): finalize loading error and runtime recovery remediation
+- `11701d3` (2026-08-29) — feat(ui): complete mobile-first and tablet responsive remediation across all screens and roles
+- `b96fce7` (2026-08-29) — chore(infra): remove obsolete aws staging artifacts and restore canonical vercel-render-atlas architecture
+- `a851c0d` (2026-08-29) — fix(cloud): correct cloud foundation status to truthfully reflect not_verified_live
+- `103241b` (2026-08-29) — chore(cloud): establish secure aws scalability staging foundation
+- `02d7545` (2026-08-29) — perf(scale): create cluster load harnesses, iac topology, and validation register
+- `8be3027` (2026-08-29) — docs(scale): record scalability main merge report and integration freeze
+- `9ef930b` (2026-08-29) — perf(scale): finalize resumable streams and redis runtime adapter
+- `de5769f` (2026-08-29) — perf(scale): persist realtime checkpoints and finalize cluster adapters
+- `624b290` (2026-08-29) — perf(scale): close distributed enterprise capacity guarantees
+- `4b5cd29` (2026-08-29) — docs: record supporting files main merge report and integration freeze
+- `c9e4b6b` (2026-08-29) — docs: create supporting files main merge baseline record
+- `9c85569` (2026-08-29) — test(app): close exact-head supporting file regression gate
+- `fdf649c` (2026-08-29) — test(app): finalize route export and template reconciliation
+- `f34568a` (2026-08-29) — chore(audit): add source-derived route arithmetic and governance assertions
+- `1aad3c0` (2026-08-29) — test(app): reconcile final supporting-file coverage
+- `7c3ac5a` (2026-08-29) — test(app): close supporting-file exact coverage gate
+- `5f66af8` (2026-08-28) — feat(app): complete application-wide supporting file integration
+- `62a6612` (2026-08-28) — test(login): increase cold-start navigation delay for CDP stage 5 browser audit
+- `0966c6f` (2026-08-28) — docs(login): record main merge history reconciliation and browser security test ownership matrix
+- `b6ccbfe` (2026-08-28) — docs(login): add main merge delta, merge report, and integration freeze gate
+- `dede55c` (2026-08-28) — fix(auth): align scrypt cost with password security baseline
+- `9a2e56e` (2026-08-28) — fix(auth): migrate password verifier to modern kdf
+- `5783771` (2026-08-28) — fix(auth): close password hashing and otp replay guarantees
+- `da96b6c` (2026-08-28) — feat(login): freeze complete authentication integration programme
+- `44a57db` (2026-08-28) — fix(auth): align password and recovery security policy with NIST SP 800-63B-4 standards
+- `01aed65` (2026-08-28) — feat(auth): complete Stage 5 identity recovery, persona handoff, and security operations certification
+- `f1f49c8` (2026-08-28) — test(login): close terminal lifecycle runtime evidence
+- `78f20cb` (2026-08-28) — feat(login): harden terminal device and session lifecycle
+- `e2eff63` (2026-08-28) — feat(login): harden canonical authority and device session single-source governance
+- `156ee44` (2026-08-28) — feat(login): integrate cafe operations terminal authentication
+- `8858788` (2026-08-28) — feat(login): integrate terminal authentication frontend
+- `310d126` (2026-08-28) — feat(login-stage-2): terminal auth UI placement — cafeMasterSignIn, cafeDeviceEnroll, cafeTerminalWelcome
+- `5a3e3d6` (2026-08-28) — feat(login-stage1): Add 9 Stage 1 Discovery and Audit deliverables
+- `643c386` (2026-08-28) — docs: record canonical stage-2 test evidence automated run
+- `8fc3dfe` (2026-08-28) — test: stabilize stage2 staff smoke readiness gate
+- `f6d6f9c` (2026-08-27) — perf: freeze application-wide instant-response optimisation
+- `d8ad778` (2026-08-27) — feat: freeze zero-dead-controls passbook and export closure
+- `5032fb2` (2026-08-26) — feat(release): final stage release package - support files, launchers, CI/CD, 100% test certification, and master runbook
+- `2a99e1b` (2026-08-24) — feat: complete gold baseline locked (v1.0.0-GOLD-LOCKED) - UI/UX overhaul, all 61 endpoints verified, zero loading issues
+- `4481e5c` (2026-08-17) — feat(auth): temporary login UI removal with fail-closed production guard and safe direct dashboard preview
+- `18b1d0e` (2026-08-17) — feat(auth): match reference UI design, universal sizing, inline show button, automatic background MFA
+- `1eec446` (2026-08-17) — feat(auth): premium login page - rotating backgrounds, company logo, modern toggle checkbox, pill buttons, entrance animations
+- `16d01fe` (2026-08-16) — style(auth): restore original login page design - clean executive card with Zamorin emblem
+- `02f3427` (2026-08-16) — style(auth): expand login container to global standard width and spacious padding
+- `c06308e` (2026-08-16) — feat(auth): automate background MFA provisioning and seamless login
+- `8c4f172` (2026-08-16) — style(frontend): unify theme, ui, and ux consistency across all roles and pages
+- `c980b53` (2026-08-16) — fix(mailops): reconcile permissions to 95/95 baseline and document MAILOPS-R2 live google certification
+- `4f0651d` (2026-08-16) — feat(mailops): complete MAILOPS-R1 live gmail integration, noise control, and certification suite
+- `43e8f47` (2026-08-16) — feat(mailops): attach seeding and role permissions for MailOps in backend bootstrap
+- `9dff11b` (2026-08-16) — feat(mailops): implement advanced system email, mailops command centre, inbound automation, and BEC defense
+- `6928e3e` (2026-08-16) — docs: finalize project storage consolidation closure audit report
+- `7adca3d` (2026-08-16) — feat(consolidation): complete full C: drive discovery, zero-scatter consolidation, storage governance, and UI/dashboard alignments
+- `4308650` (2026-08-15) — perf(attendance): implement true 500-staff arrival storm harness, optimize connection pool, and document ADB-PERF-R4 certification findings
+- `6a7257c` (2026-08-15) — docs(attendance): reconcile ADB-VERIFY-R3 attendance certification and empirical evidence
+- `ad13572` (2026-08-15) — feat(kiosk): wire safe attendance display page in router and verify all 142 backend JS files
+- `1edc8e9` (2026-08-15) — feat(attendance): complete ADB-VERIFY-R2 device-bound data separation, 3X 500-staff E2E storm, and security certification
+- `baf89df` (2026-08-15) — feat(attendance): implement shifts model, geofencing validation, and execute HT-02, HT-07, HT-10, HT-13 attendance test gates
+- `7095a29` (2026-08-15) — feat(security): implement device-bound data separation, QR attendance architecture, and cryptographic device trust
+- `11732dc` (2026-08-15) — chore(pilot): add real pilot identity onboarding sheet and lock pre-pilot provisioning gate
+- `abb3949` (2026-08-15) — chore(reconciliation): reconcile 502 synthetic users breakdown and enforce auto-teardown on production smoke test
+- `2fa5b6f` (2026-08-15) — chore(reconciliation): reconcile 8 additional smoke test sessions deleted and update post-cleanup report
+- `929814e` (2026-08-15) — chore(pre-pilot): execute authorized synthetic data cleanup, verify 337/337 regression and 95 canonical permissions
+- `13d015a` (2026-08-15) — chore(pre-pilot): reconcile canonical permission rules to 95, generate synthetic cleanup manifest, and certify pre-pilot readiness
+- `ae5b430` (2026-08-15) — chore(pilot): add master data onboarding templates, pilot UAT runbooks, and production data inventory tools
+- `2185069` (2026-08-15) — chore(release): reconcile 4-role model, staff self-service boundaries, language terminology, and 337/337 regression pass
+- `191ae39` (2026-08-15) — chore(release): add HT-15 DR point-in-time restore reconciliation, production smoke test suite, and operational closure report
+- `96386a0` (2026-08-15) — chore(release): complete HT-20R evidence reconciliation, 3x cloud attendance SLA runs, and final deployment certification
+- `8774aaf` (2026-08-15) — fix(startProd): use canonical startServer and runSeed bootstrap
+- `42b13d2` (2026-08-15) — docs(ht20): conclude 20-stage hard-testing programme with 100% pass rate
+- `f395be6` (2026-08-15) — test(ht19): pass HT-19 Cloud Staging Acceptance Gate (500 VUs)
+- `5d4d51f` (2026-08-15) — fix(env): allow PRIVATE_STORAGE_DRIVER=local in production for staging deployments
+- `ebba95b` (2026-08-15) — deploy(ht19): add cloud staging configs, Atlas DNS fix, and HT-19 acceptance gate test
+- `3fe8b58` (2026-08-15) — test(ht06-ht18): complete soak, resilience, security, multi-tenant audit, and e2e test suites
+- `ba089ab` (2026-08-15) — test(ht-05): execute extreme spike, traffic surge, and rapid recovery test suite
+- `c81e45a` (2026-08-15) — test(ht-04): execute whole-system stress, breakpoint, and capacity envelope test suite
+- `9f9ec6f` (2026-08-15) — fix(ht03r2): enforce MASTER only Personal Ledger, eliminate STAFF operational rules, and verify 3x qualifying mixed runs
+- `e621cee` (2026-08-15) — docs(ht03r): record 3x 500-VU mixed workload run results
+- `c49790f` (2026-08-14) — fix(ht03r): enforce STAFF SELF scope, verify cross-user isolation, financial reconciliation, and complete 3x 500-VU mixed runs
+- `d6ea494` (2026-08-14) — feat(ht03): complete HT-03 mixed workload stress test, align CashTransaction schema, and verify 100% operational integrity
+- `539d543` (2026-08-14) — docs(ht02r4): document cloud staging provisioning requirements and billing authorization audit
+- `9269f89` (2026-08-14) — docs(ht02r3): document production-like staging topology specification and staging validation status
+- `6c4bcf2` (2026-08-14) — fix(ht02r2): optimize SequenceCounter block range allocation and operational cafe lookup caching
+- `4f66f75` (2026-08-14) — fix(ht02r): remediate HT-02 attendance storm capacity, process crash root cause, sequence counter atomicity, and domain E11000 mapping
+- `c541f55` (2026-08-14) — feat(ht02): complete HT-02 Shift-Start Attendance Storm hard-testing suite and documentation
+- `a98b8e3` (2026-08-13) — fix(ht01r): remediate bcrypt authentication throughput bottleneck and document capacity limits
+- `3fc32c5` (2026-08-13) — feat(ht01): complete concurrent login storm hard-testing stage -- HT-01 PASS WITH CAPACITY LIMIT DOCUMENTED
+- `7e15ec0` (2026-08-13) — feat(ht00): complete baseline freeze, test environment instrumentation & readiness setup -- HT-00 PASS
+- `c7fc01a` (2026-08-13) — feat(policy): grant Personal Ledger access to OWNER role as requested by user -- 332/332 tests pass
+- `0877777` (2026-08-13) — docs(audit): finalize all 14 independent reconciliation reports -- 332/332 tests pass
+- `4765c2c` (2026-08-13) — feat(audit): complete system-wide route, navigation, auth, and seed reconciliation -- 332/332 tests pass
+- `b9760b4` (2026-08-13) — fix(security): harden user identity extraction across all expansion controllers -- 330/330 tests pass
+- `d402f17` (2026-08-13) — docs(deployment): update deployment readiness doc with Docker and 330 test stats
+- `e7f2454` (2026-08-13) — feat(deploy): add production startup script, Dockerfile, and docker-compose.yml deployment assets
+- `e88a0f1` (2026-08-13) — feat(expansion): 100% completion of all 38 World-Class Expansion Capabilities (Candidate, WorkflowDefinition, SustainabilityLog models & routes) -- 330/330 tests pass
+- `d0fefa9` (2026-08-13) — fix(frontend): resolve syntax error in administration.js -- 170/170 files clean, 327/327 tests pass
+- `cbcb845` (2026-08-13) — docs(handover): update final handover readiness doc to v1.0.4 metrics (327/327 tests pass)
+- `0062152` (2026-08-13) — feat(custom-fields): complete end-to-end routing, navigation, permission seeding, controller, and frontend integration -- 327/327 pass
+- `ec5ec9a` (2026-08-13) — feat(cap26): complete Custom Fields -- CustomFieldDefinition model + User.customFields Map + 12 new tests -- 324/324 pass
+- `8033d85` (2026-08-13) — feat(capabilities): complete PARTIAL capabilities 02 03 10 12 13 16 -- 312/312 tests pass (30 new schema tests added)
+- `3c92ae2` (2026-08-13) — chore(release): v1.0.1 final handover -- 282/282 tests, 121 JS files clean, 17 Section 141 deliverables, PWA v1.0.1, in-memory dev server, API base URL fix
+- `d430eef` (2026-08-13) — docs: add 6 world-class expansion tracking documents (07-12)
+- `81515a0` (2026-08-13) — feat(navigation): sort sidebar items alphabetically by display label for all 4 roles
+- `3e140ce` (2026-08-13) — feat(reconciliation): implement Stage 3 seed drift reconciliation, Stage 7 OWNER bills view, Stage 8/9 search topbar & role-safe deep links, Stage 19 permission matrix doc
+- `4bf0327` (2026-08-13) — feat(frontend): wire POS, Reports, Notification Centre to live APIs; async renderPage; 281/281 tests pass
+- `cc4fbc8` (2026-08-13) — feat: implement dashboard views, expense management, and authorization middleware for integration workspace
+- `ba931e9` (2026-08-12) — fix(tests): resolve path resolution in 15 policy test files, fix primaryMaster caf\u00e9 regex, 281/281 tests pass
+- `8f68398` (2026-08-11) — fix(frontend): guard browser-only main entry initialization
+- `747404d` (2026-08-11) — docs: generate final Stage 8 Handover & Release Audit Report
+- `e153c69` (2026-08-11) — fix(governance): enforce Master-only restriction on Personal Ledger per spec section 1.7
+- `ca160cb` (2026-08-11) — feat(api-integration): wire financeAccounts and cafePerformance pages to backend dashboard API
+- `d841c92` (2026-08-11) — feat(frontend): build and wire vendors, procurement, menu, customers, quality, assets, dept-orders, and trash-bin pages
+- `7fbd761` (2026-08-10) — feat(security): add Primary Master attack countermeasure, statusReason/protectionSuspension schema fields, 237/237 tests pass
+- `d488729` (2026-08-10) — feat(api-integration): wire frontend pages to backend APIs, enable OWNER Personal Ledger access
+- `054abc4` (2026-08-09) — refactor(attendance): consolidate canonical attendance module
+- `3d1390c` (2026-08-09) — style(ui): add supplied responsive UI stylesheet
+- `3250055` (2026-08-09) — docs(auth): record local authentication completion
+- `f6ad71c` (2026-08-09) — fix(auth): clear public cache on logout
+- `0efc05f` (2026-08-09) — feat(auth): restore login and add secure password recovery
+- `efe3a1f` (2026-08-09) — docs(employee): record stage 2 local completion
+- `adc4b82` (2026-08-09) — feat(employee): render full authorised profile data
+- `8bb1c2a` (2026-08-09) — feat(employee): integrate frontend directory and profile
+- `56d5d94` (2026-08-09) — fix(employee): enforce staff self read permission
+- `1311413` (2026-08-09) — docs(loans): update foundation verification
+- `30eddce` (2026-08-09) — test(loans): protect self service frontend contract
+- `86847c5` (2026-08-09) — docs(loans): record foundation checkpoint
+- `ed0d50e` (2026-08-09) — feat(loans): expose self service profile availability
+- `6e82a41` (2026-08-09) — feat(loans): add self service frontend
+- `2233af6` (2026-08-09) — feat(loans): add self service read access
+- `776873d` (2026-08-09) — feat(loans): add staff loan advance persistence model
+- `deec0d7` (2026-08-08) — feat(loans): add instalment deduction safety foundation
+- `bffa2d2` (2026-08-08) — docs(loans): record blocked business decisions
+- `4932484` (2026-08-08) — docs(payroll): record local core completion
+- `b9afcb4` (2026-08-08) — test(payroll): cover payroll lifecycle and access controls
+- `515c2d8` (2026-08-08) — feat(auth): complete secure authentication integration
+- `7904712` (2026-08-07) — feat(employees): implement GET /employees/me and GET /employees/:userId profile endpoints with role-aware section serialization and sensitive reveal auditing
+- `60364cf` (2026-08-07) — fix(security): block non-MASTER from deciding protected-entity-type approvals (GAP-004); add stage 8 formal verification documentation
+- `6c73fe5` (2026-08-07) — test: add unit test suite for business module models and contracts
+- `fad2e3b` (2026-08-07) — feat: add revenue share, dashboard metrics, private files, trash bin, and global search modules
+- `6fdcd09` (2026-08-07) — feat: add quality, assets maintenance, and department orders backend modules
+- `e8c4000` (2026-08-07) — feat: add tasks and approvals framework backend module
+- `fe572fa` (2026-08-07) — feat: add customer directory and loyalty points backend module
+- `2652384` (2026-08-07) — feat: integrate pos billing with sales cash book
+- `4daa841` (2026-08-07) — feat: add menu catalogue and pos billing backend modules
+- `4a9b786` (2026-08-07) — feat: add vendors master and procurement purchase order backend
+- `a99b1d6` (2026-08-07) — feat: add inventory backend (global items, cafe stock, stock movements)
+- `8afc7a4` (2026-08-07) — feat: implement personal ledger backend with master-only enforcement
+- `a1e6237` (2026-08-07) — fix: remove dev role switcher and owner personal ledger exposure
+- `044d933` (2026-08-07) — feat: add employee search API
+- `3766f67` (2026-08-07) — feat: add employee read permission foundation
+- `c59908a` (2026-08-06) — docs: define employee permission matrix
+- `cccd65f` (2026-08-06) — feat: add employee search read foundation
+- `080cef8` (2026-08-06) — docs: define stage two employee read contract
+- `64ead22` (2026-08-06) — docs: complete stage two employee module audit
+- `bb3f0e3` (2026-08-06) — docs: correct stage two starting point
+- `6efc247` (2026-08-06) — test: complete stage one governance coverage
+- `f472328` (2026-08-06) — feat: complete stage one identity governance
+- `35a0da3` (2026-08-06) — fix: secure user administration mutation routes
+- `a2035d3` (2026-08-06) — fix: harden user administration permission policy
+- `3f1ca93` (2026-08-06) — fix: align primary master bootstrap with current backend contract
+- `317ff45` (2026-08-06) — feat: protect primary master bootstrap
+- `110036c` (2026-08-06) — Checkpoint: complete post-payroll module audit
+- `9afa26f` (2026-08-06) — Checkpoint: clean staging infrastructure configuration
+- `ee4860c` (2026-08-05) — feat: add payroll payslip management frontend
+- `8918ef4` (2026-08-05) — feat: add secure payroll management frontend
+- `11b4d75` (2026-08-05) — feat: add authenticated frontend API mutations
+- `94c1e1b` (2026-08-05) — feat: add authenticated payslip self service
+- `c711d1c` (2026-08-05) — feat: add secure payroll voiding
+- `63f209c` (2026-08-05) — fix: harden concurrent payroll payment retries
+- `a4474a6` (2026-08-05) — feat: add secure payroll payment lifecycle
+- `f693b1a` (2026-08-05) — feat: add secure payroll payslip issuance
+- `84da72c` (2026-08-04) — feat: add secure payroll submission and approval
+- `ab78a86` (2026-08-04) — feat: add secure payroll calculation
+- `69c262c` (2026-08-04) — feat: add secure payroll draft editing
+- `01d220e` (2026-08-04) — feat: add secure payroll creation endpoints
+- `206d065` (2026-08-04) — feat: add payroll management read endpoints
+- `b13c823` (2026-08-04) — fix: allow all employee roles self payslip access
+- `1a4c424` (2026-08-04) — feat: add payroll backend foundation
+- `e2dacb5` (2026-08-04) — feat: add secure PWA foundation
+- `d6a4040` (2026-08-04) — feat: add frontend brand and app assets
+- `e52d31b` (2026-08-04) — docs: add staff module completion ledger
+- `ad694a4` (2026-08-03) — feat: add secure MFA authentication flow
+- `5a0f52d` (2026-08-03) — feat: add basic reports API batch
+- `b827ca4` (2026-08-03) — feat: add basic expense API batch
+- `7ed1108` (2026-08-03) — feat: add expense model
+- `ce16c83` (2026-08-03) — feat: add basic cash flow API batch
+- `2bc67cb` (2026-08-03) — feat: add cash transaction model
+- `8eec0f3` (2026-08-03) — feat: add basic attendance API batch
+- `3d41ce8` (2026-08-03) — feat: add attendance model
+- `63c67ad` (2026-08-03) — chore: add backend-wide syntax checker
+- `561a9cf` (2026-08-03) — feat: add initial data seed batch
+- `53b4665` (2026-08-03) — feat: add notification centre API batch
+- `e999ba9` (2026-08-03) — feat: add audit log API batch
+- `3cfc763` (2026-08-03) — feat: add user management batch
+- `60b1894` (2026-08-03) — feat: add café management batch
+- `fd8fd55` (2026-08-03) — feat: complete authentication session management batch
+- `79adfda` (2026-08-03) — feat: add user session listing route
+- `6d16e99` (2026-08-03) — feat: add user session listing controller
+- `43735b5` (2026-08-03) — feat: add user session listing service
+- `6f53b71` (2026-08-03) — feat: add logout-all route
+- `90d77d7` (2026-08-03) — feat: add logout-all controller
+- `d8da0eb` (2026-08-03) — feat: add logout-all sessions service
+- `40c5167` (2026-08-03) — feat: add protected logout route
+- `024bcbd` (2026-08-03) — feat: add logout controller
+- `54b9e21` (2026-08-03) — feat: add session refresh route
+- `01efa07` (2026-08-03) — feat: add session refresh controller
+- `2c69396` (2026-08-03) — feat: mount authentication routes
+- `9317e1f` (2026-08-03) — feat: add authentication routes
+- `d6b797c` (2026-08-03) — feat: add authentication login controller
+- `15aca53` (2026-08-03) — feat: mount central API router
+- `6ede20f` (2026-08-03) — feat: add central API router
+- `44bed6c` (2026-08-03) — feat: add async handler utility
+- `4128624` (2026-08-03) — feat: add API error utility
+- `1f73390` (2026-08-03) — feat: enable global error handling
+- `4dd36a3` (2026-08-03) — feat: add global error handler
+- `9920296` (2026-08-03) — feat: enable not-found route handling
+- `bf841f7` (2026-08-03) — feat: add not-found middleware
+- `9738d48` (2026-08-03) — feat: enable cookie parsing middleware
+- `aff63a1` (2026-08-03) — feat: apply request correlation middleware
+- `017e440` (2026-08-02) — feat: add request correlation middleware
+- `3186039` (2026-08-02) — feat: add secure audit service
+- `b392339` (2026-08-02) — feat: add backend authorization middleware
+- `5509e85` (2026-08-02) — feat: add authentication middleware
+- `968042e` (2026-08-02) — feat: add secure authentication service
+- `50546a5` (2026-08-02) — chore: add authentication dependencies
+- `8114be7` (2026-08-02) — feat: add backend role permission model
+- `c4a936e` (2026-08-02) — feat: add secure MongoDB session model
+- `bf1d758` (2026-08-02) — feat: add atomic MongoDB sequence counter
+- `cbecc83` (2026-08-02) — feat: add reliable MongoDB notification model
+- `fd93280` (2026-08-02) — feat: add immutable MongoDB audit event model
+- `493e7af` (2026-08-02) — feat: add MongoDB cafe administration model
+- `22f8624` (2026-08-02) — feat: add secure MongoDB user model
+- `d3b9e9a` (2026-08-02) — refactor: add reusable MongoDB connection helper
+- `281587f` (2026-08-02) — feat: add secure Express and MongoDB backend foundation
+- `066d361` (2026-08-02) — feat: import latest Zamorin frontend baseline
+- `068d5a0` (2026-08-02) — chore: initialize Zamorin ERP integration workspace

@@ -7,6 +7,7 @@ const { PaymentRun } = require('../models/PaymentRun');
 const { StoreDayAudit } = require('../models/StoreDayAudit');
 const { MarketplaceSettlement } = require('../models/MarketplaceSettlement');
 const { BankAccount } = require('../models/BankAccount');
+const { BudgetPlan } = require('../models/BudgetPlan');
 const { Bill } = require('../models/Bill');
 const { Expense } = require('../models/Expense');
 const { DepartmentOrder } = require('../models/DepartmentOrder');
@@ -1136,6 +1137,33 @@ const reconcileMarketplaceSettlement = asyncHandler(async (request, response) =>
 });
 
 // 9. Cash & Bank Accounts
+const createBankAccount = asyncHandler(async (request, response) => {
+  const { organisationId, userId } = request.auth;
+  const { accountAlias, bankName, maskedAccountNumber, ifscCode, accountType = 'CURRENT', glAccountCode, bookBalancePaisa = 0, status = 'ACTIVE' } = request.body;
+
+  if (!accountAlias || !bankName || !maskedAccountNumber || !ifscCode || !glAccountCode) {
+    throw new ApiError(400, 'VALIDATION_FAILED', 'Account alias, bank name, masked account number, IFSC code and GL account code are required.');
+  }
+
+  const count = await BankAccount.countDocuments({ organisationId });
+  const bankAccountId = `BA-${String(count + 1).padStart(4, '0')}`;
+
+  const account = await BankAccount.create({
+    organisationId,
+    bankAccountId,
+    accountAlias: accountAlias.trim(),
+    bankName: bankName.trim(),
+    maskedAccountNumber: maskedAccountNumber.trim(),
+    ifscCode: ifscCode.trim().toUpperCase(),
+    accountType,
+    glAccountCode: glAccountCode.trim(),
+    bookBalancePaisa: Math.round(Number(bookBalancePaisa) || 0),
+    status,
+  });
+
+  return response.status(201).json({ message: 'Bank account registered.', account });
+});
+
 const listBankAccounts = asyncHandler(async (request, response) => {
   const { organisationId } = request.auth;
   const accounts = await BankAccount.find({ organisationId }).lean();
@@ -1143,13 +1171,69 @@ const listBankAccounts = asyncHandler(async (request, response) => {
 });
 
 // 10. Budgets & Allocations
+const createBudget = asyncHandler(async (request, response) => {
+  const { organisationId, userId } = request.auth;
+  const { category, budget, cafeId = null, fiscalYear, periodType = 'MONTHLY', month = null } = request.body;
+
+  if (!category || !budget) {
+    throw new ApiError(400, 'VALIDATION_FAILED', 'Category and budget amount are required.');
+  }
+
+  const count = await BudgetPlan.countDocuments({ organisationId });
+  const budgetId = `BUD-${String(count + 1).padStart(4, '0')}`;
+
+  const plannedAmountPaisa = Math.round(Number(budget) * 100);
+  const plan = await BudgetPlan.create({
+    budgetId,
+    organisationId,
+    cafeId: cafeId ? cafeId.trim().toUpperCase() : null,
+    fiscalYear: fiscalYear || `FY${new Date().getFullYear()}-${String(new Date().getFullYear() + 1).slice(-2)}`,
+    periodType,
+    month: month ? Number(month) : null,
+    version: 1,
+    status: 'APPROVED',
+    lines: [{ category: String(category).trim().toUpperCase(), plannedAmountPaisa, notes: '' }],
+    totalPlannedPaisa: plannedAmountPaisa,
+    approvedByUserId: userId,
+    approvedAt: new Date(),
+    auditHistory: [{ action: 'CREATED', performedBy: userId, notes: 'Created via Finance workspace' }],
+  });
+
+  return response.status(201).json({ message: 'Budget allocated.', budget: plan });
+});
+
 const getBudgetsAndAllocations = asyncHandler(async (request, response) => {
-  const budgets = [
-    { category: 'COFFEE_RAW_BEANS', monthlyBudgetPaisa: 50000000, committedPaisa: 38000000, actualPaisa: 32000000, variancePaisa: 18000000 },
-    { category: 'DAIRY_AND_MILK', monthlyBudgetPaisa: 25000000, committedPaisa: 21000000, actualPaisa: 19500000, variancePaisa: 5500000 },
-    { category: 'PACKAGING_DISPOSABLES', monthlyBudgetPaisa: 15000000, committedPaisa: 14200000, actualPaisa: 11000000, variancePaisa: 4000000 },
-    { category: 'UTILITIES_ELECTRICITY', monthlyBudgetPaisa: 12000000, committedPaisa: 12000000, actualPaisa: 11800000, variancePaisa: 200000 },
-  ];
+  const { organisationId } = request.auth;
+
+  const plans = await BudgetPlan.find({ organisationId }).lean();
+  const budgetMap = {};
+  plans.forEach((plan) => {
+    (plan.lines || []).forEach((line) => {
+      const key = line.category;
+      if (!budgetMap[key]) budgetMap[key] = 0;
+      budgetMap[key] += Number(line.plannedAmountPaisa || 0);
+    });
+  });
+
+  const expenses = await Expense.aggregate([
+    { $match: { organisationId } },
+    { $group: { _id: '$category', actualPaisa: { $sum: { $ifNull: ['$totalPaisa', { $multiply: ['$amount', 100] }] } } } },
+  ]);
+  const actualMap = {};
+  expenses.forEach((e) => { actualMap[e._id] = e.actualPaisa; });
+
+  const categories = new Set([...Object.keys(budgetMap), ...Object.keys(actualMap)]);
+  const budgets = Array.from(categories).map((category) => {
+    const monthlyBudgetPaisa = budgetMap[category] || 0;
+    const actualPaisa = actualMap[category] || 0;
+    return {
+      category,
+      monthlyBudgetPaisa,
+      committedPaisa: 0,
+      actualPaisa,
+      variancePaisa: monthlyBudgetPaisa - actualPaisa,
+    };
+  });
 
   return response.status(200).json({ budgets });
 });
@@ -2169,7 +2253,9 @@ module.exports = {
   listMarketplaceSettlements,
   reconcileMarketplaceSettlement,
   listBankAccounts,
+  createBankAccount,
   getBudgetsAndAllocations,
+  createBudget,
   getTaxReview,
   getPeriodCloseStatus,
   closeFinancialPeriod,

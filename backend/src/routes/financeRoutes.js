@@ -29,7 +29,9 @@ const {
   listMarketplaceSettlements,
   reconcileMarketplaceSettlement,
   listBankAccounts,
+  createBankAccount,
   getBudgetsAndAllocations,
+  createBudget,
   getTaxReview,
   getPeriodCloseStatus,
   closeFinancialPeriod,
@@ -235,6 +237,12 @@ router.get(
   listBankAccounts
 );
 
+router.post(
+  '/bank-accounts',
+  authorize('FINANCE:WRITE', { allowedRoles: ['MASTER'] }),
+  createBankAccount
+);
+
 router.get(
   '/treasury/bank-accounts',
   authorize('FINANCE:READ', { allowedRoles: ['MASTER', 'OWNER'] }),
@@ -246,6 +254,12 @@ router.get(
   '/budgets',
   authorize('FINANCE:READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }),
   getBudgetsAndAllocations
+);
+
+router.post(
+  '/budgets',
+  authorize('FINANCE:WRITE', { allowedRoles: ['MASTER'] }),
+  createBudget
 );
 
 // 11. Tax & Statutory Review

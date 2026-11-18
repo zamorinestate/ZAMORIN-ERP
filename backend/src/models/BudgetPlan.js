@@ -33,8 +33,8 @@ const budgetLineSchema = new mongoose.Schema(
   {
     category: {
       type: String,
-      enum: BUDGET_CATEGORIES,
       required: true,
+      trim: true,
     },
     plannedAmountPaisa: {
       type: Number,

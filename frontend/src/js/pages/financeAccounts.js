@@ -1445,23 +1445,30 @@ async function openNewJournalModal(wrap) {
       const dr1 = Math.round(Number(fd.get("dr1") || 0) * 100);
       const cr2 = Math.round(Number(fd.get("cr2") || 0) * 100);
 
-      const newEntry = {
-        journalId: `JNL-202608-${String(DEFAULT_JOURNALS.length + 41).padStart(4, "0")}`,
+      const lines = [
+        { accountCode: fd.get("acc1"), accountName: fd.get("acc1"), debitPaisa: dr1, creditPaisa: 0, description: fd.get("description") },
+        { accountCode: fd.get("acc2"), accountName: fd.get("acc2"), debitPaisa: 0, creditPaisa: cr2, description: fd.get("description") },
+      ];
+
+      const payload = {
         journalDate: fd.get("journalDate"),
         periodId: fd.get("periodId"),
-        journalType: "MANUAL",
-        sourceModule: "GENERAL",
         description: fd.get("description"),
-        totalDebitPaisa: dr1,
-        totalCreditPaisa: cr2,
-        status: "DRAFT",
+        cafeId: fd.get("cafeId") || null,
+        lines,
+        journalType: "MANUAL",
+        sourceModule: "MANUAL",
       };
 
-      showToast(NOT_SAVED, "error"); return;
-      showToast("Balanced draft journal created.", "success");
-      document.querySelector("#modal-root").innerHTML = "";
-      const inner = wrap.querySelector("#fin-submodule-inner-content");
-      if (inner) renderJournalsTab(inner);
+      try {
+        await apiPost("/finance/journals", payload);
+        showToast("Balanced draft journal created.", "success");
+        document.querySelector("#modal-root").innerHTML = "";
+        const inner = wrap.querySelector("#fin-submodule-inner-content");
+        if (inner) renderJournalsTab(inner);
+      } catch (err) {
+        showToast(err?.message || "Failed to create journal.", "error");
+      }
     });
   }
 }
@@ -1516,27 +1523,29 @@ async function openNewAPBillModal(wrap) {
 
   const form = document.querySelector("#form-new-ap-bill");
   if (form) {
-    form.addEventListener("submit", (e) => {
+    form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const fd = new FormData(form);
-      const amtPaisa = Math.round(Number(fd.get("amount") || 0) * 100);
-
-      const newBill = {
-        invoiceId: `AP-2026-${String(DEFAULT_AP_INVOICES.length + 885).padStart(4, "0")}`,
-        vendorName: fd.get("vendorName"),
+      const vendorName = (fd.get("vendorName") || "").trim();
+      const payload = {
+        vendorId: vendorName.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "") || "VENDOR",
+        vendorName,
         supplierInvoiceNumber: fd.get("invoiceNum"),
+        invoiceDate: new Date().toISOString().slice(0, 10),
         dueDate: fd.get("dueDate"),
-        totalPaisa: amtPaisa,
-        outstandingPaisa: amtPaisa,
-        paymentStatus: "UNPAID",
+        amount: Number(fd.get("amount") || 0),
         cafeId: fd.get("cafeId"),
       };
 
-      showToast(NOT_SAVED, "error"); return;
-      showToast("AP Supplier Bill registered and booked in ledger.", "success");
-      document.querySelector("#modal-root").innerHTML = "";
-      const inner = wrap.querySelector("#fin-submodule-inner-content");
-      if (inner) renderAPTab(inner);
+      try {
+        await apiPost("/finance/ap/invoices", payload);
+        showToast("AP Supplier Bill registered and booked in ledger.", "success");
+        document.querySelector("#modal-root").innerHTML = "";
+        const inner = wrap.querySelector("#fin-submodule-inner-content");
+        if (inner) renderAPTab(inner);
+      } catch (err) {
+        showToast(err?.message || "Failed to register AP bill.", "error");
+      }
     });
   }
 }
@@ -1629,6 +1638,10 @@ function openAddBankAccountModal(wrap) {
             <input type="number" name="balance" class="form-input" required value="50000">
           </div>
           <div>
+            <label class="form-label" style="font-size:12px; font-weight:600;">IFSC Code</label>
+            <input type="text" name="ifscCode" class="form-input" required value="UTIB0001234">
+          </div>
+          <div>
             <label class="form-label" style="font-size:12px; font-weight:600;">GL Account Code</label>
             <input type="text" name="glCode" class="form-input" required value="1024-BANK-AXIS">
           </div>
@@ -1646,25 +1659,28 @@ function openAddBankAccountModal(wrap) {
 
   const form = document.querySelector("#form-new-bank-acct");
   if (form) {
-    form.addEventListener("submit", (e) => {
+    form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const fd = new FormData(form);
-      const balPaisa = Math.round(Number(fd.get("balance") || 0) * 100);
-
-      const newAcct = {
+      const payload = {
         accountAlias: fd.get("alias"),
         bankName: fd.get("bankName"),
         maskedAccountNumber: fd.get("accountNum"),
-        bookBalancePaisa: balPaisa,
+        ifscCode: fd.get("ifscCode"),
+        bookBalancePaisa: Math.round(Number(fd.get("balance") || 0) * 100),
         glAccountCode: fd.get("glCode"),
         status: "ACTIVE",
       };
 
-      showToast(NOT_SAVED, "error"); return;
-      showToast("Authorized bank account registered in chart of accounts.", "success");
-      document.querySelector("#modal-root").innerHTML = "";
-      const inner = wrap.querySelector("#fin-submodule-inner-content");
-      if (inner) renderCashBankTab(inner);
+      try {
+        await apiPost("/finance/bank-accounts", payload);
+        showToast("Authorized bank account registered in chart of accounts.", "success");
+        document.querySelector("#modal-root").innerHTML = "";
+        const inner = wrap.querySelector("#fin-submodule-inner-content");
+        if (inner) renderCashBankTab(inner);
+      } catch (err) {
+        showToast(err?.message || "Failed to register bank account.", "error");
+      }
     });
   }
 }
@@ -1697,24 +1713,23 @@ function openAllocateBudgetModal(wrap) {
 
   const form = document.querySelector("#form-new-budget");
   if (form) {
-    form.addEventListener("submit", (e) => {
+    form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const fd = new FormData(form);
-      const capPaisa = Math.round(Number(fd.get("budget") || 0) * 100);
-
-      const newB = {
+      const payload = {
         category: fd.get("category"),
-        monthlyBudgetPaisa: capPaisa,
-        committedPaisa: 0,
-        actualPaisa: 0,
-        variancePaisa: capPaisa,
+        budget: Number(fd.get("budget") || 0),
       };
 
-      showToast(NOT_SAVED, "error"); return;
-      showToast("Departmental budget cap allocated.", "success");
-      document.querySelector("#modal-root").innerHTML = "";
-      const inner = wrap.querySelector("#fin-submodule-inner-content");
-      if (inner) renderBudgetsTab(inner);
+      try {
+        await apiPost("/finance/budgets", payload);
+        showToast("Departmental budget cap allocated.", "success");
+        document.querySelector("#modal-root").innerHTML = "";
+        const inner = wrap.querySelector("#fin-submodule-inner-content");
+        if (inner) renderBudgetsTab(inner);
+      } catch (err) {
+        showToast(err?.message || "Failed to allocate budget.", "error");
+      }
     });
   }
 }
