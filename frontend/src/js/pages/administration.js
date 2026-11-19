@@ -166,7 +166,9 @@ function renderActiveTabContent() {
       title: "Configuration, Tax & Custom Fields",
       icon: "⚙️",
       desc: "Organisation profile, GSTIN tax registries, custom schema & templates.",
-      actionsHtml: `<button class="btn btn-sm btn-primary" id="btn-child-add-custom-field" type="button">+ Add Custom Field</button>`
+      actionsHtml: ["MASTER", "PRIMARY_MASTER"].includes(String(state.user?.role || state.role || "").toUpperCase())
+        ? `<button class="btn btn-sm btn-primary" id="btn-child-add-custom-field" type="button">+ Add Custom Field</button>`
+        : ""
     },
     audit: {
       title: "Immutable Audit Log & Forensics",
@@ -1117,15 +1119,52 @@ function renderConfigSubpanel(sub) {
           </div>
         </div>
       `;
-    case "custom_fields":
+    case "custom_fields": {
+      const fields = Array.isArray(adminState.customFields) ? adminState.customFields : [];
+      const rawRole = String(state.user?.role || state.role || "").toUpperCase();
+      const canWrite = rawRole === "MASTER" || rawRole === "PRIMARY_MASTER";
+      const typeLabels = {
+        TEXT: "Short Text",
+        LONG_TEXT: "Long Text",
+        NUMBER: "Number",
+        BOOLEAN: "Yes / No",
+        DATE: "Date",
+        SELECT: "Single Select",
+      };
+      const rows = fields.length
+        ? fields
+            .map((f) => {
+              const options =
+                Array.isArray(f.allowedValues) && f.allowedValues.length
+                  ? f.allowedValues.join(", ")
+                  : "—";
+              return `
+                <tr>
+                  <td>
+                    <strong>${escHtml(f.label)}</strong>
+                    ${f.description ? `<div style="font-size:11px;color:var(--muted);margin-top:2px;">${escHtml(f.description)}</div>` : ""}
+                  </td>
+                  <td style="font-family:var(--font-mono);color:var(--bronze-600);">${escHtml(f.key)}</td>
+                  <td>${escHtml(typeLabels[f.fieldType] || f.fieldType || "—")}</td>
+                  <td>${f.isRequired ? '<span class="badge-tag badge-warning">Required</span>' : '<span class="badge-tag">Optional</span>'}</td>
+                  <td>${escHtml(options)}</td>
+                  <td>${Number.isFinite(f.displayOrder) ? f.displayOrder : 0}</td>
+                  <td style="text-align:right;">
+                    ${canWrite ? `<button class="btn btn-xs btn-ghost" data-archive-custom-field="${escHtml(f.key)}" type="button">Archive</button>` : `<span style="color:var(--muted);font-size:11px;">Read-only</span>`}
+                  </td>
+                </tr>`;
+            })
+            .join("")
+        : `<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--muted);">No custom field definitions yet. Create one to extend User records.</td></tr>`;
+
       return `
         <div class="card" style="padding:24px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:12px;flex-wrap:wrap;">
             <div>
               <h2 style="font-size:17px;font-weight:700;margin:0 0 4px;color:var(--ink);">Custom Metadata Schema Registry</h2>
-              <p style="font-size:12.5px;color:var(--muted);margin:0;">Configurable entity attributes for Users, Employees, and Cafés.</p>
+              <p style="font-size:12.5px;color:var(--muted);margin:0;">Organisation-scoped custom attributes available on User records. Up to 50 active keys per organisation.</p>
             </div>
-            <button class="btn btn-sm btn-primary" id="admin-create-custom-field-btn" type="button">+ Create Custom Field</button>
+            <button class="btn btn-sm btn-primary" id="admin-create-custom-field-btn" type="button" ${canWrite ? "" : "disabled title=\"Only the Primary Master can define custom fields\""}>+ Create Custom Field</button>
           </div>
 
           <div class="table-wrap">
@@ -1134,37 +1173,19 @@ function renderConfigSubpanel(sub) {
                 <tr>
                   <th>Field Label</th>
                   <th>Key</th>
-                  <th>Applies To</th>
                   <th>Data Type</th>
-                  <th>Sensitivity</th>
-                  <th>Usage Count</th>
+                  <th>Required</th>
+                  <th>Allowed Values</th>
+                  <th>Order</th>
                   <th style="text-align:right;">Actions</th>
                 </tr>
               </thead>
-              <tbody>
-                <tr>
-                  <td><strong>Blood Group</strong></td>
-                  <td style="font-family:var(--font-mono);color:var(--bronze-600);">blood_group</td>
-                  <td><span class="badge">Employee</span></td>
-                  <td>Single Select</td>
-                  <td><span class="pill pill-dark">PERSONAL</span></td>
-                  <td>42 records</td>
-                  <td style="text-align:right;"><button class="btn btn-xs btn-ghost" type="button">Edit</button></td>
-                </tr>
-                <tr>
-                  <td><strong>Seating Capacity</strong></td>
-                  <td style="font-family:var(--font-mono);color:var(--bronze-600);">seating_capacity</td>
-                  <td><span class="badge">Cafe</span></td>
-                  <td>Number</td>
-                  <td><span class="pill pill-mint">STANDARD</span></td>
-                  <td>3 records</td>
-                  <td style="text-align:right;"><button class="btn btn-xs btn-ghost" type="button">Edit</button></td>
-                </tr>
-              </tbody>
+              <tbody>${rows}</tbody>
             </table>
           </div>
         </div>
       `;
+    }
     default:
       return `
         <div class="card" style="padding:24px;">
@@ -1403,6 +1424,30 @@ function wireActiveTab(root) {
   // Wire Create Custom Field Modal Button
   root.querySelector('#admin-create-custom-field-btn')?.addEventListener('click', () => {
     openCreateCustomFieldModal(root);
+  });
+
+  // Wire Archive actions on the Custom Fields registry rows
+  root.querySelectorAll("[data-archive-custom-field]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.archiveCustomField;
+      const def = (adminState.customFields || []).find((f) => f.key === key);
+      const label = def?.label || key;
+      confirmAction({
+        title: "Archive custom field",
+        description: `Archive "${label}" (${key})? Values already stored on User records are preserved, but no new values can be written for this key.`,
+        confirmLabel: "Archive Field",
+        danger: true,
+        onConfirm: async () => {
+          try {
+            await apiDelete(`/custom-fields/${encodeURIComponent(key)}`);
+            showToast(`Custom field "${label}" archived.`, "success");
+            await loadAdminData(root);
+          } catch (err) {
+            showToast(err.message || "Failed to archive custom field.", "danger");
+          }
+        },
+      });
+    });
   });
 
   // Wire Open Organisation Identity Master button (Configuration > Org Profile)
@@ -1835,6 +1880,7 @@ function openUserMoreActionsModal(root, userId) {
   if (!mount) return;
   const user = (adminState.users || []).find((u) => u.userId === userId) || { userId, name: userId };
   const name = user.fullName || user.name || userId;
+  const isPrimaryMaster = state.isPrimaryMaster === true || state.user?.isPrimaryMaster === true;
 
   mount.innerHTML = `
     <div class="modal-backdrop" style="position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:9999;display:flex;align-items:center;justify-content:center;">
@@ -1850,6 +1896,11 @@ function openUserMoreActionsModal(root, userId) {
           <button class="btn btn-sm btn-ghost" id="action-impact-user" style="justify-content:flex-start;text-align:left;padding:10px;" type="button">
             🛡️ <strong>Role Impact & Reassignment</strong>
           </button>
+          ${isPrimaryMaster ? `
+            <button class="btn btn-sm btn-ghost" id="action-custom-fields-user" style="justify-content:flex-start;text-align:left;padding:10px;" type="button">
+              🏷️ <strong>Custom Fields (Metadata)</strong>
+            </button>
+          ` : ''}
           <button class="btn btn-sm btn-ghost" id="action-toggle-status-user" style="justify-content:flex-start;text-align:left;padding:10px;" type="button">
             🔄 <strong>Toggle Account Status (Active / Suspended)</strong>
           </button>
@@ -1873,6 +1924,10 @@ function openUserMoreActionsModal(root, userId) {
   mount.querySelector("#action-impact-user")?.addEventListener("click", () => {
     mount.innerHTML = "";
     openUserRoleImpactModal(root, userId);
+  });
+  mount.querySelector("#action-custom-fields-user")?.addEventListener("click", () => {
+    mount.innerHTML = "";
+    openUserCustomFieldsModal(root, userId);
   });
   mount.querySelector("#action-toggle-status-user")?.addEventListener("click", async () => {
     mount.innerHTML = "";
@@ -1902,6 +1957,212 @@ function openUserMoreActionsModal(root, userId) {
         showToast(err.message || "Failed to archive user.", "danger");
       }
     });
+  });
+}
+
+async function openUserCustomFieldsModal(root, userId) {
+  const mount = root.querySelector("#admin-modals-mount");
+  if (!mount) return;
+
+  let user = (adminState.users || []).find((u) => u.userId === userId) || { userId };
+  try {
+    const res = await apiGet(`/users/${encodeURIComponent(userId)}`);
+    if (res?.data?.user) user = res.data.user;
+  } catch (_e) {
+    // Fall back to the directory row if the detail read fails.
+  }
+
+  let definitions = Array.isArray(adminState.customFields) ? adminState.customFields.slice() : [];
+  if (!definitions.length) {
+    try {
+      const res = await apiGet("/custom-fields");
+      definitions = res?.data?.definitions || [];
+      adminState.customFields = definitions;
+    } catch (_e) {
+      definitions = [];
+    }
+  }
+  definitions = definitions
+    .slice()
+    .sort((a, b) => (Number(a.displayOrder) || 0) - (Number(b.displayOrder) || 0));
+
+  const rawExisting = user.customFields || {};
+  const existing = rawExisting instanceof Map ? Object.fromEntries(rawExisting) : rawExisting;
+  const name = user.fullName || user.name || userId;
+
+  const typeLabels = {
+    TEXT: "Short Text",
+    LONG_TEXT: "Long Text",
+    NUMBER: "Number",
+    BOOLEAN: "Yes / No",
+    DATE: "Date",
+    SELECT: "Single Select",
+  };
+
+  const fieldHtml = (definition) => {
+    const key = definition.key;
+    const value = existing[key];
+    const dataAttr = `data-cf-key="${escHtml(key)}"`;
+    let control = "";
+
+    switch (definition.fieldType) {
+      case "LONG_TEXT":
+        control = `<textarea class="form-control" rows="2" maxlength="2000" ${dataAttr}>${escHtml(value ?? "")}</textarea>`;
+        break;
+      case "NUMBER":
+        control = `<input type="number" class="form-control" step="any" ${dataAttr} value="${escHtml(value ?? "")}" />`;
+        break;
+      case "DATE":
+        control = `<input type="date" class="form-control" ${dataAttr} value="${escHtml(typeof value === "string" ? value : "")}" />`;
+        break;
+      case "BOOLEAN":
+        control = `<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;cursor:pointer;padding:6px 0;"><input type="checkbox" ${dataAttr} style="width:16px;height:16px;" ${value === true ? "checked" : ""} /> Yes</label>`;
+        break;
+      case "SELECT":
+        control = `<select class="form-control" ${dataAttr}><option value="">— Not set —</option>${(definition.allowedValues || [])
+          .map((option) => `<option value="${escHtml(option)}" ${String(option) === String(value) ? "selected" : ""}>${escHtml(option)}</option>`)
+          .join("")}</select>`;
+        break;
+      case "TEXT":
+      default:
+        control = `<input type="text" class="form-control" maxlength="500" ${dataAttr} value="${escHtml(value ?? "")}" />`;
+        break;
+    }
+
+    return `
+      <div style="margin-bottom:12px;">
+        <label class="form-label" style="font-size:12px;font-weight:700;display:block;margin-bottom:4px;">
+          ${escHtml(definition.label || key)}${definition.isRequired ? " *" : ""}
+          <span style="font-family:var(--font-mono);font-size:10.5px;color:var(--muted);font-weight:400;"> · ${escHtml(key)} · ${escHtml(typeLabels[definition.fieldType] || definition.fieldType)}</span>
+        </label>
+        ${control}
+        ${definition.description ? `<div style="font-size:10.5px;color:var(--muted);margin-top:3px;">${escHtml(definition.description)}</div>` : ""}
+      </div>`;
+  };
+
+  const fieldsHtml = definitions.length
+    ? definitions.map(fieldHtml).join("")
+    : `<div class="notice-banner notice-info" style="margin:0;">
+         No active custom field definitions exist yet. Create them under
+         <strong>Configuration → Custom Fields Schema</strong> first.
+       </div>`;
+
+  mount.innerHTML = `
+    <div class="modal-backdrop" style="position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:9999;display:flex;align-items:center;justify-content:center;">
+      <div class="modal-card card" style="width:620px;max-width:95vw;max-height:88vh;overflow-y:auto;padding:24px;background:var(--surface-raised);border:1px solid var(--line-strong);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;border-bottom:1px solid var(--line);padding-bottom:10px;">
+          <div>
+            <h3 style="margin:0;font-size:17px;font-weight:700;color:var(--ink);">Custom Fields: ${escHtml(name)}</h3>
+            <p style="margin:4px 0 0;font-size:12px;color:var(--muted);">${escHtml(userId)} · Organisation-defined user metadata.</p>
+          </div>
+          <button class="btn btn-xs btn-ghost" data-close-modal type="button">✕</button>
+        </div>
+
+        ${fieldsHtml}
+
+        ${definitions.length ? `
+          <div class="form-group" style="margin-top:16px;">
+            <label class="form-label" style="font-size:12px;font-weight:700;">Reason for change*</label>
+            <input type="text" id="ucf-reason" class="form-control" maxlength="2000" value="Custom metadata updated via Administration" />
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--line);padding-top:14px;margin-top:14px;">
+            <button class="btn btn-sm btn-ghost" data-close-modal type="button">Cancel</button>
+            <button class="btn btn-sm btn-primary" id="ucf-save-btn" type="button">Save Custom Fields</button>
+          </div>
+        ` : `
+          <div style="display:flex;justify-content:flex-end;border-top:1px solid var(--line);padding-top:14px;margin-top:14px;">
+            <button class="btn btn-sm btn-ghost" data-close-modal type="button">Close</button>
+          </div>
+        `}
+      </div>
+    </div>
+  `;
+
+  mount.querySelectorAll("[data-close-modal]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      mount.innerHTML = "";
+    });
+  });
+
+  const readValue = (definition) => {
+    const el = mount.querySelector(`[data-cf-key="${definition.key}"]`);
+    if (!el) return undefined;
+
+    if (definition.fieldType === "BOOLEAN") {
+      return Boolean(el.checked);
+    }
+
+    const raw = String(el.value ?? "").trim();
+    if (raw === "") return null;
+
+    if (definition.fieldType === "NUMBER") {
+      const numeric = Number(raw);
+      if (!Number.isFinite(numeric)) {
+        throw new Error(`"${definition.label || definition.key}" must be a number.`);
+      }
+      return numeric;
+    }
+
+    return raw;
+  };
+
+  mount.querySelector("#ucf-save-btn")?.addEventListener("click", async () => {
+    const reason = String(mount.querySelector("#ucf-reason")?.value || "").trim();
+    if (!reason) {
+      showToast("A reason is required to change user metadata.", "warning");
+      return;
+    }
+
+    let payload;
+    try {
+      payload = {};
+      for (const definition of definitions) {
+        const next = readValue(definition);
+
+        if (definition.isRequired && (next === null || next === undefined || next === "")) {
+          throw new Error(`"${definition.label || definition.key}" is required.`);
+        }
+
+        const previousRaw = existing[definition.key];
+        const previous = previousRaw === undefined ? null : previousRaw;
+        const changed =
+          definition.fieldType === "BOOLEAN"
+            ? Boolean(previous) !== next
+            : String(previous ?? "") !== String(next ?? "");
+
+        if (changed) payload[definition.key] = next;
+      }
+    } catch (err) {
+      showToast(err.message || "Please review the custom field values.", "warning");
+      return;
+    }
+
+    if (Object.keys(payload).length === 0) {
+      showToast("No custom field changes to save.", "info");
+      return;
+    }
+
+    const btn = mount.querySelector("#ucf-save-btn");
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Saving…";
+    }
+
+    try {
+      await apiPatch(`/users/${encodeURIComponent(userId)}/custom-fields`, {
+        customFields: payload,
+        reason,
+      });
+      showToast(`Custom metadata updated for ${name}.`, "success");
+      mount.innerHTML = "";
+      await loadAdminData(root);
+    } catch (err) {
+      showToast(err.message || "Failed to update custom metadata.", "danger");
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Save Custom Fields";
+      }
+    }
   });
 }
 
@@ -1976,7 +2237,7 @@ function exportAdminAuditLogCsv() {
 
 async function loadAdminData(root) {
   try {
-    const [overviewRes, queueRes, cafesRes, usersRes, reqsRes, servicesRes, reviewsRes, devicesRes] = await Promise.allSettled([
+    const [overviewRes, queueRes, cafesRes, usersRes, reqsRes, servicesRes, reviewsRes, devicesRes, customFieldsRes] = await Promise.allSettled([
       apiGet("/admin/overview"),
       apiGet("/admin/work-queue"),
       apiGet("/cafes"),
@@ -1985,6 +2246,7 @@ async function loadAdminData(root) {
       apiGet("/admin/service-identities"),
       apiGet("/admin/access-reviews"),
       apiGet("/devices"),
+      apiGet("/custom-fields"),
     ]);
 
     if (overviewRes.status === "fulfilled") {
@@ -2010,6 +2272,9 @@ async function loadAdminData(root) {
     }
     if (devicesRes.status === "fulfilled") {
       adminState.devices = devicesRes.value?.data?.devices || [];
+    }
+    if (customFieldsRes.status === "fulfilled") {
+      adminState.customFields = customFieldsRes.value?.data?.definitions || [];
     }
 
     const mount = root.querySelector("#admin-main-tab-content");
@@ -2235,44 +2500,59 @@ function openCreateCustomFieldModal(root) {
 
   mount.innerHTML = `
     <div class="modal-backdrop" style="position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:9999;display:flex;align-items:center;justify-content:center;">
-      <div class="modal-card card" style="width:650px;max-width:95vw;padding:24px;background:var(--surface-raised);">
+      <div class="modal-card card" style="width:650px;max-width:95vw;max-height:88vh;overflow-y:auto;padding:24px;background:var(--surface-raised);">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
           <h3 style="margin:0;font-size:17px;font-weight:700;color:var(--ink);">+ Create Custom Metadata Field</h3>
           <button class="btn btn-xs btn-ghost" id="admin-close-field-modal-btn" type="button">✕</button>
         </div>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">
+          Defines a key that may be attached to User records via <code style="font-family:var(--font-mono);">User.customFields</code>.
+          Only the Primary Master can create or archive definitions.
+        </p>
 
         <div class="form-group" style="margin-bottom:12px;">
           <label class="form-label" style="font-size:12px;font-weight:700;">Field Label*</label>
-          <input type="text" id="cfg-field-label" class="form-control" placeholder="e.g. Uniform Size" />
+          <input type="text" id="cfg-field-label" class="form-control" placeholder="e.g. Uniform Size" maxlength="200" />
         </div>
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
           <div class="form-group">
-            <label class="form-label" style="font-size:12px;font-weight:700;">Applies To Entity</label>
-            <select id="cfg-field-entity" class="form-control">
-              <option value="Employee">Employee</option>
-              <option value="Cafe">Café</option>
-              <option value="User">User</option>
-            </select>
+            <label class="form-label" style="font-size:12px;font-weight:700;">Key*</label>
+            <input type="text" id="cfg-field-key" class="form-control" placeholder="uniform_size" maxlength="64" style="font-family:var(--font-mono);" />
+            <div style="font-size:10.5px;color:var(--muted);margin-top:4px;">Lowercase letters, digits and underscores only.</div>
           </div>
           <div class="form-group">
-            <label class="form-label" style="font-size:12px;font-weight:700;">Data Type</label>
+            <label class="form-label" style="font-size:12px;font-weight:700;">Data Type*</label>
             <select id="cfg-field-type" class="form-control">
               <option value="TEXT">Short Text</option>
+              <option value="LONG_TEXT">Long Text</option>
               <option value="NUMBER">Number</option>
-              <option value="SELECT">Single Select</option>
+              <option value="BOOLEAN">Yes / No</option>
               <option value="DATE">Date</option>
+              <option value="SELECT">Single Select</option>
             </select>
           </div>
         </div>
 
-        <div class="form-group" style="margin-bottom:16px;">
-          <label class="form-label" style="font-size:12px;font-weight:700;">Data Sensitivity</label>
-          <select id="cfg-field-sens" class="form-control">
-            <option value="STANDARD">Standard (Operational)</option>
-            <option value="PERSONAL">Personal (Employee)</option>
-            <option value="SENSITIVE">Sensitive (Restricted)</option>
-          </select>
+        <div class="form-group" id="cfg-field-values-group" style="margin-bottom:12px;display:none;">
+          <label class="form-label" style="font-size:12px;font-weight:700;">Allowed Values* (comma separated)</label>
+          <input type="text" id="cfg-field-values" class="form-control" placeholder="S, M, L, XL" />
+        </div>
+
+        <div class="form-group" style="margin-bottom:12px;">
+          <label class="form-label" style="font-size:12px;font-weight:700;">Description</label>
+          <textarea id="cfg-field-description" class="form-control" rows="2" maxlength="500" placeholder="Optional help text shown to users filling this field."></textarea>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;align-items:end;">
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" style="font-size:12px;font-weight:700;">Display Order</label>
+            <input type="number" id="cfg-field-order" class="form-control" value="0" min="0" step="1" />
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;cursor:pointer;padding-bottom:8px;">
+            <input type="checkbox" id="cfg-field-required" style="width:16px;height:16px;" />
+            Required field
+          </label>
         </div>
 
         <div style="display:flex;justify-content:flex-end;gap:10px;">
@@ -2283,15 +2563,99 @@ function openCreateCustomFieldModal(root) {
     </div>
   `;
 
+  const close = () => {
+    mount.innerHTML = "";
+  };
+
   mount.querySelectorAll("#admin-close-field-modal-btn, #admin-close-field-modal-btn-2").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      mount.innerHTML = "";
-    });
+    btn.addEventListener("click", close);
   });
 
-  mount.querySelector("#admin-save-custom-field-btn")?.addEventListener("click", () => {
-    showToast("Custom field schema updated successfully.", "success");
-    mount.innerHTML = "";
+  const labelEl = mount.querySelector("#cfg-field-label");
+  const keyEl = mount.querySelector("#cfg-field-key");
+  const typeEl = mount.querySelector("#cfg-field-type");
+  const valuesGroup = mount.querySelector("#cfg-field-values-group");
+  const valuesEl = mount.querySelector("#cfg-field-values");
+  let keyTouched = false;
+
+  const slugify = (str) =>
+    String(str || "")
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 64);
+
+  labelEl?.addEventListener("input", () => {
+    if (!keyTouched && keyEl) keyEl.value = slugify(labelEl.value);
+  });
+
+  keyEl?.addEventListener("input", () => {
+    keyTouched = Boolean(keyEl.value);
+    keyEl.value = slugify(keyEl.value);
+  });
+
+  typeEl?.addEventListener("change", () => {
+    const isSelect = typeEl.value === "SELECT";
+    if (valuesGroup) valuesGroup.style.display = isSelect ? "" : "none";
+    if (!isSelect && valuesEl) valuesEl.value = "";
+  });
+
+  mount.querySelector("#admin-save-custom-field-btn")?.addEventListener("click", async () => {
+    const label = labelEl?.value?.trim();
+    const key = slugify(keyEl?.value || label);
+    const fieldType = typeEl?.value;
+    const allowedValues = (valuesEl?.value || "")
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
+    const description = mount.querySelector("#cfg-field-description")?.value?.trim() || "";
+    const isRequired = Boolean(mount.querySelector("#cfg-field-required")?.checked);
+    const displayOrderRaw = Number(mount.querySelector("#cfg-field-order")?.value);
+    const displayOrder = Number.isFinite(displayOrderRaw) && displayOrderRaw >= 0 ? Math.floor(displayOrderRaw) : 0;
+
+    if (!label) {
+      showToast("Please provide a field label.", "warning");
+      labelEl?.focus();
+      return;
+    }
+    if (!/^[a-z0-9_]{1,64}$/.test(key)) {
+      showToast("Key must be 1-64 characters: lowercase letters, digits and underscores.", "warning");
+      keyEl?.focus();
+      return;
+    }
+    if (fieldType === "SELECT" && allowedValues.length === 0) {
+      showToast("Single Select fields need at least one allowed value.", "warning");
+      valuesEl?.focus();
+      return;
+    }
+
+    const btn = mount.querySelector("#admin-save-custom-field-btn");
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Creating…";
+    }
+
+    try {
+      await apiPost("/custom-fields", {
+        key,
+        label,
+        description,
+        fieldType,
+        allowedValues,
+        isRequired,
+        displayOrder,
+      });
+      showToast(`Custom field "${label}" created.`, "success");
+      close();
+      await loadAdminData(root);
+    } catch (err) {
+      showToast(err.message || "Failed to create custom field.", "danger");
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Create Field";
+      }
+    }
   });
 }
 

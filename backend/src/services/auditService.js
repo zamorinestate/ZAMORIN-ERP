@@ -211,6 +211,8 @@ function validateAuditEnumeration(
   }
 }
 
+let auditCollectionReady = null;
+
 async function recordAuditEvent({
   organisationId,
   cafeId = null,
@@ -351,6 +353,25 @@ async function recordAuditEvent({
   }
   if (mongoose.connection.readyState !== 1) {
     return eventPayload;
+  }
+
+  // Pre-create the audit_events collection outside any transaction so that
+  // implicit collection creation (a catalog change) never happens inside a
+  // multi-document transaction, which would raise a WriteConflict /
+  // TransientTransactionError on Mongo replica sets. Only do this when we are
+  // NOT already inside a transaction (session present) — otherwise the
+  // createCollection call itself could race with the transaction's catalog lock.
+  if (!session && !auditCollectionReady) {
+    auditCollectionReady = (async () => {
+      try {
+        await AuditEvent.createCollection();
+      } catch (_err) {
+        // Collection already exists or creation not permitted — ignore.
+      }
+    })();
+  }
+  if (!session) {
+    await auditCollectionReady;
   }
 
   if (session) {

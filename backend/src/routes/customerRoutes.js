@@ -44,6 +44,12 @@ const {
   expirePointsHandler,
 } = require('../controllers/customerController');
 
+const {
+  listSegments,
+  createSegment,
+  deleteSegment,
+} = require('../controllers/customerSegmentController');
+
 const router = express.Router();
 
 router.use(authenticate);
@@ -74,6 +80,11 @@ router.post('/campaigns', authorize('CUSTOMERS_WRITE', { allowedRoles: ['MASTER'
 router.post('/campaigns/:campaignId/preview', authorize('CUSTOMERS_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }), previewCampaignHandler);
 router.post('/campaigns/:campaignId/dispatch', authorize('CUSTOMERS_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }), dispatchCampaignHandler);
 router.post('/campaigns/:campaignId/cancel', authorize('CUSTOMERS_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }), cancelCampaignHandler);
+
+// Customer Segments
+router.get('/segments', authorize('CUSTOMERS_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }), listSegments);
+router.post('/segments', authorize('CUSTOMERS_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }), createSegment);
+router.delete('/segments/:segmentId', authorize('CUSTOMERS_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }), deleteSegment);
 
 // Customer Directory CRUD & Actions
 router.get('/', authorize('CUSTOMERS_READ', { allowedRoles: ['MASTER', 'OWNER', 'CAFE_ADMIN'] }), listCustomers);

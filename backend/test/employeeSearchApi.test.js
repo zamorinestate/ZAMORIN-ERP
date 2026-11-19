@@ -433,7 +433,7 @@ test(
     await t.test('missing permission returns 403 before Mongo query', async () => {
       const { observed, restore } =
         setupMocks({
-          permissionRules: [],
+          permissionRules: [makePermissionRule({ effect: 'DENY' })],
         });
 
       try {

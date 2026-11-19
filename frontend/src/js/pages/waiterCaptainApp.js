@@ -267,9 +267,18 @@ export async function wireWaiterCaptainApp(root, subroute) {
   });
 
   // Request Bill
-  root.querySelector("#btn-captain-request-bill")?.addEventListener("click", () => {
+  root.querySelector("#btn-captain-request-bill")?.addEventListener("click", async () => {
     if (!selectedTable) return;
-    showToast(`Bill requests are not connected to the cashier desk yet. Please tell the cashier that Table ${selectedTable.tableNumber} is ready to pay.`, "warning");
+    const tableIdentifier = selectedTable.tableId || selectedTable.tableNumber;
+    try {
+      const res = await apiPost(`/channels/tables/${encodeURIComponent(tableIdentifier)}/request-bill`, {
+        tableNumber: selectedTable.tableNumber,
+        cafeId: captainCafeId,
+      });
+      showToast(res?.data?.message || `Bill request sent to the cashier desk for Table ${selectedTable.tableNumber}.`, "success");
+    } catch (err) {
+      showToast(err?.message || `Could not send the bill request for Table ${selectedTable.tableNumber}. Please tell the cashier directly.`, "coral");
+    }
   });
 
   // Refresh floor

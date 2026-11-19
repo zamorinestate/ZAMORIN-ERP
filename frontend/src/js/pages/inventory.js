@@ -24,7 +24,7 @@ async function loadCafesList() {
   if (cachedCafes && cachedCafes.length > 0) return cachedCafes;
   try {
     const res = await apiGet("/cafes");
-    cachedCafes = res?.data || res?.cafes || (Array.isArray(res) ? res : []);
+    cachedCafes = res?.data?.cafes || res?.cafes || (Array.isArray(res?.data) ? res.data : []) || [];
   } catch (err) {
     cachedCafes = [];
   }
@@ -2484,7 +2484,7 @@ async function loadRecallsData(wrap) {
   let recalls = [];
   try {
     const res = await apiGet("/inventory/recalls");
-    recalls = res?.recalls || DEFAULT_RECALLS;
+    recalls = res?.data?.recalls || res?.recalls || DEFAULT_RECALLS;
   } catch (err) {
     console.warn("Recalls API offline, using fallback recalls data:", err);
     recalls = DEFAULT_RECALLS;

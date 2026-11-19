@@ -3325,7 +3325,7 @@ async function renderWorkforceSubtab(root, container) {
         if (!box) return;
         try {
           const res = await apiGet('/reports/staff-performance-by-assignee' + buildFilterQueryString('workforce'));
-          const list = res?.data?.performance || res?.data || [];
+          const list = res?.data?.staffPerformance || res?.data?.performance || (Array.isArray(res?.data) ? res.data : []) || [];
           if (!Array.isArray(list) || list.length === 0) {
             box.innerHTML = `<div style="text-align:center;padding:24px;color:var(--muted);font-size:11.5px;">No assigned orders recorded in this date range. Cashier bills with assigned staff will appear here.</div>`;
             return;
@@ -7546,8 +7546,23 @@ async function renderForecastingSubtab(root, container) {
         reportId: 'sales-forecast',
         format: 'PDF',
       });
-      if (res?.jobId) {
-        showToast(`PDF Export Job ${res.jobId} created successfully.`, 'success');
+      const runId = res?.data?.runId || res?.runId;
+      const downloadUrl = res?.data?.downloadUrl;
+      if (runId) {
+        if (downloadUrl) {
+          const apiPath = String(downloadUrl).replace(/^https?:\/\/[^/]+/, '').replace(/^\/api\/v1/, '');
+          try {
+            const blob = await apiBlob(apiPath);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = `sales_forecast_${runId}.pdf`;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 10000);
+          } catch { /* download grant unavailable — the toast below still confirms generation */ }
+        }
+        showToast(`PDF export ready (run ${runId}).`, 'success');
+      } else {
+        showToast('PDF export completed.', 'success');
       }
     } catch (err) {
       showToast(err.message || 'PDF export error.', 'error');
@@ -7561,8 +7576,23 @@ async function renderForecastingSubtab(root, container) {
         reportId: 'sales-forecast',
         format: 'XLSX',
       });
-      if (res?.jobId) {
-        showToast(`XLSX Export Job ${res.jobId} created successfully.`, 'success');
+      const runId = res?.data?.runId || res?.runId;
+      const downloadUrl = res?.data?.downloadUrl;
+      if (runId) {
+        if (downloadUrl) {
+          const apiPath = String(downloadUrl).replace(/^https?:\/\/[^/]+/, '').replace(/^\/api\/v1/, '');
+          try {
+            const blob = await apiBlob(apiPath);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = `sales_forecast_${runId}.xlsx`;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 10000);
+          } catch { /* download grant unavailable — the toast below still confirms generation */ }
+        }
+        showToast(`XLSX export ready (run ${runId}).`, 'success');
+      } else {
+        showToast('XLSX export completed.', 'success');
       }
     } catch (err) {
       showToast(err.message || 'XLSX export error.', 'error');

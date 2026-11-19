@@ -531,7 +531,7 @@ class PdfDocumentBuilder {
   build({ reportTitle, reportCode, qrCodeData, scope, period, columns = [], rows = [], kpiCards = [], runId }) {
     const finalRunId = runId || generateStandardRunId();
     const dateStr = new Date().toISOString().slice(0, 10);
-    const headerLegalName = this.legalName || 'Zamorin Speciality Coffee & Kitchens Pvt. Ltd.';
+    const headerLegalName = this.legalName || 'Organisation legal name not configured';
     const resolvedGstin = this.gstin || '32AABCT1332L1ZV';
 
     // Guarantee Sl. No. as first visual column
@@ -803,7 +803,7 @@ function generatePdf(opts) {
   const branding = opts.branding || {};
   const builder = new PdfDocumentBuilder({
     title: opts.reportTitle || 'Corporate Report',
-    legalName: branding.legalName || null,
+    legalName: (opts.legalName !== undefined ? opts.legalName : branding.legalName) || null,
     gstin: branding.gstin || null
   });
   return builder.build(opts);

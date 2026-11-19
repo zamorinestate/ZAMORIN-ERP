@@ -45,6 +45,10 @@ const {
   auditGovernanceSuccess,
 } = require('../services/userGovernanceService');
 
+const {
+  resolveCustomFieldValues,
+} = require('../services/customFieldValueService');
+
 const ROLE_PREFIXES = {
   MASTER: 'MU',
   OWNER: 'OW',
@@ -764,6 +768,96 @@ const updateUser = asyncHandler(
   }
 );
 
+const updateUserCustomFields = asyncHandler(
+  async (request, response) => {
+    requireMaster(request);
+
+    const userId = govNormId(request.params.userId);
+
+    const actorDocument = await loadActor(request);
+
+    const user = await User.findOne({
+      organisationId: request.auth.organisationId,
+      userId,
+      accountStatus: {
+        $ne: 'ARCHIVED',
+      },
+    });
+
+    if (!user) {
+      throw new ApiError(
+        404,
+        'USER_NOT_FOUND',
+        'The user was not found.'
+      );
+    }
+
+    await assertNotPrimaryMasterTarget(
+      user,
+      'custom metadata cannot be administratively modified',
+      { request, actorDocument }
+    );
+
+    assertMayActOnMasterTarget(actorDocument, user);
+
+    const { updates, removedKeys } =
+      await resolveCustomFieldValues({
+        organisationId: request.auth.organisationId,
+        values: request.body?.customFields,
+      });
+
+    const beforeCustomFields = user.customFields
+      ? Object.fromEntries(user.customFields)
+      : {};
+
+    if (!user.customFields) {
+      user.customFields = new Map();
+    }
+
+    for (const [key, value] of updates) {
+      user.customFields.set(key, value);
+    }
+
+    for (const key of removedKeys) {
+      user.customFields.delete(key);
+    }
+
+    user.updatedBy = request.auth.userId;
+
+    await user.save();
+
+    const afterCustomFields = Object.fromEntries(user.customFields);
+    const changedKeys = [
+      ...new Set([...updates.keys(), ...removedKeys]),
+    ];
+
+    await auditGovernanceSuccess({
+      request,
+      action: 'USER_CUSTOM_FIELDS_UPDATED',
+      target: user,
+      before: { customFields: beforeCustomFields },
+      after: { customFields: afterCustomFields },
+      reason:
+        typeof request.body?.reason === 'string' &&
+        request.body.reason.trim()
+          ? request.body.reason.trim()
+          : 'Custom metadata updated.',
+      riskClassification: 'MEDIUM',
+      metadata: { changedKeys },
+    });
+
+    return response.status(200).json({
+      success: true,
+      message: 'Custom metadata updated successfully.',
+      data: {
+        user,
+        customFields: afterCustomFields,
+      },
+      correlationId: request.correlationId || null,
+    });
+  }
+);
+
 const changeUserStatus = asyncHandler(
   async (request, response) => {
     requireMaster(request);
@@ -1044,6 +1138,7 @@ module.exports = {
   getUser,
   createUser,
   updateUser,
+  updateUserCustomFields,
   changeUserStatus,
   archiveUser,
 };

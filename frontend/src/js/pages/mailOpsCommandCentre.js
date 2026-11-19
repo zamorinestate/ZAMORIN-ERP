@@ -1047,7 +1047,7 @@ async function openComposeModal(wrap) {
   let cafesList = [];
   try {
     const res = await apiGet('/cafes');
-    cafesList = res?.data || res?.cafes || (Array.isArray(res) ? res : []);
+    cafesList = res?.data?.cafes || res?.cafes || (Array.isArray(res?.data) ? res.data : []) || [];
   } catch (_e) {
     cafesList = [];
   }

@@ -542,20 +542,41 @@ async function listen(
     port,
   }
 ) {
-  return new Promise(
-    (resolve, reject) => {
-      const server = app.listen(
-        {
-          port,
-          host,
-          backlog: 2048,
-        },
-        () => resolve(server)
-      );
+  // Bind to a dual-stack address when possible so that `localhost` (which
+  // resolves to ::1 on many systems) reaches the API instead of failing with
+  // "could not be reached" because the server only listened on IPv4.
+  const requestedHost = String(host || '').trim();
+  const candidateHosts = [];
+  if (!requestedHost || requestedHost === '0.0.0.0') {
+    candidateHosts.push('::');
+  } else {
+    candidateHosts.push(requestedHost);
+  }
+  if (requestedHost !== '0.0.0.0') {
+    candidateHosts.push('0.0.0.0');
+  }
 
-      server.once('error', reject);
+  let lastError = null;
+  for (const candidateHost of candidateHosts) {
+    try {
+      const server = await new Promise((resolve, reject) => {
+        const s = app.listen(
+          {
+            port,
+            host: candidateHost,
+            backlog: 2048,
+            ipv6Only: false,
+          },
+          () => resolve(s)
+        );
+        s.once('error', reject);
+      });
+      return server;
+    } catch (err) {
+      lastError = err;
     }
-  );
+  }
+  throw lastError || new Error('Failed to bind HTTP server');
 }
 
 async function startServer() {

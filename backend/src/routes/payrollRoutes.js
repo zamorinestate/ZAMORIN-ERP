@@ -4,6 +4,7 @@ const express = require('express');
 
 const {
   authenticate,
+  requireStepUpAuthentication,
 } = require('../middleware/authenticate');
 
 const {
@@ -155,6 +156,7 @@ router.get(
 
 router.post(
   '/runs/:payrollRunId/payments/batch',
+  requireStepUpAuthentication,
   generatePaymentBatch
 );
 
@@ -175,26 +177,31 @@ router.post(
 
 router.post(
   '/runs/:payrollRunId/submit',
+  requireStepUpAuthentication,
   submitPayrollRun
 );
 
 router.post(
   '/runs/:payrollRunId/approve',
+  requireStepUpAuthentication,
   approvePayrollRun
 );
 
 router.post(
   '/runs/:payrollRunId/issue-payslips',
+  requireStepUpAuthentication,
   issuePayrollRunPayslips
 );
 
 router.post(
   '/runs/:payrollRunId/pay',
+  requireStepUpAuthentication,
   payPayrollRun
 );
 
 router.post(
   '/runs/:payrollRunId/void',
+  requireStepUpAuthentication,
   voidPayrollRun
 );
 

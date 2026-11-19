@@ -513,7 +513,7 @@ test('COGS Engine & Product Margin Integration Suite (SCR-022 / Issue #2)', asyn
       organisationId: orgId,
       cafeId,
       billId: 'BILL-20261015-0101',
-      businessDate: '2026-10-15',
+      businessDate: '2026-11-15',
       cashierUserId: 'CA-0001',
       status: 'COMPLETED',
       subtotalPaisa: 30000,

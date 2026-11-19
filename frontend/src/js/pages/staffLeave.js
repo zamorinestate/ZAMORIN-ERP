@@ -1099,6 +1099,25 @@ function exportLeaveCsv() {
   if (cachedRequests.length === 0) { showToast("No leave requests to export", "info"); return; }
   const headers = ["Request ID", "Leave Type", "Start Date", "End Date", "Days Charged", "Status", "Reason"];
   const rows = cachedRequests.map((r) => [r.id || "", r.type || "", r.startDate || r.dates || "", r.endDate || r.startDate || r.dates || "", r.days ?? 1, r.status || "", r.reason || ""]);
-  exportGrid({ headers, rows, title: "Leave History", filename: `Zamorin_Leave_History_${new Date().toISOString().slice(0, 10)}` });
-  showToast("Leave statement downloaded (XLSX) ✓", "mint");
+  // RFC 4180 CSV export
+  const csvCell = (value) => {
+    const str = String(value ?? "");
+    if (/[",\n\r]/.test(str)) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+  const csvLines = [headers.map(csvCell).join(",")];
+  for (const row of rows) csvLines.push(row.map(csvCell).join(","));
+  const csvContent = csvLines.join("\r\n");
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `Zamorin_Leave_History_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  showToast("Leave statement downloaded (CSV) ✓", "mint");
 }

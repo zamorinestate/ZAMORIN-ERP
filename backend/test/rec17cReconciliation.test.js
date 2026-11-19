@@ -63,6 +63,7 @@ const { CashTransaction } = require('../src/models/CashTransaction');
 const { StockMovement } = require('../src/models/StockMovement');
 const { CafeInventoryConfig } = require('../src/models/CafeInventoryConfig');
 const { InventoryLot } = require('../src/models/InventoryLot');
+const { AuditEvent } = require('../src/models/AuditEvent');
 const vendorLedgerService = require('../src/services/vendorLedgerService');
 const vendorLedgerController = require('../src/controllers/vendorLedgerController');
 const procurementController = require('../src/controllers/procurementController');
@@ -117,6 +118,9 @@ describe('REC-17C — PO Approval Authority, Accounts Capabilities & AP Aging Su
   before(async () => {
     mongoReplSet = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
     await mongoose.connect(mongoReplSet.getUri());
+    // Pre-create the audit_events collection so implicit collection creation
+    // (a catalog change) never happens inside a multi-document transaction.
+    await AuditEvent.createCollection();
   });
 
   after(async () => {
@@ -134,6 +138,7 @@ describe('REC-17C — PO Approval Authority, Accounts Capabilities & AP Aging Su
     await StockMovement.deleteMany({});
     await CafeInventoryConfig.deleteMany({});
     await InventoryLot.deleteMany({});
+    if (AuditEvent.collection) { await AuditEvent.collection.deleteMany({}); }
 
     // Seed base test users
     await User.create([

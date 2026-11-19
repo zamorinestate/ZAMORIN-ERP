@@ -24,9 +24,7 @@ export function renderCallCenter(subroute) {
         <div style="display:flex; gap:12px; align-items:center;">
           <label style="font-size:13px; color:#94A3B8;">Outlet Routing:</label>
           <select id="callcenter-outlet-select" style="background:#1E293B; border:1px solid #334155; color:#F8FAFC; padding:8px 12px; border-radius:6px; font-size:13px; font-weight:600;">
-            <option value="CALICUT_BEACH">Calicut Beach Flagship</option>
-            <option value="HILITE_MALL">Hi-Lite Mall Express</option>
-            <option value="CYBERPARK">Cyberpark Tech Cafe</option>
+            <option value="">Loading outlets…</option>
           </select>
         </div>
       </header>
@@ -92,22 +90,7 @@ export function renderCallCenter(subroute) {
           </div>
 
           <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap:12px;" id="callcenter-items-grid">
-            <button class="btn-add-call-item" data-name="Signature Malabar Pour-Over" data-price="28000" style="background:#1E293B; border:1px solid #334155; border-radius:8px; padding:12px; text-align:left; color:#FFF; cursor:pointer;">
-              <div style="font-weight:700; font-size:13px;">Signature Pour-Over</div>
-              <div style="color:#D4AF37; font-size:12px; margin-top:4px;">₹280.00</div>
-            </button>
-            <button class="btn-add-call-item" data-name="Iced Spanish Latte" data-price="32000" style="background:#1E293B; border:1px solid #334155; border-radius:8px; padding:12px; text-align:left; color:#FFF; cursor:pointer;">
-              <div style="font-weight:700; font-size:13px;">Iced Spanish Latte</div>
-              <div style="color:#D4AF37; font-size:12px; margin-top:4px;">₹320.00</div>
-            </button>
-            <button class="btn-add-call-item" data-name="Zamorin Club Sandwich" data-price="38000" style="background:#1E293B; border:1px solid #334155; border-radius:8px; padding:12px; text-align:left; color:#FFF; cursor:pointer;">
-              <div style="font-weight:700; font-size:13px;">Club Sandwich</div>
-              <div style="color:#D4AF37; font-size:12px; margin-top:4px;">₹380.00</div>
-            </button>
-            <button class="btn-add-call-item" data-name="Truffle Mushroom Pasta" data-price="49000" style="background:#1E293B; border:1px solid #334155; border-radius:8px; padding:12px; text-align:left; color:#FFF; cursor:pointer;">
-              <div style="font-weight:700; font-size:13px;">Truffle Pasta</div>
-              <div style="color:#D4AF37; font-size:12px; margin-top:4px;">₹490.00</div>
-            </button>
+            <div style="color:#64748B; padding:12px;">Loading menu…</div>
           </div>
         </div>
 
@@ -139,6 +122,58 @@ export function renderCallCenter(subroute) {
 export function wireCallCenter(container, subroute) {
   const root = container || document.getElementById("page-content") || document.body;
   let callCart = [];
+
+  // Port hardcoded outlet list & menu items to DB-backed data
+  (async () => {
+    const outletSelect = root.querySelector("#callcenter-outlet-select");
+    try {
+      const res = await apiGet("/cafes");
+      const cafes = res?.data?.cafes || (Array.isArray(res?.data) ? res.data : []) || [];
+      if (outletSelect) {
+        outletSelect.innerHTML = cafes.length
+          ? cafes.map((c) => `<option value="${c.cafeId}">${c.cafeId} · ${(c.name || c.displayName || '').replace(/[<>&"]/g, '')}</option>`).join('')
+          : '<option value="">No cafés available</option>';
+        if (cafes[0]) outletSelect.value = cafes[0].cafeId;
+      }
+    } catch (_e) {
+      if (outletSelect) outletSelect.innerHTML = '<option value="">Failed to load outlets</option>';
+    }
+
+    const grid = root.querySelector("#callcenter-items-grid");
+    try {
+      const res = await apiGet("/menu/items");
+      const items = res?.items || res?.data?.items || res?.data?.menuItems || (Array.isArray(res?.data) ? res.data : []) || [];
+      if (grid) {
+        if (items.length === 0) {
+          grid.innerHTML = '<div style="color:#64748B; padding:12px;">No menu items available.</div>';
+        } else {
+          grid.innerHTML = items.map((it) => {
+            const name = it.name || it.itemName || it.title || '';
+            const pricePaisa = Number(it.currentPricePaisa ?? (it.price != null ? Number(it.price) * 100 : 0) ?? 0);
+            const priceRs = (pricePaisa / 100).toFixed(2);
+            const safeName = String(name).replace(/[<>&"]/g, '');
+            return `<button class="btn-add-call-item" data-name="${safeName}" data-price="${pricePaisa}" style="background:#1E293B; border:1px solid #334155; border-radius:8px; padding:12px; text-align:left; color:#FFF; cursor:pointer;">
+              <div style="font-weight:700; font-size:13px;">${safeName}</div>
+              <div style="color:#D4AF37; font-size:12px; margin-top:4px;">₹${priceRs}</div>
+            </button>`;
+          }).join('');
+          // re-bind click handlers for dynamically added buttons
+          grid.querySelectorAll(".btn-add-call-item").forEach((btn) => {
+            btn.addEventListener("click", () => {
+              const name = btn.getAttribute("data-name");
+              const pricePaisa = Number(btn.getAttribute("data-price"));
+              const existing = callCart.find((i) => i.name === name);
+              if (existing) existing.qty += 1;
+              else callCart.push({ name, pricePaisa, qty: 1 });
+              updateCart();
+            });
+          });
+        }
+      }
+    } catch (_e) {
+      if (grid) grid.innerHTML = '<div style="color:#64748B; padding:12px;">Failed to load menu.</div>';
+    }
+  })();
 
   const updateCart = () => {
     const list = root.querySelector("#call-cart-list");

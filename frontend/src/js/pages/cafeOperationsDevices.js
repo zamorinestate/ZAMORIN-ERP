@@ -14,7 +14,7 @@ async function loadCafesList() {
   if (cachedCafes.length) return cachedCafes;
   try {
     const res = await apiGet("/cafes");
-    cachedCafes = res?.data || res?.cafes || (Array.isArray(res) ? res : []);
+    cachedCafes = res?.data?.cafes || res?.cafes || (Array.isArray(res?.data) ? res.data : []) || [];
   } catch (err) {
     cachedCafes = [];
   }

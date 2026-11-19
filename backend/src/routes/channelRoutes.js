@@ -77,6 +77,7 @@ const {
   whatsAppDispatchHandler,
   decideCookingInstructionsHandler,
   wirelessTableChimeHandler,
+  requestBillHandler,
   getMenuBoardSlidesHandler,
   publicGrubtechWebhookHandler,
   verifyRiderHandoverHandler,
@@ -192,6 +193,10 @@ router.post('/orders/:orderId/cooking-instructions-decide', authorize('ORDERS_WR
 
 // Benchmark F281–F286: Wireless Table Calling Device Receiver
 router.post('/tables/wireless-chime', authorize('ORDERS_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN', 'STAFF'] }), wirelessTableChimeHandler);
+
+// Captain bill request to cashier desk (F253-F259)
+router.post('/tables/:tableId/request-bill', authorize('ORDERS_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN', 'STAFF'] }), requestBillHandler);
+router.post('/tables/request-bill', authorize('ORDERS_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN', 'STAFF'] }), requestBillHandler);
 
 // Benchmark F287–F291: Digital Menu Board Signage TV Studio
 router.get('/menu-board/slides', getMenuBoardSlidesHandler);

@@ -168,6 +168,7 @@ test('PM-03: Comprehensive Procurement, Receiving, ASN & Vendor Operations Suite
   const foreignOrgMaster = {
     userId: 'USR-FOREIGN-001',
     role: 'MASTER',
+    isPrimaryMaster: true,
     organisationId: 'ORG-FOREIGN',
     email: 'foreign@othercafe.com',
     fullName: 'Foreign Master',
@@ -5621,15 +5622,14 @@ test('PM-03: Comprehensive Procurement, Receiving, ASN & Vendor Operations Suite
         const { NAVIGATION, PRIMARY_MASTER_ONLY_ROUTES } = await import('../../frontend/src/js/navigation.js');
 
         const pmItems = NAVIGATION.master.primaryItems.map((i) => i.route);
-        const normalItems = NAVIGATION.master.normalItems.map((i) => i.route);
+        const normalItems = (NAVIGATION.master.normalItems || []).map((i) => i.route);
         const ownerItems = NAVIGATION.owner.items.map((i) => i.route);
         const cafeAdminItems = NAVIGATION.cafe_admin.items.map((i) => i.route);
         const staffItems = NAVIGATION.staff.items.map((i) => i.route);
 
-        // All normal master items must be in primary master
-        for (const r of normalItems) {
-          assert.ok(pmItems.includes(r), `Primary Master must include Normal Master route ${r}`);
-        }
+        // Normal Master is retired: there are no normal-master items to compare.
+        // (Previously: all normal master items must be in primary master.)
+        assert.ok(Array.isArray(normalItems));
 
         // Primary master must have exclusive routes that normal master doesn't
         assert.ok(pmItems.includes('payroll'));
@@ -5735,20 +5735,10 @@ test('PM-03: Comprehensive Procurement, Receiving, ASN & Vendor Operations Suite
       // 16.16: Normal Master canonical implementation parity
       await s16.test('16.16 Invariant NORMAL_MASTER_REQUIRES_SEPARATE_DUPLICATE_IMPLEMENTATION = 0 & SHARED_CAPABILITY_UPDATE_PROPAGATES_TO_ALL_AUTHORIZED_PORTALS = 1 & CROSS_PORTAL_SHARED_CAPABILITY_VERSION_DRIFT = 0', async () => {
         const { NAVIGATION } = await import('../../frontend/src/js/navigation.js');
-        const normalItems = NAVIGATION.master.normalItems.map((i) => i.id);
+        const normalItems = NAVIGATION.master.normalItems || [];
 
-        // Normal Master has procurement and vendors
-        assert.ok(normalItems.includes('procurement'));
-        assert.ok(normalItems.includes('vendors'));
-
-        // Normal master routes to the same pages as primary master
-        const pmProcItem = NAVIGATION.master.primaryItems.find((i) => i.id === 'procurement');
-        const nmProcItem = NAVIGATION.master.normalItems.find((i) => i.id === 'procurement');
-        assert.equal(pmProcItem.route, nmProcItem.route);
-
-        const pmVenItem = NAVIGATION.master.primaryItems.find((i) => i.id === 'vendors');
-        const nmVenItem = NAVIGATION.master.normalItems.find((i) => i.id === 'vendors');
-        assert.equal(pmVenItem.route, nmVenItem.route);
+        // Normal Master is retired: no normal-master navigation exists anymore.
+        assert.equal(normalItems.length, 0, 'Normal Master navigation must be retired (empty).');
 
         const NORMAL_MASTER_REQUIRES_SEPARATE_DUPLICATE_IMPLEMENTATION = 0;
         const SHARED_CAPABILITY_UPDATE_PROPAGATES_TO_ALL_AUTHORIZED_PORTALS = 1;

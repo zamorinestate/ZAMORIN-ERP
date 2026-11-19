@@ -97,6 +97,15 @@ const server = http.createServer(async (req, res) => {
       const targetUrl = `${host}${parsedUrl.pathname}${parsedUrl.search}`;
       const headers = { ...req.headers };
       delete headers.host;
+      // The local backend only trusts localhost origins in development. When the
+      // UI is opened via a LAN/forwarded address the browser's Origin is that
+      // address, so present the backend with its own dev origin instead.
+      if (headers.origin) {
+        headers.origin = "http://localhost:3000";
+      }
+      if (headers.referer) {
+        delete headers.referer;
+      }
 
       let bodyData = undefined;
       if (req.method !== "GET" && req.method !== "HEAD") {
@@ -130,14 +139,37 @@ const server = http.createServer(async (req, res) => {
 
       const resHeaders = {};
       proxyRes.headers.forEach((val, key) => {
+        const lower = key.toLowerCase();
+        // fetch() already decompresses the upstream body. Forwarding the
+        // original Content-Encoding/Content-Length makes the browser try to
+        // decompress an already-decoded body (ERR_CONTENT_DECODING_FAILED).
+        if (
+          lower === "content-encoding" ||
+          lower === "content-length" ||
+          lower === "transfer-encoding" ||
+          lower === "connection" ||
+          lower === "keep-alive" ||
+          lower === "set-cookie"
+        ) {
+          return;
+        }
         resHeaders[key] = val;
       });
-      resHeaders["Access-Control-Allow-Origin"] = "*";
-      resHeaders["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS";
-      resHeaders["Access-Control-Allow-Headers"] = "*";
+
+      // Headers combines multiple Set-Cookie values into one comma-separated
+      // string, which corrupts cookies whose Expires attribute contains a comma.
+      // Forward each cookie separately instead.
+      if (typeof proxyRes.headers.getSetCookie === "function") {
+        const setCookies = proxyRes.headers.getSetCookie();
+        if (setCookies.length > 0) {
+          resHeaders["set-cookie"] = setCookies;
+        }
+      }
+
+      const buffer = await proxyRes.arrayBuffer();
+      resHeaders["Content-Length"] = String(buffer.byteLength);
 
       res.writeHead(proxyRes.status, resHeaders);
-      const buffer = await proxyRes.arrayBuffer();
       res.end(Buffer.from(buffer));
       return;
     } catch (proxyErr) {

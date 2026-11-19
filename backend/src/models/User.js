@@ -1136,6 +1136,17 @@ const userSchema = new mongoose.Schema(
       default: 0,
     },
 
+    attendancePinFailedAttempts: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+
+    attendancePinLockedUntil: {
+      type: Date,
+      default: null,
+    },
+
     roleHistory: {
       type: [roleHistoryEntrySchema],
       default: [],

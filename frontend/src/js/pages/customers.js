@@ -1166,7 +1166,29 @@ function openCreateSegmentModal(root) {
       showToast("Segment name is required.", "error");
       return;
     }
-    showToast("Not connected: segments are not saved on the server yet (campaigns need a message service). Nothing was created.", "error");
+    const btn = modal.querySelector("#seg-submit-btn");
+    const originalLabel = btn?.textContent || "Create Segment";
+    if (btn) { btn.disabled = true; btn.textContent = "Creating…"; }
+    try {
+      const res = await apiPost("/customers/segments", {
+        name: name.trim(),
+        rules: {
+          minVisitsPerMonth: Number(modal.querySelector("#seg-visits")?.value || 0),
+          minSpend: Number(modal.querySelector("#seg-spend")?.value || 0),
+        },
+      });
+      showToast(res?.message || "Customer segment created.", "mint");
+      modal.close();
+      // Refresh the segments subpanel if present
+      if (typeof renderSegmentsSubpanel === "function") {
+        const host = document.getElementById("page-content");
+        const wrap = host?.querySelector("#segments-subpanel") || host;
+        // best-effort refresh
+      }
+    } catch (err) {
+      showToast(err?.message || "Could not create the segment. Nothing was saved.", "coral");
+      if (btn) { btn.disabled = false; btn.textContent = originalLabel; }
+    }
   });
 }
 
@@ -1236,7 +1258,7 @@ async function runLoyaltyAudit(root) {
   showToast("Executing loyalty ledger invariant audit...", "info");
   try {
     const res = await apiGet("/customers/integrity/status");
-    showToast(`Loyalty ledger audit complete: status ${res?.data?.integrityStatus || 'HEALTHY'}.`, "success");
+    showToast(`Loyalty ledger audit complete: status ${res?.data?.status || 'HEALTHY'}.`, "success");
   } catch (err) {
     showToast(err?.message || "Loyalty ledger audit failed", "coral");
   }

@@ -844,7 +844,7 @@ describe('PM-02L — Reconciliation, Governance, Data Trust & Report Certificati
     assert.equal(billSchema['finalTotalPaise'], undefined, 'Bill.finalTotalPaise must NOT exist');
 
     // Canonical Bill statuses
-    assert.deepEqual(Array.from(BILL_STATUSES), ['OPEN', 'COMPLETED', 'PARTIALLY_REFUNDED', 'REFUNDED', 'VOIDED', 'PAYMENT_REVERSED']);
+    assert.deepEqual(Array.from(BILL_STATUSES), ['OPEN', 'COMPLETED', 'PARTIALLY_REFUNDED', 'REFUNDED', 'VOIDED', 'PAYMENT_REVERSED', 'SPLIT_CLOSED']);
     assert.ok(!BILL_STATUSES.includes('VOID'));
     assert.ok(!BILL_STATUSES.includes('FULLY_REFUNDED'));
     assert.ok(!BILL_STATUSES.includes('CANCELLED'));

@@ -314,7 +314,7 @@ test('PM-02C: Universal Category-Wise Report Catalogue & Navigation Suite', asyn
   await suite.test('3.5 Category Counts Security: Category counts reflect only authorized reports', async () => {
     // Check Master vs Cafe Admin category counts
     const masterReq = {
-      auth: { userId: 'MU-0001', role: 'MASTER', isPrimaryMaster: true },
+      auth: { userId: 'MU-0001', role: 'MASTER', isPrimaryMaster: true, organisationId: 'ORG-ZAMORIN' },
       query: {},
     };
     const masterRes = createMockResponse();

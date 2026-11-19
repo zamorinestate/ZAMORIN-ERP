@@ -1,7 +1,7 @@
 'use strict';
 
 const express = require('express');
-const { authenticate } = require('../middleware/authenticate');
+const { authenticate, requireStepUpAuthentication } = require('../middleware/authenticate');
 const { authorize } = require('../middleware/authorize');
 
 const {
@@ -48,12 +48,14 @@ router.get(
 router.post(
   '/vendors/:vendorId/opening-balance',
   authorize('FINANCE:ADMIN', { allowedRoles: ['MASTER'] }),
+  requireStepUpAuthentication,
   setOpeningBalance
 );
 
 router.post(
   '/vendors/:vendorId/rebuild-summary',
   authorize('FINANCE:WRITE', { allowedRoles: ['MASTER'] }),
+  requireStepUpAuthentication,
   rebuildVendorSummary
 );
 
@@ -81,12 +83,14 @@ router.get(
 router.post(
   '/payments',
   authorize('FINANCE:POST', { allowedRoles: ['MASTER'] }),
+  requireStepUpAuthentication,
   recordPayment
 );
 
 router.post(
   '/payments/:paymentId/reverse',
   authorize('FINANCE:POST', { allowedRoles: ['MASTER'] }),
+  requireStepUpAuthentication,
   reversePayment
 );
 
@@ -94,12 +98,14 @@ router.post(
 router.post(
   '/advances',
   authorize('FINANCE:POST', { allowedRoles: ['MASTER'] }),
+  requireStepUpAuthentication,
   recordAdvance
 );
 
 router.post(
   '/advances/apply',
   authorize('FINANCE:POST', { allowedRoles: ['MASTER'] }),
+  requireStepUpAuthentication,
   applyAdvance
 );
 
@@ -109,6 +115,7 @@ router.post(
     allowedRoles: ['MASTER', 'CAFE_ADMIN'],
     allowedCapabilities: ['VENDOR_AP_MATCH', 'FINANCE:WRITE'],
   }),
+  requireStepUpAuthentication,
   applyCreditNote
 );
 
@@ -116,12 +123,14 @@ router.post(
 router.post(
   '/bills/:invoiceId/holds',
   authorize('FINANCE:POST', { allowedRoles: ['MASTER'] }),
+  requireStepUpAuthentication,
   placePaymentHold
 );
 
 router.post(
   '/bills/:invoiceId/holds/release',
   authorize('FINANCE:POST', { allowedRoles: ['MASTER'] }),
+  requireStepUpAuthentication,
   releasePaymentHold
 );
 

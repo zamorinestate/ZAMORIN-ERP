@@ -25,7 +25,7 @@ const readOnlyBanner = () => `<div class="readonly-banner" role="note">Read-only
 async function loadCafes() {
   try {
     const r = await apiGet("/cafes");
-    const list = r?.data || r?.cafes || (Array.isArray(r) ? r : []);
+    const list = r?.data?.cafes || r?.cafes || (Array.isArray(r?.data) ? r.data : []) || [];
     return list.map((c) => ({ id: c.cafeId || c.id || c._id, name: c.name || c.cafeName || c.cafeId || c.id }));
   } catch { return []; }
 }

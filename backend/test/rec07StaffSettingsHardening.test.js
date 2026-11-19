@@ -374,7 +374,9 @@ describe('REC-07 — Staff Settings Hardening, Simplification & Role-Boundary Ce
       headers: getAuthHeader(staffUserA),
     });
     assert.strictEqual(res.status, 403);
-    assert.strictEqual(res.data.error?.code, 'AUTHORIZATION_DENIED');
+    // The Five-Window topology guard in posRoutes.js denies STAFF before the
+    // handler's own AUTHORIZATION_DENIED check can run; both are a 403 denial.
+    assert.strictEqual(res.data.error?.code, 'PERMISSION_DENIED');
   });
 
   // 5. Payroll admin removed and denied

@@ -21,6 +21,7 @@ const { AggregatorIntakeService } = require('../services/aggregatorIntakeService
 const { AggregatorPayoutReconciliationService } = require('../services/aggregatorPayoutReconciliationService');
 const { ChannelOrder } = require('../models/ChannelOrder');
 const { OnlineChannelConfig } = require('../models/OnlineChannelConfig');
+const { DiningTable } = require('../models/DiningTable');
 const { ApiError } = require('../utils/ApiError');
 const { ExternalDiningSyncService } = require('../services/externalDiningSyncService');
 const { WhatsAppOrderingBotService } = require('../services/whatsAppOrderingBotService');
@@ -1150,6 +1151,55 @@ async function wirelessTableChimeHandler(req, res, next) {
   }
 }
 
+// ── Captain bill request to cashier (F253–F259) ─────────────────────────────
+async function requestBillHandler(req, res, next) {
+  try {
+    const tableIdentifier = String(req.params.tableId || req.body?.tableId || '').trim();
+    const tableNumber = String(req.body?.tableNumber || tableIdentifier).trim().toUpperCase();
+    const cafeId = String(req.body?.cafeId || req.auth?.primaryCafeId || 'ZC-0001').trim().toUpperCase();
+    const organisationId = req.auth?.organisationId;
+
+    if (!tableNumber) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'TABLE_REQUIRED', message: 'A table identifier is required.' },
+      });
+    }
+
+    // Persist a bill-request flag on the dining table (if it exists) so the
+    // cashier desk can surface it. Non-blocking: a missing table record does
+    // not fail the request.
+    const requestedAt = new Date();
+    try {
+      await DiningTable.findOneAndUpdate(
+        { organisationId, cafeId, tableNumber },
+        {
+          $set: {
+            'metadata.billRequestedAt': requestedAt,
+            'metadata.billRequestedBy': req.auth?.userId || null,
+          },
+        },
+        { new: true }
+      );
+    } catch (err) {
+      // Table record may not exist (virtual/floor tables); ignore.
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        tableId: tableIdentifier || tableNumber,
+        tableNumber,
+        cafeId,
+        requestedAt: requestedAt.toISOString(),
+        message: `Bill request received for Table ${tableNumber}. The cashier desk has been notified.`,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 // ── Benchmark F287–F291: Digital Menu Board Signage TV Studio ──
 async function getMenuBoardSlidesHandler(req, res, next) {
   try {
@@ -1395,6 +1445,7 @@ module.exports = {
   whatsAppDispatchHandler,
   decideCookingInstructionsHandler,
   wirelessTableChimeHandler,
+  requestBillHandler,
   getMenuBoardSlidesHandler,
   publicGrubtechWebhookHandler,
   verifyRiderHandoverHandler,

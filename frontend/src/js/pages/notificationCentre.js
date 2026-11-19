@@ -73,7 +73,7 @@ export async function wireNotificationCentre(root) {
 async function loadNotifications(root) {
   try {
     const data = await apiGet("/notifications");
-    _notifications = data?.notifications || data?.data || [];
+    _notifications = data?.data?.notifications || data?.notifications || (Array.isArray(data?.data) ? data.data : []) || [];
     renderList(root);
   } catch {
     root.querySelector("#notif-list").innerHTML = `

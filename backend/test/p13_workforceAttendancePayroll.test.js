@@ -1212,13 +1212,19 @@ test('P13: Workforce Attendance, Employee Lifecycle & Payroll Suite', async (sui
     const orgId = 'ORG-ZAMORIN';
     const cafeId = 'ZC-0001';
 
+    const now = new Date();
+    const periodKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const periodStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const periodEnd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
     await PayrollRun.create({
-      payrollRunId: 'PR-202610-0021',
+      payrollRunId: `PR-${periodKey.replace('-','')}-0021`,
       organisationId: orgId,
       cafeId,
-      periodKey: '2026-10',
-      periodStartDate: '2026-10-01',
-      periodEndDate: '2026-10-31',
+      periodKey,
+      periodStartDate: periodStart,
+      periodEndDate: periodEnd,
       status: 'APPROVED',
       employeeCount: 3,
       totalGrossPaise: 9000000,

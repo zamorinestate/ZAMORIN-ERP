@@ -298,11 +298,18 @@ async function executeTransactionWithRetry(operationFn, options = {}) {
       const isTransient =
         (typeof err.hasErrorLabel === 'function' && err.hasErrorLabel('TransientTransactionError')) ||
         (Array.isArray(err.errorLabels) && err.errorLabels.includes('TransientTransactionError')) ||
+        (err.errorLabelSet && typeof err.errorLabelSet.has === 'function' && err.errorLabelSet.has('TransientTransactionError')) ||
         err.code === 112 ||
-        String(err.message).includes('WriteConflict');
+        err.code === 24 ||
+        String(err.codeName || '') === 'LockTimeout' ||
+        String(err.message).includes('WriteConflict') ||
+        String(err.message).includes('catalog changes') ||
+        String(err.message).includes('please retry the operation') ||
+        String(err.message).includes('TransientTransactionError');
 
       if (isTransient && transientAttempts < maxTransientRetries) {
         lastTransientError = err;
+        await new Promise((resolve) => setTimeout(resolve, 50 * transientAttempts));
         continue;
       }
 

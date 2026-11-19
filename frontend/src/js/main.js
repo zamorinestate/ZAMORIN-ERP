@@ -576,7 +576,9 @@ async function handleCompleteLoginFlow({ organisationId, email, password, rememb
     const loginPayload = {
       organisationId,
       email,
-      password,
+      // Trim accidental leading/trailing whitespace from copy-paste; stored
+      // passwords never intentionally begin or end with spaces.
+      password: typeof password === "string" ? password.trim() : password,
       rememberDevice: Boolean(rememberDevice),
       identifier: email,
       device: {

@@ -17,6 +17,7 @@ const {
   getUser,
   createUser,
   updateUser,
+  updateUserCustomFields,
   changeUserStatus,
   archiveUser,
 } = require('../controllers/userController');
@@ -91,6 +92,12 @@ router.post(
   '/:userId/archive',
   ...userAdministrationGuards,
   archiveUser
+);
+
+router.patch(
+  '/:userId/custom-fields',
+  ...userAdministrationGuards,
+  updateUserCustomFields
 );
 
 router

@@ -6,11 +6,9 @@
 
 import { state } from "./state.js";
 
-const DEFAULT_API_BASE_URL =
-  typeof globalThis.location !== "undefined" &&
-  (globalThis.location.hostname === "localhost" || globalThis.location.hostname === "127.0.0.1")
-    ? `http://${globalThis.location.hostname}:4000/api/v1`
-    : "/api/v1";
+// Always use the same-origin proxy. The dev frontend server forwards /api/* to
+// the backend, so the browser never has to make cross-origin requests to :4000.
+const DEFAULT_API_BASE_URL = "/api/v1";
 
 function normalizeApiBaseUrl(value) {
   const candidate =
@@ -566,6 +564,9 @@ export function mapErrorToUserMessage(code, status, fallbackMessage) {
   const safeFallback = sanitizeFallback(fallbackMessage);
 
   switch (code) {
+    case "INVALID_LOGIN":
+    case "INVALID_CREDENTIALS":
+      return "Invalid email or password. Please check your credentials.";
     case "AUTH_TOKEN_EXPIRED":
     case "AUTH_TOKEN_INVALID":
     case "AUTH_TOKEN_NOT_ACTIVE":
@@ -574,7 +575,6 @@ export function mapErrorToUserMessage(code, status, fallbackMessage) {
     case "INVALID_OR_EXPIRED_SESSION":
     case "AUTHENTICATION_REQUIRED":
     case "AUTH_SESSION_INVALID":
-    case "INVALID_CREDENTIALS":
       return "Your authenticated session could not be validated. Please sign in again.";
     case "ROLE_CHANGED":
       return "Your access role has changed. Please sign in again.";

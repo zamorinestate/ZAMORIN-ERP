@@ -6,7 +6,7 @@
  */
 
 const express = require('express');
-const { authenticate } = require('../middleware/authenticate');
+const { authenticate, requireStepUpAuthentication } = require('../middleware/authenticate');
 const { authorize } = require('../middleware/authorize');
 const {
   listVendors,
@@ -91,12 +91,14 @@ router.get(
 router.post(
   '/orders/:poId/master-approve',
   authorize('PROCUREMENT_APPROVE', { allowedRoles: ['MASTER'] }),
+  requireStepUpAuthentication,
   masterApproveInvoiceAndPostInventory
 );
 
 router.post(
   '/orders/:poId/retry-posting',
   authorize('PROCUREMENT_APPROVE', { allowedRoles: ['MASTER'] }),
+  requireStepUpAuthentication,
   retryFailedInventoryPosting
 );
 
@@ -154,24 +156,28 @@ router.post(
 router.post(
   '/:vendorId/bank-change-approve',
   authorize('VENDORS_WRITE', { allowedRoles: ['MASTER'] }),
+  requireStepUpAuthentication,
   approveBankChangeRequest
 );
 
 router.post(
   '/:vendorId/bank-change-reject',
   authorize('VENDORS_WRITE', { allowedRoles: ['MASTER'] }),
+  requireStepUpAuthentication,
   rejectBankChangeRequest
 );
 
 router.post(
   '/:vendorId/holds',
   authorize('VENDORS_WRITE', { allowedRoles: ['MASTER'] }),
+  requireStepUpAuthentication,
   placeVendorHold
 );
 
 router.delete(
   '/:vendorId/holds/:holdId',
   authorize('VENDORS_WRITE', { allowedRoles: ['MASTER'] }),
+  requireStepUpAuthentication,
   releaseVendorHold
 );
 

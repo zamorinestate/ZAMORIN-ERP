@@ -163,6 +163,7 @@ class DocumentStorageAdapter {
       'image/jpeg': 'jpg',
       'image/jpg': 'jpg',
       'image/png': 'png',
+      'image/webp': 'webp',
     };
     const ext = extMap[String(mimeType || '').toLowerCase()] || 'bin';
     const opaqueId = `${documentId}-${crypto.randomBytes(6).toString('hex')}`;
@@ -180,6 +181,7 @@ class DocumentStorageAdapter {
       'image/jpeg': 'jpg',
       'image/jpg': 'jpg',
       'image/png': 'png',
+      'image/webp': 'webp',
     };
     const ext = extMap[String(mimeType || '').toLowerCase()] || 'bin';
     return `quarantine/${org}/${cafe}/${documentId}-${crypto.randomBytes(6).toString('hex')}.${ext}`;

@@ -9,6 +9,8 @@ const { DeviceSecurityEvent } = require('../models/DeviceSecurityEvent');
 const { Attendance } = require('../modules/attendance/Attendance');
 const { Cafe } = require('../models/Cafe');
 const ApiError = require('../utils/ApiError');
+const mongoose = require('mongoose');
+const { User } = require('../models/User');
 
 // Fail closed in production: the rotating QR challenge must be signed with a
 // configured secret (validated at boot by the startup validator). Dev/test keep
@@ -31,6 +33,8 @@ function calculateDistanceMetres(lat1, lon1, lat2, lon2) {
 
 class AttendanceQrService {
   constructor() {
+    // In-process cache; DB (User.attendancePinFailedAttempts/LockedUntil) is the
+    // source of truth so lockout survives restarts and is shared across instances.
     this.userPinAttempts = new Map();
   }
 
@@ -38,16 +42,70 @@ class AttendanceQrService {
     return calculateDistanceMetres(lat1, lon1, lat2, lon2);
   }
 
-  getUserPinAttemptState(userId) {
-    return this.userPinAttempts.get(userId) || { failedAttempts: 0, lockedUntil: null };
+  async getUserPinAttemptState(userId) {
+    const key = String(userId || '').trim().toUpperCase();
+    if (this.userPinAttempts.has(key)) {
+      return this.userPinAttempts.get(key);
+    }
+
+    let state = { failedAttempts: 0, lockedUntil: null };
+    try {
+      if (mongoose.connection?.readyState === 1) {
+        const user = await User.findOne({ userId: key }).lean();
+        if (user) {
+          state = {
+            failedAttempts: Number(user.attendancePinFailedAttempts) || 0,
+            lockedUntil: user.attendancePinLockedUntil ? new Date(user.attendancePinLockedUntil) : null,
+          };
+        }
+      }
+    } catch (_) {
+      // DB unavailable / mocked User — fall back to in-memory default
+    }
+
+    this.userPinAttempts.set(key, state);
+    return state;
   }
 
-  setUserPinAttemptState(userId, state) {
-    this.userPinAttempts.set(userId, state);
+  async setUserPinAttemptState(userId, state) {
+    const key = String(userId || '').trim().toUpperCase();
+    const normalized = {
+      failedAttempts: Number(state?.failedAttempts) || 0,
+      lockedUntil: state?.lockedUntil ? new Date(state.lockedUntil) : null,
+    };
+    this.userPinAttempts.set(key, normalized);
+
+    try {
+      if (mongoose.connection?.readyState === 1) {
+        await User.updateMany(
+          { userId: key },
+          {
+            $set: {
+              attendancePinFailedAttempts: normalized.failedAttempts,
+              attendancePinLockedUntil: normalized.lockedUntil,
+            },
+          }
+        );
+      }
+    } catch (_) {
+      // Best-effort persistence; in-memory cache remains authoritative for this process
+    }
   }
 
-  clearUserPinAttemptState(userId) {
-    this.userPinAttempts.delete(userId);
+  async clearUserPinAttemptState(userId) {
+    const key = String(userId || '').trim().toUpperCase();
+    this.userPinAttempts.delete(key);
+
+    try {
+      if (mongoose.connection?.readyState === 1) {
+        await User.updateMany(
+          { userId: key },
+          { $set: { attendancePinFailedAttempts: 0, attendancePinLockedUntil: null } }
+        );
+      }
+    } catch (_) {
+      // Best-effort
+    }
   }
 
   /**
@@ -581,7 +639,7 @@ class AttendanceQrService {
 
       challenge = await AttendanceQrChallenge.findOne({ challengeId: envelopeData.cid });
     } else if (fallbackPin) {
-      const userAttempt = this.getUserPinAttemptState(userId);
+      const userAttempt = await this.getUserPinAttemptState(userId);
       if (userAttempt.lockedUntil && userAttempt.lockedUntil > new Date()) {
         throw new Error('FALLBACK_PIN_USER_LOCKED_TOO_MANY_ATTEMPTS');
       }
@@ -597,12 +655,12 @@ class AttendanceQrService {
         if (userAttempt.failedAttempts >= 5) {
           userAttempt.lockedUntil = new Date(Date.now() + 15 * 60 * 1000);
         }
-        this.setUserPinAttemptState(userId, userAttempt);
+        await this.setUserPinAttemptState(userId, userAttempt);
         throw new Error('INVALID_OR_EXPIRED_FALLBACK_PIN');
       }
 
       // Reset user failure counter on successful PIN match
-      this.clearUserPinAttemptState(userId);
+      await this.clearUserPinAttemptState(userId);
     } else {
       throw new Error('CHALLENGE_ENVELOPE_OR_PIN_REQUIRED');
     }

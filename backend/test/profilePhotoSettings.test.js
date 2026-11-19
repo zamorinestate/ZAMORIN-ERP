@@ -29,6 +29,12 @@ const PNG_BYTES = Buffer.concat([
   Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
   Buffer.from('profile-photo-test-png-payload'),
 ]);
+const WEBP_BYTES = Buffer.concat([
+  Buffer.from('RIFF'),
+  Buffer.from([0x24, 0x00, 0x00, 0x00]),
+  Buffer.from('WEBP'),
+  Buffer.from('profile-photo-test-webp-payload'),
+]);
 
 function expectApiError(fn, code) {
   assert.throws(fn, (err) => {
@@ -200,6 +206,18 @@ describe('Profile photo upload / remove (Settings SCR-023)', () => {
     });
     assert.equal(photoResponse.status, 200);
     assert.equal(photoResponse.headers.get('content-type'), 'image/png');
+  });
+
+  it('accepts a WebP photo and stores it with a .webp extension', async () => {
+    const response = await uploadPhoto({ buffer: WEBP_BYTES, mimeType: 'image/webp' });
+    assert.equal(response.status, 201);
+    const payload = await response.json();
+    assert.equal(payload.data.photoMimeType, 'image/webp');
+
+    const stored = await User.findOne({ userId: user.userId }).lean();
+    assert.match(stored.photoAttachmentId, /\.webp$/);
+    storedKeys.add(stored.photoAttachmentId);
+    assert.equal(await documentStorageAdapter.exists({ storageKey: stored.photoAttachmentId }), true);
   });
 
   it('removes the photo, deletes the stored object and stays idempotent', async () => {

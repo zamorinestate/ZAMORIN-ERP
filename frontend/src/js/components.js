@@ -1205,13 +1205,22 @@ export function closeAllModals() {
 /* -------------------------------------------------------------------------
    Confirmation Dialog
    ------------------------------------------------------------------------- */
-export function confirmAction({
-  title = "Confirm Action",
-  description = "Are you sure you want to proceed with this operation?",
-  confirmLabel = "Confirm",
-  danger = false,
-  onConfirm,
-}) {
+export function confirmAction(input, legacyOnConfirm) {
+  // Supports both the object form and the legacy (message, onConfirm) form used
+  // by many existing call sites.
+  const options =
+    typeof input === "string"
+      ? { description: input, onConfirm: legacyOnConfirm }
+      : input || {};
+
+  const {
+    title = "Confirm Action",
+    description = "Are you sure you want to proceed with this operation?",
+    confirmLabel = "Confirm",
+    danger = false,
+    onConfirm,
+  } = options;
+
   openModal({
     title,
     body: `<p style="font-size:14px;line-height:1.6;color:var(--muted);margin:0;">${description}</p>`,

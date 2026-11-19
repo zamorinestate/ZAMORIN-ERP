@@ -313,7 +313,7 @@ test('SCR-014: My Loans & Advances — Comprehensive Integration Suite', async (
   });
 
   // ── 1. Self-Service Identity & Normal Master Privacy Firewall ─────────────
-  await t.test('1. Normal MASTER is blocked with 403 on ALL loan endpoints (Privacy Firewall)', async () => {
+  await t.test('1. Retired Normal MASTER is blocked with 403 ROLE_RETIRED on loan endpoints', async () => {
     const res = await makeRequest({
       port,
       method: 'GET',
@@ -321,7 +321,7 @@ test('SCR-014: My Loans & Advances — Comprehensive Integration Suite', async (
       headers: { Authorization: 'Bearer token_normal_master' },
     });
     assert.equal(res.statusCode, 403);
-    assert.equal(res.body?.error?.code, 'PRIVACY_FIREWALL_NORMAL_MASTER_DENIED');
+    assert.equal(res.body?.error?.code, 'ROLE_RETIRED');
   });
 
   await t.test('2. Staff user retrieves own self-service loans and factual KPIs', async () => {

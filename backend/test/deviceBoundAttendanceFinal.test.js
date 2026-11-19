@@ -172,29 +172,29 @@ test('ADB-VERIFY-R2: Geofence Boundary Verification', async (t) => {
 });
 
 test('ADB-VERIFY-R3: Fallback PIN User-Scoped Lockout & Shared Challenge DoS Resistance', async (t) => {
-  await t.test('5 failed PIN attempts by Staff A locks Staff A without invalidating shared QR for Staff B or C', () => {
+  await t.test('5 failed PIN attempts by Staff A locks Staff A without invalidating shared QR for Staff B or C', async () => {
     const userA = 'ST-0001';
     const userB = 'ST-0002';
     const userC = 'ST-0003';
 
     // 1. Staff A submits 5 wrong PIN attempts
     for (let i = 1; i <= 5; i++) {
-      const state = attendanceQrService.getUserPinAttemptState(userA);
+      const state = await attendanceQrService.getUserPinAttemptState(userA);
       state.failedAttempts += 1;
       if (state.failedAttempts >= 5) {
         state.lockedUntil = new Date(Date.now() + 15 * 60 * 1000);
       }
-      attendanceQrService.setUserPinAttemptState(userA, state);
+      await attendanceQrService.setUserPinAttemptState(userA, state);
     }
 
     // Verify Staff A is locked
-    const stateA = attendanceQrService.getUserPinAttemptState(userA);
+    const stateA = await attendanceQrService.getUserPinAttemptState(userA);
     assert.equal(stateA.failedAttempts, 5);
     assert.ok(stateA.lockedUntil && stateA.lockedUntil > new Date());
 
     // Verify Staff B and Staff C are NOT locked
-    const stateB = attendanceQrService.getUserPinAttemptState(userB);
-    const stateC = attendanceQrService.getUserPinAttemptState(userC);
+    const stateB = await attendanceQrService.getUserPinAttemptState(userB);
+    const stateC = await attendanceQrService.getUserPinAttemptState(userC);
     assert.equal(stateB.failedAttempts, 0);
     assert.equal(stateB.lockedUntil, null);
     assert.equal(stateC.failedAttempts, 0);
@@ -214,7 +214,7 @@ test('ADB-VERIFY-R3: Fallback PIN User-Scoped Lockout & Shared Challenge DoS Res
     assert.equal(sig, expectedSig, 'Shared challenge remains completely valid for other staff');
 
     // Clean up
-    attendanceQrService.clearUserPinAttemptState(userA);
+    await attendanceQrService.clearUserPinAttemptState(userA);
   });
 });
 

@@ -1760,7 +1760,7 @@ function openCreateComboModal(wrap) {
       let catalogue = [];
       try {
         const r = await apiGet("/menu/items");
-        catalogue = r?.data?.items || r?.data?.menuItems || (Array.isArray(r?.data) ? r.data : []);
+        catalogue = r?.items || r?.data?.items || r?.data?.menuItems || (Array.isArray(r?.data) ? r.data : []) || [];
       } catch (err) {
         showToast(err?.message || "Could not load the menu items to build this combo. Nothing was saved.", "error");
         return;

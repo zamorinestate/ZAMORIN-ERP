@@ -476,7 +476,9 @@ async function renderActiveTab(root) {
     showToast('Triggering 3-way automated reconciliation check...', 'info');
     try {
       const res = await apiGet('/procurement/matching');
-      showToast(`3-Way Match check completed: status ${res?.data?.status || 'HEALTHY'}.`, 'mint');
+      const m = res?.data || {};
+      const summary = m.status || `${m.matchedCount ?? 0} matched / ${m.exceptionsCount ?? 0} exceptions`;
+      showToast(`3-Way Match check completed: ${summary}.`, 'mint');
     } catch (err) {
       showToast(err?.message || '3-Way Match check failed', 'coral');
     }
@@ -872,10 +874,17 @@ async function loadOrdersSubtabData(root) {
   renderFilteredOrders(root);
 }
 
-function downloadOrderBill(poId) {
-  // The server has no download route for the vendor bill file yet; say so rather than
-  // opening a link that returns an error page.
-  showToast(`The vendor bill file for ${poId} cannot be downloaded yet — the server does not provide that file route.`, 'amber');
+async function downloadOrderBill(poId) {
+  try {
+    await downloadFile({
+      url: `/procurement/orders/${encodeURIComponent(poId)}/receipt-bill`,
+      filename: `vendor_bill_${poId}.pdf`,
+      expectedMimeTypes: ['application/pdf', 'image/', 'application/octet-stream'],
+    });
+    showToast(`Downloaded vendor bill for ${poId}.`, 'mint');
+  } catch (err) {
+    showToast(err?.message || `Could not download the vendor bill for ${poId}.`, 'coral');
+  }
 }
 
 async function executeMasterApprove(root, poId) {
@@ -1444,7 +1453,7 @@ async function renderReceivingSubtab(root, container) {
 
   try {
     const res = await apiGet('/procurement/grns');
-    const grns = res?.data?.goodsReceipts || [];
+    const grns = res?.data?.goodsReceipts || res?.data?.grns || [];
     const wrap = container.querySelector('#grn-table-wrap');
     if (!wrap) return;
 

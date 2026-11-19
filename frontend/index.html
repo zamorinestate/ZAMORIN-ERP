@@ -44,13 +44,12 @@
     // Dynamic API URL Resolution:
     // 1. Explicit window override (if injected by reverse proxy / host environment)
     // 2. Operator override from localStorage
-    // 3. Localhost development bridge (:4000)
-    // 4. Production same-origin relative endpoint (/api/v1 proxied by Vercel to Render)
+    // 3. Same-origin relative endpoint (/api/v1). The dev frontend server proxies
+    //    /api/* to the backend, which avoids cross-origin/CORS and IPv6-localhost
+    //    failures when the UI is opened as http://localhost:3000.
     window.ZAMORIN_API_BASE_URL = window.ZAMORIN_API_BASE_URL ||
       localStorage.getItem('zamorin_api_url') ||
-      ((window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-        ? ('http://' + window.location.hostname + ':4000/api/v1')
-        : '/api/v1');
+      '/api/v1';
   </script>
 </head>
 <body style="background-color: #0b1120; margin: 0;">

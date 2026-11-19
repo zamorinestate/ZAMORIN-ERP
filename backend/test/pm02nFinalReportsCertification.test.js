@@ -695,15 +695,11 @@ describe('PM-02N: Final Reports & Analytics End-to-End Certification Suite', () 
       assert.strictEqual(rep.category, 'TASKS_APPROVALS');
     });
 
-    it('12.11 Role authority ledger distinguishes Primary Master vs Normal Master', () => {
+    it('12.11 Role authority ledger: Primary Master resolves to PRIMARY_MASTER (Normal Master retired)', () => {
       const primaryAuth = { userId: 'MU-0001', role: 'MASTER', isPrimaryMaster: true, organisationId: 'ORG-01' };
-      const normalAuth = { userId: 'MU-0002', role: 'MASTER', isPrimaryMaster: false, organisationId: 'ORG-01' };
 
       const pScope = resolveReportScope({ auth: primaryAuth, query: {} }, {});
       assert.strictEqual(pScope.authorityType, 'PRIMARY_MASTER');
-
-      const nScope = resolveReportScope({ auth: normalAuth, query: {} }, {});
-      assert.strictEqual(nScope.authorityType, 'NORMAL_MASTER');
     });
 
     it('12.12 Invariant-count reconciliation: exactly 32 verified PM-02N invariants', () => {
@@ -916,22 +912,18 @@ describe('PM-02N: Final Reports & Analytics End-to-End Certification Suite', () 
 
     it('13.7 Persistent database roles strict equality: exactly 4 roles on User model', () => {
       const dbRoles = User.schema.path('role').enumValues;
-      const expectedRoles = ['CAFE_ADMIN', 'MASTER', 'OWNER', 'STAFF'];
+      const expectedRoles = ['CAFE_ADMIN', 'MASTER', 'OWNER', 'STAFF', 'VENDOR'];
       assert.deepStrictEqual([...dbRoles].sort(), expectedRoles.sort());
       assert.deepStrictEqual([...USER_ROLES].sort(), expectedRoles.sort());
       assert.strictEqual(dbRoles.includes('PRIMARY_MASTER'), false);
       assert.strictEqual(dbRoles.includes('NORMAL_MASTER'), false);
     });
 
-    it('13.8 Derived Master classification: PRIMARY_MASTER and NORMAL_MASTER are runtime classifications', () => {
+    it('13.8 Derived Master classification: PRIMARY_MASTER is a runtime classification (Normal Master retired)', () => {
       const primaryAuth = { userId: 'MU-001', role: 'MASTER', isPrimaryMaster: true, organisationId: 'ORG-01' };
-      const normalAuth = { userId: 'MU-002', role: 'MASTER', isPrimaryMaster: false, organisationId: 'ORG-01' };
 
       const pScope = resolveReportScope({ auth: primaryAuth, query: {} }, {});
       assert.strictEqual(pScope.authorityType, 'PRIMARY_MASTER');
-
-      const nScope = resolveReportScope({ auth: normalAuth, query: {} }, {});
-      assert.strictEqual(nScope.authorityType, 'NORMAL_MASTER');
     });
 
     it('13.9 Trust-status source audit equality: exactly 6 canonical trust tokens', () => {

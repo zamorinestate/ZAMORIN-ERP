@@ -55,7 +55,7 @@ async function loadCafesList() {
   if (cachedCafes.length) return cachedCafes;
   try {
     const res = await apiGet("/cafes");
-    cachedCafes = res?.data || res?.cafes || (Array.isArray(res) ? res : []);
+    cachedCafes = res?.data?.cafes || res?.cafes || (Array.isArray(res?.data) ? res.data : []) || [];
     cachedCafes.forEach(c => {
       const id = c.cafeId || c.code || c.id || c._id;
       if (id) CAFE_NAMES[id] = c.name || id;
@@ -2919,7 +2919,7 @@ async function openScopedManualAttendanceModal(root) {
   let employeeList = [];
   try {
     const empRes = await apiGet("/employees");
-    employeeList = empRes?.data || empRes?.employees || (Array.isArray(empRes) ? empRes : []);
+    employeeList = empRes?.data?.employees || empRes?.employees || (Array.isArray(empRes?.data) ? empRes.data : []) || [];
   } catch {}
 
   if (!employeeList.length) {

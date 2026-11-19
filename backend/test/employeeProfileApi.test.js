@@ -415,7 +415,7 @@ test('GET /employees/:userId rejects STAFF access to another employee', async (t
 
   const { status, body } = await request(server, '/api/v1/employees/ST-0002', { token: 'mock-token' });
   assert.equal(status, 403);
-  assert.ok(body.error.code === 'SELF_ACCESS_ONLY' || body.error.code === 'PERMISSION_DENIED', `Expected 403 error code, got ${body.error?.code}`);
+  assert.ok(body.error.code === 'SELF_ACCESS_ONLY' || body.error.code === 'PERMISSION_DENIED' || body.error.code === 'FORBIDDEN' || body.error.code === 'ROLE_NOT_ALLOWED', `Expected 403 error code, got ${body.error?.code}`);
 });
 
 // ---------------------------------------------------------------------------

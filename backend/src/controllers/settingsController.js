@@ -159,7 +159,7 @@ async function getMyProfile(req, res) {
   // Field governance map â€” backend determines editability, never client
   const fieldGovernance = {
     preferredName:      'USER_EDITABLE',
-    profileImageUrl:    'USER_EDITABLE',
+    profileImageUrl:    'SERVER_MANAGED', // derived from the photo endpoint, never set by the client
     personalEmail:      'USER_EDITABLE',
     personalMobile:     'USER_EDITABLE',
     emergencyContact:   'USER_EDITABLE',

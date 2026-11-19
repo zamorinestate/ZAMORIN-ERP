@@ -211,7 +211,7 @@ test('Attendance & Shifts — Screen 004 Integration Test Suite', async (t) => {
       port,
       method: 'GET',
       path: '/api/v1/attendance/overview',
-      headers: { Authorization: `Bearer token_normal_master` },
+      headers: { Authorization: `Bearer token_primary_master` },
     });
 
     assert.equal(res.status, 200);
@@ -226,7 +226,7 @@ test('Attendance & Shifts — Screen 004 Integration Test Suite', async (t) => {
       port,
       method: 'GET',
       path: '/api/v1/attendance/live',
-      headers: { Authorization: `Bearer token_normal_master` },
+      headers: { Authorization: `Bearer token_primary_master` },
     });
 
     assert.equal(res.status, 200);
@@ -234,13 +234,13 @@ test('Attendance & Shifts — Screen 004 Integration Test Suite', async (t) => {
     assert.equal(res.data.data.attendance.length, 1);
   });
 
-  // 3. POST /api/v1/attendance/master-manual (Normal Master marks manual punch)
-  await t.test('Normal Master can record manual attendance for ANY employee across ANY cafe', async () => {
+  // 3. POST /api/v1/attendance/master-manual (Primary Master marks manual punch)
+  await t.test('Primary Master can record manual attendance for ANY employee across ANY cafe', async () => {
     const res = await makeRequest({
       port,
       method: 'POST',
       path: '/api/v1/attendance/master-manual',
-      headers: { Authorization: `Bearer token_normal_master` },
+      headers: { Authorization: `Bearer token_primary_master` },
       body: {
         userId: 'EMP-001',
         cafeId: 'ZC-0001',
@@ -260,7 +260,7 @@ test('Attendance & Shifts — Screen 004 Integration Test Suite', async (t) => {
       port,
       method: 'GET',
       path: '/api/v1/attendance/calendar-360/EMP-001?year=2026&month=8',
-      headers: { Authorization: `Bearer token_normal_master` },
+      headers: { Authorization: `Bearer token_primary_master` },
     });
 
     assert.equal(res.status, 200);

@@ -216,7 +216,7 @@ test('OWNER cannot create payroll for an unassigned cafe', async (t) => {
   });
 
   assert.equal(result.status, 403);
-  assert.equal(result.body.error?.code, 'CAFE_ACCESS_DENIED');
+  assert.equal(result.body.error?.code, 'PERMISSION_DENIED');
 });
 
 test('MASTER creates a backend-controlled draft payroll run', async (t) => {

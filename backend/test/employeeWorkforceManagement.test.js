@@ -122,9 +122,24 @@ test('Screen 008: Employee Directory & Staffing Integration Test Suite', async (
     save: async function () { return this; },
   };
 
+  const ownerUser = {
+    userId: 'MU-OWNER-01',
+    role: 'OWNER',
+    isPrimaryMaster: false,
+    organisationId: 'ORG-ZAMORIN',
+    email: 'owner@zamorincafe.com',
+    fullName: 'Owner',
+    sessionVersion: 1,
+    permissionsVersion: 1,
+    assignedCafeIds: ['ZC-0001', 'ZC-0002'],
+    accountStatus: 'ACTIVE',
+    save: async function () { return this; },
+  };
+
   t.mock.method(authService, 'verifyAccessToken', async (token) => {
+    const isOwner = token === 'token_owner';
     const isNormal = token === 'token_normal_master';
-    const activeUser = isNormal ? normalMasterUser : primaryMasterUser;
+    const activeUser = isOwner ? ownerUser : (isNormal ? normalMasterUser : primaryMasterUser);
     return {
       payload: {
         sub: activeUser.userId,
@@ -173,6 +188,9 @@ test('Screen 008: Employee Directory & Staffing Integration Test Suite', async (
 
   // Global User.findOne handler
   t.mock.method(User, 'findOne', (query) => {
+    if (query?.userId === 'MU-OWNER-01') {
+      return createQueryWrapper({ ...ownerUser, isPrimaryMaster: false, toObject: () => ownerUser });
+    }
     if (query?.userId === 'MU-NORMAL-01') {
       return createQueryWrapper({ ...normalMasterUser, isPrimaryMaster: false, toObject: () => normalMasterUser });
     }
@@ -249,7 +267,7 @@ test('Screen 008: Employee Directory & Staffing Integration Test Suite', async (
     assert.ok(Array.isArray(res.body.data.cafeWorkforce));
   });
 
-  await t.test('2. GET /api/v1/employees lists employees with privacy masking for Normal Master', async () => {
+  await t.test('2. GET /api/v1/employees lists employees with privacy masking for non-Primary Master (Owner)', async () => {
     t.mock.method(User, 'countDocuments', async () => 1);
     t.mock.method(User, 'find', () => createQueryWrapper([
       {
@@ -267,7 +285,7 @@ test('Screen 008: Employee Directory & Staffing Integration Test Suite', async (
       port,
       method: 'GET',
       path: '/api/v1/employees',
-      headers: { Authorization: 'Bearer token_normal_master' },
+      headers: { Authorization: 'Bearer token_owner' },
     });
 
     assert.equal(res.statusCode, 200);

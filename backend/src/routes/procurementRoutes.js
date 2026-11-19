@@ -11,7 +11,7 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const crypto = require('crypto');
-const { authenticate } = require('../middleware/authenticate');
+const { authenticate, requireStepUpAuthentication } = require('../middleware/authenticate');
 const { authorize } = require('../middleware/authorize');
 const { attachDeviceContext } = require('../middleware/deviceContext');
 const { DEFAULT_DOCUMENT_MAX_BYTES } = require('../services/documentAttachmentService');
@@ -317,6 +317,7 @@ router.post(
 router.post(
   '/orders/:purchaseOrderId/approve-and-send',
   authorize('PROCUREMENT_APPROVE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  requireStepUpAuthentication,
   approveAndSendOrder
 );
 
@@ -364,12 +365,14 @@ router.post(
 router.post(
   '/dispatch-worker/run',
   authorize('PROCUREMENT_WRITE', { allowedRoles: ['MASTER'] }),
+  requireStepUpAuthentication,
   runProcurementDispatchWorker
 );
 
 router.post(
   '/dispatch-jobs/:dispatchJobId/reconcile',
   authorize('PROCUREMENT_WRITE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  requireStepUpAuthentication,
   reconcileDispatchJob
 );
 
@@ -401,12 +404,14 @@ router.post(
 router.post(
   '/orders/:purchaseOrderId/approve',
   authorize('PROCUREMENT_APPROVE', { allowedRoles: ['MASTER'] }),
+  requireStepUpAuthentication,
   approveOrder
 );
 
 router.post(
   '/orders/:purchaseOrderId/master-approve',
   authorize('PROCUREMENT_APPROVE', { allowedRoles: ['MASTER', 'OWNER'] }),
+  requireStepUpAuthentication,
   masterApproveOrderAndBill
 );
 
@@ -425,6 +430,7 @@ router.post(
 router.post(
   '/orders/:purchaseOrderId/verify-delivery',
   authorize('PROCUREMENT_RECEIVE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  requireStepUpAuthentication,
   upload.single('file'),
   verifyDeliveryAndSubmitBill
 );
@@ -487,6 +493,7 @@ router.post(
 router.post(
   '/orders/:purchaseOrderId/lines/:lineId/substitute/decide',
   authorize('PROCUREMENT_APPROVE', { allowedRoles: ['MASTER', 'CAFE_ADMIN'] }),
+  requireStepUpAuthentication,
   decideSubstitution
 );
 
